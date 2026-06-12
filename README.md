@@ -1,6 +1,7 @@
 notes: still early, still deciding about architecture.
 
 todo:
+- that build.rs really necessary?
 - new contents for that readme! it should give all credits to YaLTeR
 and point to the niri-wm repo but not document anything
 - make correct workflows
