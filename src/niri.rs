@@ -113,20 +113,10 @@ use smithay::wayland::xdg_activation::XdgActivationState;
 use smithay::wayland::xdg_foreign::XdgForeignState;
 use wayland_server::protocol::wl_output::WlOutput;
 
-#[cfg(feature = "dbus")]
-use crate::a11y::A11y;
 use crate::animation::Clock;
 use crate::backend::tty::SurfaceDmabufFeedback;
 use crate::backend::{Backend, Headless, RenderResult, Tty, Winit};
 use crate::cursor::{CursorManager, CursorTextureCache, RenderCursor, XCursor};
-#[cfg(feature = "dbus")]
-use crate::dbus::freedesktop_locale1::Locale1ToNiri;
-#[cfg(feature = "dbus")]
-use crate::dbus::freedesktop_login1::Login1ToNiri;
-#[cfg(feature = "dbus")]
-use crate::dbus::gnome_shell_introspect::{self, IntrospectToNiri, NiriToIntrospect};
-#[cfg(feature = "dbus")]
-use crate::dbus::gnome_shell_screenshot::{NiriToScreenshot, ScreenshotToNiri};
 use crate::frame_clock::FrameClock;
 use crate::handlers::{XDG_ACTIVATION_TOKEN_TIMEOUT, configure_lock_surface};
 use crate::input::pick_color_grab::PickColorGrab;
@@ -164,8 +154,6 @@ use crate::render_helpers::{
     RenderCtx, RenderTarget, encompassing_geo, render_to_dmabuf, render_to_encompassing_texture,
     render_to_shm, render_to_texture, render_to_vec, shaders,
 };
-#[cfg(feature = "xdp-gnome-screencast")]
-use crate::screencasting::Screencasting;
 use crate::ui::config_error_notification::ConfigErrorNotification;
 use crate::ui::exit_confirm_dialog::{ExitConfirmDialog, ExitConfirmDialogRenderElement};
 use crate::ui::hotkey_overlay::HotkeyOverlay;
@@ -400,22 +388,10 @@ pub struct Niri {
     pub debug_draw_opaque_regions: bool,
     pub debug_draw_damage: bool,
 
-    #[cfg(feature = "dbus")]
-    pub dbus: Option<crate::dbus::DBusServers>,
-    #[cfg(feature = "dbus")]
-    pub a11y_keyboard_monitor: Option<crate::dbus::freedesktop_a11y::KeyboardMonitor>,
-    #[cfg(feature = "dbus")]
-    pub a11y: A11y,
-    #[cfg(feature = "dbus")]
-    pub inhibit_power_key_fd: Option<zbus::zvariant::OwnedFd>,
-
     pub ipc_server: Option<IpcServer>,
     pub ipc_outputs_changed: bool,
 
     pub satellite: Option<Satellite>,
-
-    #[cfg(feature = "xdp-gnome-screencast")]
-    pub casting: Screencasting,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -771,9 +747,6 @@ impl State {
             self.niri.display_handle.flush_clients().unwrap();
         }
 
-        #[cfg(feature = "dbus")]
-        self.niri.update_locked_hint();
-
         // Clear the time so it's fetched afresh next iteration.
         self.niri.clock.clear();
         self.niri.pointer_inactivity_timer_got_reset = false;
@@ -819,12 +792,8 @@ impl State {
         foreign_toplevel::refresh(self);
         ext_workspace::refresh(self);
 
-        #[cfg(feature = "xdp-gnome-screencast")]
-        self.niri.refresh_mapped_cast_outputs();
         // Should happen before refresh_window_rules(), but after anything that can start or stop
         // screencasts.
-        #[cfg(feature = "xdp-gnome-screencast")]
-        self.niri.refresh_mapped_cast_window_rules();
         self.ipc_refresh_casts();
 
         self.niri.refresh_window_rules();
@@ -833,8 +802,6 @@ impl State {
         self.ipc_refresh_keyboard_layout_index();
 
         // Needs to be called after updating the keyboard focus.
-        #[cfg(feature = "dbus")]
-        self.niri.refresh_a11y();
     }
 
     fn notify_blocker_cleared(&mut self) {
@@ -1432,9 +1399,6 @@ impl State {
                 self.niri.config_error_notification.show();
                 self.niri.queue_redraw_all();
 
-                #[cfg(feature = "dbus")]
-                self.niri.a11y_announce_config_error();
-
                 return;
             }
         };
@@ -1956,9 +1920,6 @@ impl State {
             ipc_output.logical = logical;
         }
 
-        #[cfg(feature = "dbus")]
-        self.niri.on_ipc_outputs_changed();
-
         let new_config = self.backend.ipc_outputs().lock().unwrap().clone();
         self.niri.output_management_state.notify_changes(new_config);
     }
@@ -2094,140 +2055,7 @@ impl State {
         });
     }
 
-    #[cfg(not(feature = "xdp-gnome-screencast"))]
     pub fn set_dynamic_cast_target(&mut self, _target: CastTarget) {}
-
-    #[cfg(feature = "dbus")]
-    pub fn on_screen_shot_msg(
-        &mut self,
-        to_screenshot: &async_channel::Sender<NiriToScreenshot>,
-        msg: ScreenshotToNiri,
-    ) {
-        match msg {
-            ScreenshotToNiri::TakeScreenshot { include_cursor } => {
-                self.handle_take_screenshot(to_screenshot, include_cursor);
-            }
-            ScreenshotToNiri::PickColor(tx) => {
-                self.handle_pick_color(tx);
-            }
-        }
-    }
-
-    #[cfg(feature = "dbus")]
-    fn handle_take_screenshot(
-        &mut self,
-        to_screenshot: &async_channel::Sender<NiriToScreenshot>,
-        include_cursor: bool,
-    ) {
-        let _span = tracy_client::span!("TakeScreenshot");
-
-        let rv = self.backend.with_primary_renderer(|renderer| {
-            let on_done = {
-                let to_screenshot = to_screenshot.clone();
-                move |path| {
-                    let msg = NiriToScreenshot::ScreenshotResult(Some(path));
-                    if let Err(err) = to_screenshot.send_blocking(msg) {
-                        warn!("error sending path to screenshot: {err:?}");
-                    }
-                }
-            };
-
-            let res = self
-                .niri
-                .screenshot_all_outputs(renderer, include_cursor, on_done);
-
-            if let Err(err) = res {
-                warn!("error taking a screenshot: {err:?}");
-
-                let msg = NiriToScreenshot::ScreenshotResult(None);
-                if let Err(err) = to_screenshot.send_blocking(msg) {
-                    warn!("error sending None to screenshot: {err:?}");
-                }
-            }
-        });
-
-        if rv.is_none() {
-            let msg = NiriToScreenshot::ScreenshotResult(None);
-            if let Err(err) = to_screenshot.send_blocking(msg) {
-                warn!("error sending None to screenshot: {err:?}");
-            }
-        }
-    }
-
-    #[cfg(feature = "dbus")]
-    pub fn on_introspect_msg(
-        &mut self,
-        to_introspect: &async_channel::Sender<NiriToIntrospect>,
-        msg: IntrospectToNiri,
-    ) {
-        use crate::utils::with_toplevel_role;
-
-        let IntrospectToNiri::GetWindows = msg;
-        let _span = tracy_client::span!("GetWindows");
-
-        let mut windows = HashMap::new();
-
-        #[cfg(feature = "xdp-gnome-screencast")]
-        windows.insert(
-            self.niri.casting.dynamic_cast_id_for_portal.get(),
-            gnome_shell_introspect::WindowProperties {
-                title: String::from("niri Dynamic Cast Target"),
-                app_id: String::from("rs.bxt.niri.desktop"),
-            },
-        );
-
-        self.niri.layout.with_windows(|mapped, _, _, _| {
-            let id = mapped.id().get();
-            let props = with_toplevel_role(mapped.toplevel(), |role| {
-                gnome_shell_introspect::WindowProperties {
-                    title: role.title.clone().unwrap_or_default(),
-                    app_id: role
-                        .app_id
-                        .as_ref()
-                        // We don't do proper .desktop file tracking (it's quite involved), and
-                        // Wayland windows can set any app id they want. However, this seems to
-                        // work well enough in practice.
-                        .map(|app_id| format!("{app_id}.desktop"))
-                        .unwrap_or_default(),
-                }
-            });
-
-            windows.insert(id, props);
-        });
-
-        let msg = NiriToIntrospect::Windows(windows);
-        if let Err(err) = to_introspect.send_blocking(msg) {
-            warn!("error sending windows to introspect: {err:?}");
-        }
-    }
-
-    #[cfg(feature = "dbus")]
-    pub fn on_login1_msg(&mut self, msg: Login1ToNiri) {
-        let Login1ToNiri::LidClosedChanged(is_closed) = msg;
-
-        trace!("login1 lid {}", if is_closed { "closed" } else { "opened" });
-        self.set_lid_closed(is_closed);
-    }
-
-    #[cfg(feature = "dbus")]
-    pub fn on_locale1_msg(&mut self, msg: Locale1ToNiri) {
-        let Locale1ToNiri::XkbChanged(xkb) = msg;
-
-        trace!("locale1 xkb settings changed: {xkb:?}");
-        let xkb = self.niri.xkb_from_locale1.insert(xkb);
-
-        {
-            let config = self.niri.config.borrow();
-            if config.input.keyboard.xkb != Xkb::default() {
-                trace!("ignoring locale1 xkb change because niri config has xkb settings");
-                return;
-            }
-        }
-
-        let xkb = xkb.clone();
-        self.set_xkb_config(xkb.to_xkb_config());
-        self.ipc_keyboard_layouts_changed();
-    }
 }
 
 impl Niri {
@@ -2427,9 +2255,6 @@ impl Niri {
 
         let exit_confirm_dialog = ExitConfirmDialog::new(animation_clock.clone(), config.clone());
 
-        #[cfg(feature = "dbus")]
-        let a11y = A11y::new(event_loop.clone());
-
         event_loop
             .insert_source(
                 Timer::from_duration(Duration::from_secs(1)),
@@ -2462,9 +2287,6 @@ impl Niri {
                 None
             }
         };
-
-        #[cfg(feature = "xdp-gnome-screencast")]
-        let screencasting = Screencasting::new(&event_loop);
 
         let display_source = Generic::new(display, Interest::READ, Mode::Level);
         event_loop
@@ -2619,22 +2441,10 @@ impl Niri {
             debug_draw_opaque_regions: false,
             debug_draw_damage: false,
 
-            #[cfg(feature = "dbus")]
-            dbus: None,
-            #[cfg(feature = "dbus")]
-            a11y_keyboard_monitor: None,
-            #[cfg(feature = "dbus")]
-            a11y,
-            #[cfg(feature = "dbus")]
-            inhibit_power_key_fd: None,
-
             ipc_server,
             ipc_outputs_changed: false,
 
             satellite: None,
-
-            #[cfg(feature = "xdp-gnome-screencast")]
-            casting: screencasting,
         };
 
         niri.reset_pointer_inactivity_timer();
@@ -2661,32 +2471,6 @@ impl Niri {
         if let Err(err) = self.display_handle.insert_client(client, data) {
             warn!("error inserting client: {err}");
         }
-    }
-
-    #[cfg(feature = "dbus")]
-    pub fn inhibit_power_key(&mut self) -> anyhow::Result<()> {
-        use smithay::reexports::rustix::io::{FdFlags, fcntl_setfd};
-
-        let conn = zbus::blocking::Connection::system()?;
-
-        let message = conn.call_method(
-            Some("org.freedesktop.login1"),
-            "/org/freedesktop/login1",
-            Some("org.freedesktop.login1.Manager"),
-            "Inhibit",
-            &("handle-power-key", "niri", "Power key handling", "block"),
-        )?;
-
-        let fd: zbus::zvariant::OwnedFd = message.body().deserialize()?;
-
-        // Don't leak the fd to child processes.
-        if let Err(err) = fcntl_setfd(&fd, FdFlags::CLOEXEC) {
-            warn!("error setting CLOEXEC on inhibit fd: {err:?}");
-        };
-
-        self.inhibit_power_key_fd = Some(fd);
-
-        Ok(())
     }
 
     /// Repositions all outputs, optionally adding a new output.
@@ -4698,18 +4482,6 @@ impl Niri {
         // to err on the safe side.
         self.send_frame_callbacks(output);
         backend.with_primary_renderer(|renderer| {
-            #[cfg(feature = "xdp-gnome-screencast")]
-            {
-                // Render and send to PipeWire screencast streams.
-                self.render_for_screen_cast(renderer, output, target_presentation_time);
-
-                // FIXME: when a window is hidden, it should probably still receive frame callbacks
-                // and get rendered for screen cast. This is currently
-                // unimplemented, but happens to work by chance, since output
-                // redrawing is more eager than it should be.
-                self.render_windows_for_screen_cast(renderer, output, target_presentation_time);
-            }
-
             self.render_for_screencopy_with_damage(renderer, output);
         });
     }
@@ -5443,10 +5215,8 @@ impl Niri {
         Ok(sync)
     }
 
-    #[cfg(not(feature = "xdp-gnome-screencast"))]
     pub fn stop_casts_for_target(&mut self, _target: CastTarget) {}
 
-    #[cfg(not(feature = "xdp-gnome-screencast"))]
     pub fn stop_cast(&mut self, _session_id: crate::utils::CastSessionId) {}
 
     pub fn debug_toggle_damage(&mut self) {
@@ -5733,90 +5503,12 @@ impl Niri {
                 debug!("not saving screenshot to disk");
             }
 
-            #[cfg(feature = "dbus")]
-            if let Err(err) = crate::utils::show_screenshot_notification(image_path.as_deref()) {
-                warn!("error showing screenshot notification: {err:?}");
-            }
-
             // Send screenshot completion event.
             let path_string = image_path
                 .as_ref()
                 .and_then(|p| p.to_str())
                 .map(|s| s.to_owned());
             let _ = event_tx.send(path_string);
-        });
-
-        Ok(())
-    }
-
-    #[cfg(feature = "dbus")]
-    pub fn screenshot_all_outputs(
-        &mut self,
-        renderer: &mut GlesRenderer,
-        include_pointer: bool,
-        on_done: impl FnOnce(PathBuf) + Send + 'static,
-    ) -> anyhow::Result<()> {
-        let _span = tracy_client::span!("Niri::screenshot_all_outputs");
-
-        self.update_render_elements(None);
-
-        let outputs: Vec<_> = self.global_space.outputs().cloned().collect();
-
-        // FIXME: support multiple outputs, needs fixing multi-scale handling and cropping.
-        anyhow::ensure!(outputs.len() == 1);
-
-        let output = outputs.into_iter().next().unwrap();
-        let geom = self.global_space.output_geometry(&output).unwrap();
-
-        let output_scale = output.current_scale().integer_scale();
-        let geom = geom.to_physical(output_scale);
-
-        let size = geom.size;
-        let transform = output.current_transform();
-        let size = transform.transform_size(size);
-
-        let ctx = RenderCtx {
-            renderer,
-            target: RenderTarget::ScreenCapture,
-            xray: None,
-        };
-        let elements = self.render_to_vec(ctx, &output, include_pointer);
-        let elements = elements.iter().rev();
-        let pixels = render_to_vec(
-            renderer,
-            size,
-            Scale::from(f64::from(output_scale)),
-            Transform::Normal,
-            Fourcc::Abgr8888,
-            elements,
-        )?;
-
-        let path = make_screenshot_path(&self.config.borrow())
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| {
-                let mut path = env::temp_dir();
-                path.push("screenshot.png");
-                path
-            });
-        debug!("saving screenshot to {path:?}");
-
-        thread::spawn(move || {
-            let file = match std::fs::File::create(&path) {
-                Ok(file) => file,
-                Err(err) => {
-                    warn!("error creating file: {err:?}");
-                    return;
-                }
-            };
-
-            let w = std::io::BufWriter::new(file);
-            if let Err(err) = write_png_rgba8(w, size.w as u32, size.h as u32, &pixels) {
-                warn!("error encoding screenshot image: {err:?}");
-                return;
-            }
-
-            on_done(path);
         });
 
         Ok(())
@@ -5959,85 +5651,6 @@ impl Niri {
         self.queue_redraw_all();
     }
 
-    #[cfg(feature = "dbus")]
-    fn update_locked_hint(&mut self) {
-        use std::sync::LazyLock;
-
-        if !self.is_session_instance {
-            return;
-        }
-
-        static XDG_SESSION_ID: LazyLock<Option<String>> = LazyLock::new(|| {
-            let id = std::env::var("XDG_SESSION_ID").ok();
-            if id.is_none() {
-                warn!(
-                    "env var 'XDG_SESSION_ID' is unset or invalid; logind LockedHint won't be set"
-                );
-            }
-            id
-        });
-
-        let Some(session_id) = &*XDG_SESSION_ID else {
-            return;
-        };
-
-        fn call(session_id: &str, locked: bool) -> anyhow::Result<()> {
-            let conn = zbus::blocking::Connection::system()
-                .context("error connecting to the system bus")?;
-
-            let message = conn
-                .call_method(
-                    Some("org.freedesktop.login1"),
-                    "/org/freedesktop/login1",
-                    Some("org.freedesktop.login1.Manager"),
-                    "GetSession",
-                    &(session_id),
-                )
-                .context("failed to call GetSession")?;
-
-            let message_body = message.body();
-            let session_path: zbus::zvariant::ObjectPath = message_body
-                .deserialize()
-                .context("failed to deserialize GetSession reply")?;
-
-            conn.call_method(
-                Some("org.freedesktop.login1"),
-                session_path,
-                Some("org.freedesktop.login1.Session"),
-                "SetLockedHint",
-                &(locked),
-            )
-            .context("failed to call SetLockedHint")?;
-
-            Ok(())
-        }
-
-        // Consider only the fully locked state here. When using the locked hint with sleep
-        // inhibitor tools, we want to allow sleep only after the screens are fully cleared with
-        // the lock screen, which corresponds to the Locked state.
-        let locked = matches!(self.lock_state, LockState::Locked(_));
-
-        if self.locked_hint.is_some_and(|h| h == locked) {
-            return;
-        }
-
-        self.locked_hint = Some(locked);
-
-        let res = thread::Builder::new()
-            .name("Logind LockedHint Updater".to_owned())
-            .spawn(move || {
-                let _span = tracy_client::span!("LockedHint");
-
-                if let Err(err) = call(session_id, locked) {
-                    warn!("failed to set logind LockedHint: {err:?}");
-                }
-            });
-
-        if let Err(err) = res {
-            warn!("error spawning a thread to set logind LockedHint: {err:?}");
-        }
-    }
-
     pub fn new_lock_surface(&mut self, surface: LockSurface, output: &Output) {
         let lock = match &self.lock_state {
             LockState::Unlocked => {
@@ -6133,44 +5746,6 @@ impl Niri {
         }
 
         root.clone()
-    }
-
-    #[cfg(feature = "dbus")]
-    pub fn on_ipc_outputs_changed(&self) {
-        let _span = tracy_client::span!("Niri::on_ipc_outputs_changed");
-
-        let Some(dbus) = &self.dbus else { return };
-        let Some(conn_display_config) = dbus.conn_display_config.clone() else {
-            return;
-        };
-
-        let res = thread::Builder::new()
-            .name("DisplayConfig MonitorsChanged Emitter".to_owned())
-            .spawn(move || {
-                use crate::dbus::mutter_display_config::DisplayConfig;
-                let _span = tracy_client::span!("MonitorsChanged");
-                let iface = match conn_display_config
-                    .object_server()
-                    .interface::<_, DisplayConfig>("/org/gnome/Mutter/DisplayConfig")
-                {
-                    Ok(iface) => iface,
-                    Err(err) => {
-                        warn!("error getting DisplayConfig interface: {err:?}");
-                        return;
-                    }
-                };
-
-                async_io::block_on(async move {
-                    if let Err(err) = DisplayConfig::monitors_changed(iface.signal_emitter()).await
-                    {
-                        warn!("error emitting MonitorsChanged: {err:?}");
-                    }
-                });
-            });
-
-        if let Err(err) = res {
-            warn!("error spawning a thread to send MonitorsChanged: {err:?}");
-        }
     }
 
     pub fn handle_focus_follows_mouse(&mut self, new_focus: &PointContents) {

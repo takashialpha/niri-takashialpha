@@ -2013,12 +2013,7 @@ impl Tty {
         }
     }
 
-    pub fn suspend(&self) {
-        #[cfg(feature = "dbus")]
-        if let Err(err) = suspend() {
-            warn!("error suspending: {err:?}");
-        }
-    }
+    pub fn suspend(&self) {}
 
     pub fn toggle_debug_tint(&mut self) {
         self.debug_tint = !self.debug_tint;
@@ -2233,19 +2228,6 @@ impl Tty {
 
     pub fn ipc_outputs(&self) -> Arc<Mutex<IpcOutputMap>> {
         self.ipc_outputs.clone()
-    }
-
-    #[cfg(feature = "xdp-gnome-screencast")]
-    pub fn primary_gbm_device(&self) -> Option<GbmDevice<DrmDeviceFd>> {
-        // Try to find a device corresponding to the primary render node.
-        let device = self
-            .devices
-            .values()
-            .find(|d| d.render_node == Some(self.primary_render_node));
-        // Otherwise, try to get the device corresponding to the primary node.
-        let device = device.or_else(|| self.devices.get(&self.primary_node));
-
-        Some(device?.gbm.clone())
     }
 
     pub fn set_monitors_active(&mut self, active: bool) {
@@ -2933,22 +2915,6 @@ fn refresh_interval(mode: DrmMode) -> Duration {
 
     let refresh_interval = (numerator + denominator / 2) / denominator;
     Duration::from_nanos(refresh_interval)
-}
-
-#[cfg(feature = "dbus")]
-fn suspend() -> anyhow::Result<()> {
-    let conn = zbus::blocking::Connection::system().context("error connecting to system bus")?;
-
-    conn.call_method(
-        Some("org.freedesktop.login1"),
-        "/org/freedesktop/login1",
-        Some("org.freedesktop.login1.Manager"),
-        "Suspend",
-        &(true),
-    )
-    .context("error suspending")?;
-
-    Ok(())
 }
 
 fn queue_estimated_vblank_timer(

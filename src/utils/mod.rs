@@ -540,58 +540,6 @@ pub fn baba_is_float_offset(now: Duration, view_height: f64) -> f64 {
     amplitude * ((f64::consts::TAU * now / 3.6).sin() - 1.)
 }
 
-#[cfg(feature = "dbus")]
-pub fn show_screenshot_notification(image_path: Option<&Path>) -> anyhow::Result<()> {
-    use std::collections::HashMap;
-
-    use pango::glib;
-    use zbus::zvariant;
-
-    let conn = zbus::blocking::Connection::session()?;
-
-    // Try to add the screenshot as an image if possible.
-    let mut image_url = None;
-    if let Some(path) = image_path {
-        match path.canonicalize() {
-            Ok(path) => match glib::filename_to_uri(path, None) {
-                Ok(url) => {
-                    image_url = Some(url);
-                }
-                Err(err) => {
-                    warn!("error converting screenshot path to file url: {err:?}");
-                }
-            },
-            Err(err) => {
-                warn!("error canonicalizing screenshot path: {err:?}");
-            }
-        }
-    }
-
-    let actions: &[&str] = &[];
-
-    conn.call_method(
-        Some("org.freedesktop.Notifications"),
-        "/org/freedesktop/Notifications",
-        Some("org.freedesktop.Notifications"),
-        "Notify",
-        &(
-            "niri",
-            0u32,
-            image_url.as_ref().map(|url| url.as_str()).unwrap_or(""),
-            "Screenshot captured",
-            "You can paste the image from the clipboard.",
-            actions,
-            HashMap::from([
-                ("transient", zvariant::Value::Bool(true)),
-                ("urgency", zvariant::Value::U8(1)),
-            ]),
-            -1,
-        ),
-    )?;
-
-    Ok(())
-}
-
 #[inline(never)]
 pub fn cause_panic() {
     let a = Duration::from_secs(1);

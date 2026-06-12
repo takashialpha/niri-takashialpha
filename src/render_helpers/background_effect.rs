@@ -81,6 +81,12 @@ niri_render_elements! {
     }
 }
 
+impl Default for BackgroundEffect {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BackgroundEffect {
     pub fn new() -> Self {
         Self {

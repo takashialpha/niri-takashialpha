@@ -818,58 +818,6 @@ impl State {
         let mut events = Vec::new();
         let mut seen = HashSet::new();
 
-        // Check PipeWire screencasts.
-        #[cfg(feature = "xdp-gnome-screencast")]
-        {
-            // Check pending dynamic casts.
-            for pending in &self.niri.casting.pending_dynamic_casts {
-                let stream_id = pending.stream_id.get();
-                seen.insert(stream_id);
-
-                // Pending dynamic casts don't change any properties, so we only need to check if
-                // it's missing from the state.
-                if !state.casts.contains_key(&stream_id) {
-                    let cast = niri_ipc::Cast {
-                        session_id: pending.session_id.get(),
-                        stream_id,
-                        kind: niri_ipc::CastKind::PipeWire,
-                        target: niri_ipc::CastTarget::Nothing {},
-                        is_dynamic_target: true,
-                        is_active: false,
-                        pid: None,
-                        pw_node_id: None,
-                    };
-                    events.push(Event::CastStartedOrChanged { cast });
-                }
-            }
-
-            // Check active casts.
-            for cast in &self.niri.casting.casts {
-                let stream_id = cast.stream_id.get();
-                seen.insert(stream_id);
-
-                let pw_node_id = cast.node_id();
-                if state.casts.get(&stream_id).is_none_or(|existing| {
-                    // Only these properties can change.
-                    existing.is_active != cast.is_active()
-                        || !cast.target.matches(&existing.target)
-                        || existing.pw_node_id != pw_node_id
-                }) {
-                    let cast = niri_ipc::Cast {
-                        session_id: cast.session_id.get(),
-                        stream_id,
-                        kind: niri_ipc::CastKind::PipeWire,
-                        target: cast.target.make_ipc(),
-                        is_dynamic_target: cast.dynamic_target,
-                        is_active: cast.is_active(),
-                        pid: None,
-                        pw_node_id,
-                    };
-                    events.push(Event::CastStartedOrChanged { cast });
-                }
-            }
-        }
-
         // Check screencopy casts.
         //
         // First, clear expired casts. Ideally we'd have a deadline timer, but our 1 second frame

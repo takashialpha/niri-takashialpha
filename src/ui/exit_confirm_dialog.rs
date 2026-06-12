@@ -294,12 +294,3 @@ fn text(markup: bool) -> String {
          Press {key} to confirm."
     )
 }
-
-#[cfg(feature = "dbus")]
-pub fn a11y_node() -> accesskit::Node {
-    let mut node = accesskit::Node::new(accesskit::Role::AlertDialog);
-    node.set_label("Exit niri");
-    node.set_description(text(false));
-    node.set_modal();
-    node
-}

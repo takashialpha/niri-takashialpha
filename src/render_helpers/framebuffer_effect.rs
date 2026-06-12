@@ -49,6 +49,12 @@ struct Inner {
     subregion_damage: Vec<Rectangle<i32, Physical>>,
 }
 
+impl Default for FramebufferEffect {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FramebufferEffect {
     pub fn new() -> Self {
         Self {

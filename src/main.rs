@@ -1,7 +1,6 @@
 #[macro_use]
 extern crate tracing;
 
-use std::fmt::Write as _;
 use std::fs::File;
 use std::io::{self, Write};
 use std::os::fd::FromRawFd;
@@ -16,8 +15,6 @@ use clap_complete::Shell;
 use clap_complete_nushell::Nushell;
 use directories::ProjectDirs;
 use niri::cli::{Cli, CompletionShell, Sub};
-#[cfg(feature = "dbus")]
-use niri::dbus;
 use niri::ipc::client::handle_msg;
 use niri::niri::State;
 use niri::utils::spawning::{
@@ -60,12 +57,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if env::var_os("NOTIFY_SOCKET").is_some() {
         IS_SYSTEMD_SERVICE.store(true, Ordering::Relaxed);
-
-        #[cfg(not(feature = "systemd"))]
-        warn!(
-            "running as a systemd service, but systemd support is compiled out. \
-             Are you sure you did not forget to set `--features systemd`?"
-        );
     }
 
     let cli = Cli::parse();
@@ -215,22 +206,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if cli.session {
         // We're starting as a session. Import our variables.
         import_environment();
-
-        // Inhibit power key handling so we can suspend on it.
-        #[cfg(feature = "dbus")]
-        if !state.niri.config.borrow().input.disable_power_key_handling
-            && let Err(err) = state.niri.inhibit_power_key()
-        {
-            warn!("error inhibiting power key: {err:?}");
-        }
-    }
-
-    #[cfg(feature = "dbus")]
-    dbus::DBusServers::start(&mut state, cli.session);
-
-    #[cfg(feature = "dbus")]
-    if cli.session {
-        state.niri.a11y.start();
     }
 
     if env::var_os("NIRI_DISABLE_SYSTEM_MANAGER_NOTIFY").is_none_or(|x| x != "1") {
@@ -283,24 +258,11 @@ fn import_environment() {
     ]
     .join(" ");
 
-    let mut init_system_import = String::new();
-    if cfg!(feature = "systemd") {
-        write!(
-            init_system_import,
-            "systemctl --user import-environment {variables};"
-        )
-        .unwrap();
-    }
-    if cfg!(feature = "dinit") {
-        write!(init_system_import, "dinitctl setenv {variables};").unwrap();
-    }
-
     let rv = Command::new("/bin/sh")
         .args([
             "-c",
             &format!(
-                "{init_system_import}\
-                 hash dbus-update-activation-environment 2>/dev/null && \
+                "hash dbus-update-activation-environment 2>/dev/null && \
                  dbus-update-activation-environment {variables}"
             ),
         ])

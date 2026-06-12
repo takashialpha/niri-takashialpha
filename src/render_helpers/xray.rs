@@ -83,6 +83,12 @@ pub struct XrayElement {
     program: Option<GlesTexProgram>,
 }
 
+impl Default for Xray {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Xray {
     pub fn new() -> Self {
         Self {

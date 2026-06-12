@@ -3,12 +3,13 @@ members = ["niri-config", "niri-ipc", "niri-visual-tests"]
 
 [workspace.package]
 version = "26.4.0"
-description = "A scrollable-tiling Wayland compositor"
-authors = ["Ivan Molodetskikh <yalterz@gmail.com>"]
+description = "[ALL CREDITS TO YaLTeR] A scrollable-tiling Wayland compositor (takashialpha's personal fork!)"
+authors = [
+  "Ivan Molodetskikh <yalterz@gmail.com>",
+  "takashialpha <takashialpha@protonmail.com>",
+]
 license = "GPL-3.0-or-later"
 edition = "2024"
-repository = "https://github.com/niri-wm/niri"
-rust-version = "1.96"
 
 [workspace.dependencies]
 anyhow = "1.0"
@@ -43,24 +44,14 @@ description.workspace = true
 authors.workspace = true
 license.workspace = true
 edition.workspace = true
-repository.workspace = true
-rust-version.workspace = true
 
 readme = "README.md"
 keywords = ["wayland", "compositor", "tiling", "smithay", "wm"]
 
 [dependencies]
-# accesskit_unix 0.18 regressed screen reader support (niri-wm/niri#3594, AccessKit/accesskit-c#76):
-# it switched to activating only when a screen reader is detected, using the wrong D-Bus property
-# (ScreenReaderEnabled). The fix (PR # 715 on accesskit, switching back to IsEnabled) is merged in
-# accesskit_unix main but not in a published release yet; it is expected in the next point release (will be out soon).
-# We track latest anyway since that fix is imminent. NOTE: this revives the regression until the fix is released.
-accesskit = { version = "0.24", optional = true }
-accesskit_unix = { version = "0.21", optional = true }
 anyhow.workspace = true
 arrayvec = "0.7"
 async-channel = "2.5"
-async-io = { version = "2.6", optional = true }
 atomic = "0.6"
 bitflags.workspace = true
 bytemuck = { version = "1.25", features = ["derive"] }
@@ -81,20 +72,13 @@ input = { version = "0.10", features = ["libinput_1_21"] }
 keyframe = { version = "1.1", default-features = false }
 libc = "0.2"
 libdisplay-info = "0.3"
-# log = { version = "0.4", features = [
-#   "max_level_trace",
-#  "release_max_level_debug",
-# ] } unused dep
 niri-config = { version = "26.4.0", path = "niri-config" }
 niri-ipc = { version = "26.4.0", path = "niri-ipc", features = ["clap"] }
 ordered-float = "5.3"
 pango = { version = "0.22", features = ["v1_44"] }
 pangocairo = "0.22"
-pipewire = { version = "0.10", optional = true, features = ["v0_3_33"] }
 png = "0.18"
-# profiling = "1.0"
 sd-notify = "0.5"
-serde.workspace = true
 serde_json.workspace = true
 smithay-drm-extras.workspace = true
 tracing-subscriber.workspace = true
@@ -104,7 +88,6 @@ wayland-backend = "0.3"
 wayland-scanner = "0.31"
 wayland-server = "0.31"
 xcursor = "0.3"
-zbus = { version = "5.16", optional = true }
 
 [dependencies.smithay]
 workspace = true
@@ -138,13 +121,7 @@ xshell = "0.2"
 pkg-config = "0.3"
 
 [features]
-default = ["dbus", "systemd", "xdp-gnome-screencast"]
-# Enables D-Bus support (serve various freedesktop and GNOME interfaces, accessibility tree, power button handling).
-dbus = ["dep:zbus", "dep:async-io", "dep:accesskit", "dep:accesskit_unix"]
-# Enables systemd integration (global environment, apps in transient scopes).
-systemd = ["dbus"]
-# Enables screencasting support through xdg-desktop-portal-gnome.
-xdp-gnome-screencast = ["dbus", "pipewire"]
+default = []
 # Enables the Tracy profiler instrumentation.
 profile-with-tracy = [
   # "profiling/profile-with-tracy",
@@ -159,12 +136,6 @@ profile-with-tracy-ondemand = [
 ]
 # Enables Tracy allocation profiling.
 profile-with-tracy-allocations = ["profile-with-tracy"]
-# Enables dinit integration (global environment).
-dinit = []
-
-[lints.clippy]
-new_without_default = "allow"
-collapsible_match = "allow"
 
 [profile.release]
 debug = "line-tables-only"
@@ -172,58 +143,9 @@ overflow-checks = true
 lto = "thin"
 
 [profile.release.package.niri-config]
-# knuffel with chomsky generates a metric ton of debuginfo.
+# knus...?
 debug = false
 
 [profile.dev.package]
 insta.opt-level = 3
 similar.opt-level = 3
-
-[package.metadata.generate-rpm]
-version = "26.04"
-assets = [
-  { source = "target/release/niri", dest = "/usr/bin/", mode = "755" },
-  { source = "resources/niri-session", dest = "/usr/bin/", mode = "755" },
-  { source = "resources/niri.desktop", dest = "/usr/share/wayland-sessions/", mode = "644" },
-  { source = "resources/niri-portals.conf", dest = "/usr/share/xdg-desktop-portal/", mode = "644" },
-  { source = "resources/niri.service", dest = "/usr/lib/systemd/user/", mode = "644" },
-  { source = "resources/niri-shutdown.target", dest = "/usr/lib/systemd/user/", mode = "644" },
-]
-[package.metadata.generate-rpm.requires]
-alacritty = "*"
-fuzzel = "*"
-
-[package.metadata.deb]
-depends = "alacritty, fuzzel"
-assets = [
-  [
-    "target/release/niri",
-    "usr/bin/",
-    "755",
-  ],
-  [
-    "resources/niri-session",
-    "usr/bin/",
-    "755",
-  ],
-  [
-    "resources/niri.desktop",
-    "/usr/share/wayland-sessions/",
-    "644",
-  ],
-  [
-    "resources/niri-portals.conf",
-    "/usr/share/xdg-desktop-portal/",
-    "644",
-  ],
-  [
-    "resources/niri.service",
-    "/usr/lib/systemd/user/",
-    "644",
-  ],
-  [
-    "resources/niri-shutdown.target",
-    "/usr/lib/systemd/user/",
-    "644",
-  ],
-]

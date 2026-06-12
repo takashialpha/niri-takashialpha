@@ -72,6 +72,12 @@ impl Default for Elements {
     }
 }
 
+impl Default for EffectBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EffectBuffer {
     pub fn new() -> Self {
         Self {
