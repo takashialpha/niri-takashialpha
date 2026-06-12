@@ -43,10 +43,10 @@ impl ResolvedLayerRules {
 
         for rule in rules {
             let matches = |m: &Match| {
-                if let Some(at_startup) = m.at_startup {
-                    if at_startup != is_at_startup {
-                        return false;
-                    }
+                if let Some(at_startup) = m.at_startup
+                    && at_startup != is_at_startup
+                {
+                    return false;
                 }
 
                 surface_matches(surface, m)
@@ -90,10 +90,10 @@ impl ResolvedLayerRules {
 }
 
 fn surface_matches(surface: &LayerSurface, m: &Match) -> bool {
-    if let Some(namespace_re) = &m.namespace {
-        if !namespace_re.0.is_match(surface.namespace()) {
-            return false;
-        }
+    if let Some(namespace_re) = &m.namespace
+        && !namespace_re.0.is_match(surface.namespace())
+    {
+        return false;
     }
 
     if let Some(layer) = m.layer {

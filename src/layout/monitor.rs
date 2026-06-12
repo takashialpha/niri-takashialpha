@@ -14,22 +14,22 @@ use super::insert_hint_element::{InsertHintElement, InsertHintRenderElement};
 use super::scrolling::{Column, ColumnWidth};
 use super::tile::Tile;
 use super::workspace::{
-    compute_working_area, OutputId, Workspace, WorkspaceAddWindowTarget, WorkspaceId,
-    WorkspaceRenderElement,
+    OutputId, Workspace, WorkspaceAddWindowTarget, WorkspaceId, WorkspaceRenderElement,
+    compute_working_area,
 };
-use super::{compute_overview_zoom, ActivateWindow, HitType, LayoutElement, Options};
+use super::{ActivateWindow, HitType, LayoutElement, Options, compute_overview_zoom};
 use crate::animation::{Animation, Clock};
 use crate::input::swipe_tracker::SwipeTracker;
 use crate::niri_render_elements;
+use crate::render_helpers::RenderCtx;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::shadow::ShadowRenderElement;
 use crate::render_helpers::solid_color::SolidColorRenderElement;
 use crate::render_helpers::xray::XrayPos;
-use crate::render_helpers::RenderCtx;
 use crate::rubber_band::RubberBand;
 use crate::utils::transaction::Transaction;
 use crate::utils::{
-    output_size, round_logical_in_physical, round_logical_in_physical_max1, ResizeEdge,
+    ResizeEdge, output_size, round_logical_in_physical, round_logical_in_physical_max1,
 };
 
 /// Amount of touchpad movement to scroll the height of one workspace.
@@ -415,10 +415,10 @@ impl<W: LayoutElement> Monitor<W> {
             self.active_workspace_idx += 1;
         }
 
-        if let Some(switch) = &mut self.workspace_switch {
-            if idx as f64 <= switch.target_idx() {
-                switch.offset(1);
-            }
+        if let Some(switch) = &mut self.workspace_switch
+            && idx as f64 <= switch.target_idx()
+        {
+            switch.offset(1);
         }
     }
 
@@ -1060,10 +1060,10 @@ impl<W: LayoutElement> Monitor<W> {
                     }
                 }
 
-                if let Some(anim) = &mut gesture.animation {
-                    if anim.is_done() {
-                        gesture.animation = None;
-                    }
+                if let Some(anim) = &mut gesture.animation
+                    && anim.is_done()
+                {
+                    gesture.animation = None;
                 }
             }
             None => (),
@@ -1383,11 +1383,11 @@ impl<W: LayoutElement> Monitor<W> {
         // If the view jumped (can happen when going from corrected to uncorrected render_idx, for
         // example when toggling the overview in the middle of an overview animation), then restart
         // the workspace switch to avoid jumps.
-        if prev_render_idx != new_render_idx {
-            if let Some(WorkspaceSwitch::Animation(anim)) = &mut self.workspace_switch {
-                // FIXME: maintain velocity.
-                *anim = anim.restarted(prev_render_idx, anim.to(), 0.);
-            }
+        if prev_render_idx != new_render_idx
+            && let Some(WorkspaceSwitch::Animation(anim)) = &mut self.workspace_switch
+        {
+            // FIXME: maintain velocity.
+            *anim = anim.restarted(prev_render_idx, anim.to(), 0.);
         }
     }
 
@@ -1403,13 +1403,11 @@ impl<W: LayoutElement> Monitor<W> {
             Some(WorkspaceSwitch::Animation(switch_anim)),
             Some(OverviewProgress::Animation(progress_anim)),
         ) = (&self.workspace_switch, &self.overview_progress)
+            && switch_anim.start_time() == progress_anim.start_time()
+            && (switch_anim.duration().as_secs_f64() - progress_anim.duration().as_secs_f64()).abs()
+                <= 0.001
         {
-            if switch_anim.start_time() == progress_anim.start_time()
-                && (switch_anim.duration().as_secs_f64() - progress_anim.duration().as_secs_f64())
-                    .abs()
-                    <= 0.001
-            {
-                #[rustfmt::skip]
+            #[rustfmt::skip]
                 // How this was derived:
                 //
                 // - Assume we're animating a zoom + switch. Consider switch "from" and "to".
@@ -1451,17 +1449,16 @@ impl<W: LayoutElement> Monitor<W> {
                 // - first_y = to * from_height - switch_anim.value() * from_height - to * current_height
                 // - first_y = -switch_anim.value() * from_height + to * (from_height - current_height)
                 let from = progress_anim.from();
-                let from_zoom = compute_overview_zoom(&self.options, Some(from));
-                let from_ws_height_with_gap = self.workspace_size_with_gap(from_zoom).h;
+            let from_zoom = compute_overview_zoom(&self.options, Some(from));
+            let from_ws_height_with_gap = self.workspace_size_with_gap(from_zoom).h;
 
-                let zoom = self.overview_zoom();
-                let ws_height_with_gap = self.workspace_size_with_gap(zoom).h;
+            let zoom = self.overview_zoom();
+            let ws_height_with_gap = self.workspace_size_with_gap(zoom).h;
 
-                let first_ws_y = -switch_anim.value() * from_ws_height_with_gap
-                    + switch_anim.to() * (from_ws_height_with_gap - ws_height_with_gap);
+            let first_ws_y = -switch_anim.value() * from_ws_height_with_gap
+                + switch_anim.to() * (from_ws_height_with_gap - ws_height_with_gap);
 
-                return -first_ws_y / ws_height_with_gap;
-            }
+            return -first_ws_y / ws_height_with_gap;
         };
 
         if let Some(switch) = &self.workspace_switch {
@@ -1530,7 +1527,7 @@ impl<W: LayoutElement> Monitor<W> {
     ) -> impl Iterator<Item = (&mut Workspace<W>, Rectangle<f64, Logical>)> {
         let output_geo = Rectangle::from_size(self.view_size);
 
-        let geo = self.workspaces_render_geo();
+        let geo: Vec<_> = self.workspaces_render_geo().collect();
         zip(self.workspaces.iter_mut(), geo)
             // Cull out workspaces outside the output.
             .filter(move |(_ws, geo)| !cull || geo.intersection(output_geo).is_some())
@@ -1723,7 +1720,7 @@ impl<W: LayoutElement> Monitor<W> {
         for (ws, geo) in self.workspaces_with_render_geo() {
             // Macro instead of closure because ws and insert hint have different elem types.
             macro_rules! push {
-                () => {{
+                () => {
                     &mut |elem| {
                         let elem = CropRenderElement::from_element(elem, scale, crop_bounds);
                         if let Some(elem) = elem {
@@ -1731,18 +1728,18 @@ impl<W: LayoutElement> Monitor<W> {
                             push(scale_relocate(geo, elem));
                         }
                     }
-                }};
+                };
             }
 
             let xray_pos = XrayPos::new(geo.loc, zoom);
 
             ws.render_floating(ctx.r(), xray_pos, focus_ring, push!());
 
-            if let Some(loc) = insert_hint_render_loc {
-                if loc.workspace == InsertWorkspace::Existing(ws.id()) {
-                    self.insert_hint_element
-                        .render(ctx.renderer, loc.location, push!());
-                }
+            if let Some(loc) = insert_hint_render_loc
+                && loc.workspace == InsertWorkspace::Existing(ws.id())
+            {
+                self.insert_hint_element
+                    .render(ctx.renderer, loc.location, push!());
             }
 
             ws.render_scrolling(ctx.r(), xray_pos, focus_ring, push!());

@@ -9,9 +9,9 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Client, Resource};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
+    BufferAssignment, CompositorClientState, CompositorHandler, CompositorState, SurfaceAttributes,
     add_blocker, add_pre_commit_hook, get_parent, is_sync_subsurface, remove_pre_commit_hook,
-    with_states, BufferAssignment, CompositorClientState, CompositorHandler, CompositorState,
-    SurfaceAttributes,
+    with_states,
 };
 use smithay::wayland::dmabuf::get_dmabuf;
 use smithay::wayland::shell::xdg::ToplevelCachedState;
@@ -346,16 +346,16 @@ impl CompositorHandler for State {
                 self.niri.layout.update_window(&window, serial);
 
                 // Move the toplevel according to the attach offset.
-                if let Some(delta) = buffer_delta {
-                    if delta.x != 0 || delta.y != 0 {
-                        let (x, y) = delta.to_f64().into();
-                        self.niri.layout.move_floating_window(
-                            Some(&window),
-                            PositionChange::AdjustFixed(x),
-                            PositionChange::AdjustFixed(y),
-                            false,
-                        );
-                    }
+                if let Some(delta) = buffer_delta
+                    && (delta.x != 0 || delta.y != 0)
+                {
+                    let (x, y) = delta.to_f64().into();
+                    self.niri.layout.move_floating_window(
+                        Some(&window),
+                        PositionChange::AdjustFixed(x),
+                        PositionChange::AdjustFixed(y),
+                        false,
+                    );
                 }
 
                 // Popup placement depends on window size which might have changed.
@@ -460,16 +460,16 @@ impl CompositorHandler for State {
 
         // This might be a lock surface.
         for (output, state) in &self.niri.output_state {
-            if let Some(lock_surface) = &state.lock_surface {
-                if lock_surface.wl_surface() == &root_surface {
-                    if matches!(self.niri.lock_state, LockState::WaitingForSurfaces { .. }) {
-                        self.niri.maybe_continue_to_locking();
-                    } else {
-                        self.niri.queue_redraw(&output.clone());
-                    }
-
-                    return;
+            if let Some(lock_surface) = &state.lock_surface
+                && lock_surface.wl_surface() == &root_surface
+            {
+                if matches!(self.niri.lock_state, LockState::WaitingForSurfaces { .. }) {
+                    self.niri.maybe_continue_to_locking();
+                } else {
+                    self.niri.queue_redraw(&output.clone());
                 }
+
+                return;
             }
         }
 
@@ -488,12 +488,12 @@ impl CompositorHandler for State {
         // This is still not perfect, as this function is called already after the (first)
         // subsurface is destroyed; in the case of alacritty, this is the top CSD shadow. But, it
         // gets most of the job done.
-        if let Some(root) = self.niri.root_surface.get(surface) {
-            if let Some((mapped, output)) = self.niri.layout.find_window_and_output(root) {
-                let window = mapped.window.clone();
-                let output = output.cloned();
-                self.store_unmap_snapshot(&window, output.as_ref());
-            }
+        if let Some(root) = self.niri.root_surface.get(surface)
+            && let Some((mapped, output)) = self.niri.layout.find_window_and_output(root)
+        {
+            let window = mapped.window.clone();
+            let output = output.cloned();
+            self.store_unmap_snapshot(&window, output.as_ref());
         }
 
         self.niri
@@ -546,25 +546,23 @@ impl State {
                         _ => None,
                     })
             });
-            if let Some(dmabuf) = maybe_dmabuf {
-                if let Ok((blocker, source)) = dmabuf.generate_blocker(Interest::READ) {
-                    if let Some(client) = surface.client() {
-                        let res =
-                            state
-                                .niri
-                                .event_loop
-                                .insert_source(source, move |_, _, state| {
-                                    let display_handle = state.niri.display_handle.clone();
-                                    state
-                                        .client_compositor_state(&client)
-                                        .blocker_cleared(state, &display_handle);
-                                    Ok(())
-                                });
-                        if res.is_ok() {
-                            add_blocker(surface, blocker);
-                            trace!("added default dmabuf blocker");
-                        }
-                    }
+            if let Some(dmabuf) = maybe_dmabuf
+                && let Ok((blocker, source)) = dmabuf.generate_blocker(Interest::READ)
+                && let Some(client) = surface.client()
+            {
+                let res = state
+                    .niri
+                    .event_loop
+                    .insert_source(source, move |_, _, state| {
+                        let display_handle = state.niri.display_handle.clone();
+                        state
+                            .client_compositor_state(&client)
+                            .blocker_cleared(state, &display_handle);
+                        Ok(())
+                    });
+                if res.is_ok() {
+                    add_blocker(surface, blocker);
+                    trace!("added default dmabuf blocker");
                 }
             }
         });
