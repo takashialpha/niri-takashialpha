@@ -72,6 +72,8 @@ use smithay::{
     delegate_viewporter, delegate_virtual_keyboard_manager, delegate_xdg_activation,
 };
 
+#[cfg(feature = "xwayland")]
+use crate::delegate_mutter_x11_interop;
 pub use crate::handlers::xdg_shell::KdeDecorationsModeState;
 use crate::layout::ActivateWindow;
 use crate::layout::workspace::WorkspaceId;
@@ -81,6 +83,7 @@ use crate::protocols::foreign_toplevel::{
     self, ForeignToplevelHandler, ForeignToplevelManagerState,
 };
 use crate::protocols::gamma_control::{GammaControlHandler, GammaControlManagerState};
+#[cfg(feature = "xwayland")]
 use crate::protocols::mutter_x11_interop::MutterX11InteropHandler;
 use crate::protocols::output_management::{OutputManagementHandler, OutputManagementManagerState};
 use crate::protocols::screencopy::{Screencopy, ScreencopyHandler, ScreencopyManagerState};
@@ -92,8 +95,7 @@ use crate::protocols::virtual_pointer::{
 use crate::utils::{output_size, send_scale_transform};
 use crate::{
     delegate_ext_workspace, delegate_foreign_toplevel, delegate_gamma_control,
-    delegate_mutter_x11_interop, delegate_output_management, delegate_screencopy,
-    delegate_virtual_pointer,
+    delegate_output_management, delegate_screencopy, delegate_virtual_pointer,
 };
 
 pub const XDG_ACTIVATION_TOKEN_TIMEOUT: Duration = Duration::from_secs(10);
@@ -856,7 +858,9 @@ impl OutputManagementHandler for State {
 }
 delegate_output_management!(State);
 
+#[cfg(feature = "xwayland")]
 impl MutterX11InteropHandler for State {}
+#[cfg(feature = "xwayland")]
 delegate_mutter_x11_interop!(State);
 
 delegate_single_pixel_buffer!(State);

@@ -1,3 +1,4 @@
+#[cfg(feature = "xwayland")]
 pub mod mutter_x11_interop {
     pub mod v1 {
         pub use self::generated::server;
@@ -14,11 +15,13 @@ pub mod mutter_x11_interop {
                 pub mod __interfaces {
                     use smithay::reexports::wayland_server;
                     use wayland_server::protocol::__interfaces::*;
-                    wayland_scanner::generate_interfaces!("resources/mutter-x11-interop.xml");
+                    wayland_scanner::generate_interfaces!(
+                        "resources/mutter-x11-interop-optional.xml"
+                    );
                 }
                 use self::__interfaces::*;
 
-                wayland_scanner::generate_server_code!("resources/mutter-x11-interop.xml");
+                wayland_scanner::generate_server_code!("resources/mutter-x11-interop-optional.xml");
             }
         }
     }

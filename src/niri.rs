@@ -138,6 +138,7 @@ use crate::niri_render_elements;
 use crate::protocols::ext_workspace::{self, ExtWorkspaceManagerState};
 use crate::protocols::foreign_toplevel::{self, ForeignToplevelManagerState};
 use crate::protocols::gamma_control::GammaControlManagerState;
+#[cfg(feature = "xwayland")]
 use crate::protocols::mutter_x11_interop::MutterX11InteropManagerState;
 use crate::protocols::output_management::OutputManagementManagerState;
 use crate::protocols::screencopy::{Screencopy, ScreencopyBuffer, ScreencopyManagerState};
@@ -161,14 +162,17 @@ use crate::ui::mru::{MruCloseRequest, WindowMruUi, WindowMruUiRenderElement};
 use crate::ui::screen_transition::{self, ScreenTransition};
 use crate::ui::screenshot_ui::{OutputScreenshot, ScreenshotUi, ScreenshotUiRenderElement};
 use crate::utils::scale::{closest_representable_scale, guess_monitor_scale};
-use crate::utils::spawning::{CHILD_DISPLAY, CHILD_ENV};
+#[cfg(feature = "xwayland")]
+use crate::utils::spawning::CHILD_DISPLAY;
+use crate::utils::spawning::CHILD_ENV;
 use crate::utils::vblank_throttle::VBlankThrottle;
 use crate::utils::watcher::Watcher;
-use crate::utils::xwayland::satellite::Satellite;
+#[cfg(feature = "xwayland")]
+use crate::utils::xwayland::{self, satellite::Satellite};
 use crate::utils::{
     center, center_f64, expand_home, get_monotonic_time, ipc_transform_to_smithay, is_mapped,
     logical_output, make_screenshot_path, output_matches_name, output_size, panel_orientation,
-    send_scale_transform, write_png_rgba8, xwayland,
+    send_scale_transform, write_png_rgba8,
 };
 use crate::window::mapped::MappedId;
 use crate::window::{InitialConfigureState, Mapped, ResolvedWindowRules, Unmapped, WindowRef};
@@ -299,6 +303,7 @@ pub struct Niri {
     pub security_context_state: SecurityContextState,
     pub gamma_control_manager_state: GammaControlManagerState,
     pub activation_state: XdgActivationState,
+    #[cfg(feature = "xwayland")]
     pub mutter_x11_interop_state: MutterX11InteropManagerState,
 
     // This will not work as is outside of tests, so it is gated with #[cfg(test)] for now. In
@@ -391,6 +396,7 @@ pub struct Niri {
     pub ipc_server: Option<IpcServer>,
     pub ipc_outputs_changed: bool,
 
+    #[cfg(feature = "xwayland")]
     pub satellite: Option<Satellite>,
 }
 
@@ -1443,6 +1449,7 @@ impl State {
         let mut shaders_changed = false;
         let mut cursor_inactivity_timeout_changed = false;
         let mut recent_windows_changed = false;
+        #[cfg(feature = "xwayland")]
         let mut xwls_changed = false;
         let mut old_config = self.niri.config.borrow_mut();
 
@@ -1572,6 +1579,7 @@ impl State {
             recent_windows_changed = true;
         }
 
+        #[cfg(feature = "xwayland")]
         if config.xwayland_satellite != old_config.xwayland_satellite {
             xwls_changed = true;
         }
@@ -1654,6 +1662,7 @@ impl State {
             self.niri.window_mru_ui.update_config();
         }
 
+        #[cfg(feature = "xwayland")]
         if xwls_changed {
             // If xwl-s was previously working and is now off, we don't try to kill it or stop
             // watching the sockets, for simplicity's sake.
@@ -2199,6 +2208,7 @@ impl Niri {
             )
             .unwrap();
 
+        #[cfg(feature = "xwayland")]
         let mutter_x11_interop_state =
             MutterX11InteropManagerState::new::<State, _>(&display_handle, move |_| true);
 
@@ -2389,6 +2399,7 @@ impl Niri {
             security_context_state,
             gamma_control_manager_state,
             activation_state,
+            #[cfg(feature = "xwayland")]
             mutter_x11_interop_state,
             #[cfg(test)]
             single_pixel_buffer_state,
@@ -2444,6 +2455,7 @@ impl Niri {
             ipc_server,
             ipc_outputs_changed: false,
 
+            #[cfg(feature = "xwayland")]
             satellite: None,
         };
 

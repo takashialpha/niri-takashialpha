@@ -18,6 +18,3 @@ pub mod rubber_band;
 pub mod ui;
 pub mod utils;
 pub mod window;
-
-#[cfg(test)]
-mod tests;

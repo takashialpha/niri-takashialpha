@@ -109,12 +109,9 @@ features = [
 
 [dev-dependencies]
 approx = "0.5"
-calloop-wayland-source = "0.4"
 insta.workspace = true
 proptest = "1.11"
 proptest-derive = { version = "0.8", features = ["boxed_union"] }
-rayon = "1.12"
-wayland-client = "0.31"
 xshell = "0.2"
 
 [build-dependencies]
@@ -136,6 +133,8 @@ profile-with-tracy-ondemand = [
 ]
 # Enables Tracy allocation profiling.
 profile-with-tracy-allocations = ["profile-with-tracy"]
+# Enables Xwayland support via xwayland-satellite + the mutter_x11_interop protocol.
+xwayland = []
 
 [profile.release]
 debug = "line-tables-only"

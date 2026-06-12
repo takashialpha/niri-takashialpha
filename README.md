@@ -1,14 +1,15 @@
-notes: still early, still deciding about architecture. No cargo lock yet.
+notes: still early, still deciding about architecture.
 
 todo:
 - new contents for that readme! it should give all credits to YaLTeR
 and point to the niri-wm repo but not document anything
 - make correct workflows
-- clean up code and deps where i'm not gonna use it (trim down/remove features)
-- get rid of most of resources/* too
-- make it small enough for low maintenance
+- see if that 3 features profile with tracy are necessary or what are them really for
+- more opt build profile
+- try reducing libc usage to prioritize rustix
+- instead of x.y lock to x all over the workspace
+- cleanups + reviews
 
 features it must drop:
-- any x11 interop? try wayland defaults always
-- wont need accessibility
-- more [..]
+- think on dropping xwayland entirely??
+- look for them

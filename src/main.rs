@@ -17,11 +17,15 @@ use directories::ProjectDirs;
 use niri::cli::{Cli, CompletionShell, Sub};
 use niri::ipc::client::handle_msg;
 use niri::niri::State;
+#[cfg(feature = "xwayland")]
+use niri::utils::spawning::CHILD_DISPLAY;
 use niri::utils::spawning::{
-    CHILD_DISPLAY, CHILD_ENV, REMOVE_ENV_RUST_BACKTRACE, REMOVE_ENV_RUST_LIB_BACKTRACE, spawn,
-    spawn_sh, store_and_increase_nofile_rlimit,
+    CHILD_ENV, REMOVE_ENV_RUST_BACKTRACE, REMOVE_ENV_RUST_LIB_BACKTRACE, spawn, spawn_sh,
+    store_and_increase_nofile_rlimit,
 };
-use niri::utils::{IS_SYSTEMD_SERVICE, cause_panic, version, watcher, xwayland};
+#[cfg(feature = "xwayland")]
+use niri::utils::xwayland;
+use niri::utils::{IS_SYSTEMD_SERVICE, cause_panic, version, watcher};
 use niri_config::{Config, ConfigPath};
 use niri_ipc::socket::SOCKET_PATH_ENV;
 use sd_notify::NotifyState;
@@ -192,16 +196,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Setup xwayland-satellite integration.
-    xwayland::satellite::setup(&mut state);
-    if let Some(satellite) = &state.niri.satellite {
-        let name = satellite.display_name();
-        *CHILD_DISPLAY.write().unwrap() = Some(name.to_owned());
-        unsafe { env::set_var("DISPLAY", name) };
-        info!("listening on X11 socket: {name}");
-    } else {
-        // Avoid spawning children in the host X11.
-        unsafe { env::remove_var("DISPLAY") };
+    #[cfg(feature = "xwayland")]
+    {
+        xwayland::satellite::setup(&mut state);
+        if let Some(satellite) = &state.niri.satellite {
+            let name = satellite.display_name();
+            *CHILD_DISPLAY.write().unwrap() = Some(name.to_owned());
+            unsafe { env::set_var("DISPLAY", name) };
+            info!("listening on X11 socket: {name}");
+        } else {
+            // Avoid spawning children in the host X11.
+            unsafe { env::remove_var("DISPLAY") };
+        }
     }
+
+    // Avoid spawning children in the host X11.
+    #[cfg(not(feature = "xwayland"))]
+    unsafe {
+        env::remove_var("DISPLAY")
+    };
 
     if cli.session {
         // We're starting as a session. Import our variables.

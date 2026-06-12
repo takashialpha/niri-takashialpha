@@ -12,7 +12,6 @@ mod imp {
 
     use anyhow::{Context, ensure};
     use gtk::gdk;
-    use gtk::prelude::*;
     use niri::animation::Clock;
     use niri::render_helpers::{resources, shaders};
     use smithay::backend::egl::EGLContext;

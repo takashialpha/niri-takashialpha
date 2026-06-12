@@ -44,6 +44,7 @@ pub mod spawning;
 pub mod transaction;
 pub mod vblank_throttle;
 pub mod watcher;
+#[cfg(feature = "xwayland")]
 pub mod xwayland;
 
 pub static IS_SYSTEMD_SERVICE: AtomicBool = AtomicBool::new(false);
