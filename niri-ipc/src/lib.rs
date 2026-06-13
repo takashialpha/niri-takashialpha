@@ -37,19 +37,7 @@
 //! This crate follows the niri version. It is **not** API-stable in terms of the Rust semver. In
 //! particular, expect new struct fields and enum variants to be added in patch version bumps.
 //!
-//! Use an exact version requirement to avoid breaking changes:
-//!
-//! ```toml
-//! [dependencies]
-//! niri-ipc = "=26.4.0"
-//! ```
-//!
-//! ## Features
-//!
-//! This crate defines the following features:
-//! - `json-schema`: derives the [schemars](https://lib.rs/crates/schemars) `JsonSchema` trait for
-//!   the types.
-//! - `clap`: derives the clap CLI parsing traits for some types. Used internally by niri itself.
+//! This crate is internal to this niri fork and not API-stable.
 #![warn(missing_docs)]
 
 use std::collections::HashMap;
@@ -63,7 +51,6 @@ pub mod state;
 
 /// Request from client to niri.
 #[derive(Debug, Serialize, Deserialize, Clone)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum Request {
     /// Request the version string for the running niri instance.
     Version,
@@ -133,7 +120,6 @@ pub type Reply = Result<Response, String>;
 
 /// Successful response from niri to client.
 #[derive(Debug, Serialize, Deserialize, Clone)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum Response {
     /// A request that does not need a response was handled successfully.
     Handled,
@@ -169,7 +155,6 @@ pub enum Response {
 
 /// Overview information.
 #[derive(Serialize, Deserialize, Debug, Clone)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct Overview {
     /// Whether the overview is currently open.
     pub is_open: bool,
@@ -177,7 +162,6 @@ pub struct Overview {
 
 /// Color picked from the screen.
 #[derive(Serialize, Deserialize, Debug, Clone)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct PickedColor {
     /// Color values as red, green, blue, each ranging from 0.0 to 1.0.
     pub rgb: [f64; 3],
@@ -186,16 +170,14 @@ pub struct PickedColor {
 /// Actions that niri can perform.
 // Variants in this enum should match the spelling of the ones in niri-config. Most, but not all,
 // variants from niri-config should be present here.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[cfg_attr(feature = "clap", derive(clap::Parser))]
-#[cfg_attr(feature = "clap", command(subcommand_value_name = "ACTION"))]
-#[cfg_attr(feature = "clap", command(subcommand_help_heading = "Actions"))]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
+#[derive(Serialize, Deserialize, Debug, Clone, clap::Parser)]
+#[command(subcommand_value_name = "ACTION")]
+#[command(subcommand_help_heading = "Actions")]
 pub enum Action {
     /// Exit niri.
     Quit {
         /// Skip the "Press Enter to confirm" prompt.
-        #[cfg_attr(feature = "clap", arg(short, long))]
+        #[arg(short, long)]
         skip_confirmation: bool,
     },
     /// Power off all monitors via DPMS.
@@ -205,25 +187,25 @@ pub enum Action {
     /// Spawn a command.
     Spawn {
         /// Command to spawn.
-        #[cfg_attr(feature = "clap", arg(last = true, required = true))]
+        #[arg(last = true, required = true)]
         command: Vec<String>,
     },
     /// Spawn a command through the shell.
     SpawnSh {
         /// Command to run.
-        #[cfg_attr(feature = "clap", arg(last = true, required = true))]
+        #[arg(last = true, required = true)]
         command: String,
     },
     /// Do a screen transition.
     DoScreenTransition {
         /// Delay in milliseconds for the screen to freeze before starting the transition.
-        #[cfg_attr(feature = "clap", arg(short, long))]
+        #[arg(short, long)]
         delay_ms: Option<u16>,
     },
     /// Open the screenshot UI.
     Screenshot {
         ///  Whether to show the mouse pointer by default in the screenshot UI.
-        #[cfg_attr(feature = "clap", arg(short = 'p', long, action = clap::ArgAction::Set, default_value_t = true))]
+        #[arg(short = 'p', long, action = clap::ArgAction::Set, default_value_t = true)]
         show_pointer: bool,
 
         /// Path to save the screenshot to.
@@ -231,7 +213,7 @@ pub enum Action {
         /// The path must be absolute, otherwise an error is returned.
         ///
         /// If `None`, the screenshot is saved according to the `screenshot-path` config setting.
-        #[cfg_attr(feature = "clap", arg(long, action = clap::ArgAction::Set))]
+        #[arg(long, action = clap::ArgAction::Set)]
         path: Option<String>,
     },
     /// Screenshot the focused screen.
@@ -239,11 +221,11 @@ pub enum Action {
         /// Write the screenshot to disk in addition to putting it in your clipboard.
         ///
         /// The screenshot is saved according to the `screenshot-path` config setting.
-        #[cfg_attr(feature = "clap", arg(short = 'd', long, action = clap::ArgAction::Set, default_value_t = true))]
+        #[arg(short = 'd', long, action = clap::ArgAction::Set, default_value_t = true)]
         write_to_disk: bool,
 
         /// Whether to include the mouse pointer in the screenshot.
-        #[cfg_attr(feature = "clap", arg(short = 'p', long, action = clap::ArgAction::Set, default_value_t = true))]
+        #[arg(short = 'p', long, action = clap::ArgAction::Set, default_value_t = true)]
         show_pointer: bool,
 
         /// Path to save the screenshot to.
@@ -251,28 +233,28 @@ pub enum Action {
         /// The path must be absolute, otherwise an error is returned.
         ///
         /// If `None`, the screenshot is saved according to the `screenshot-path` config setting.
-        #[cfg_attr(feature = "clap", arg(long, action = clap::ArgAction::Set))]
+        #[arg(long, action = clap::ArgAction::Set)]
         path: Option<String>,
     },
     /// Screenshot a window.
-    #[cfg_attr(feature = "clap", clap(about = "Screenshot the focused window"))]
+    #[clap(about = "Screenshot the focused window")]
     ScreenshotWindow {
         /// Id of the window to screenshot.
         ///
         /// If `None`, uses the focused window.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         id: Option<u64>,
         /// Write the screenshot to disk in addition to putting it in your clipboard.
         ///
         /// The screenshot is saved according to the `screenshot-path` config setting.
-        #[cfg_attr(feature = "clap", arg(short = 'd', long, action = clap::ArgAction::Set, default_value_t = true))]
+        #[arg(short = 'd', long, action = clap::ArgAction::Set, default_value_t = true)]
         write_to_disk: bool,
 
         /// Whether to include the mouse pointer in the screenshot.
         ///
         /// The pointer will be included only if the window is currently receiving pointer input
         /// (usually this means the pointer is on top of the window).
-        #[cfg_attr(feature = "clap", arg(short = 'p', long, action = clap::ArgAction::Set, default_value_t = false))]
+        #[arg(short = 'p', long, action = clap::ArgAction::Set, default_value_t = false)]
         show_pointer: bool,
 
         /// Path to save the screenshot to.
@@ -280,48 +262,42 @@ pub enum Action {
         /// The path must be absolute, otherwise an error is returned.
         ///
         /// If `None`, the screenshot is saved according to the `screenshot-path` config setting.
-        #[cfg_attr(feature = "clap", arg(long, action = clap::ArgAction::Set))]
+        #[arg(long, action = clap::ArgAction::Set)]
         path: Option<String>,
     },
     /// Enable or disable the keyboard shortcuts inhibitor (if any) for the focused surface.
     ToggleKeyboardShortcutsInhibit {},
     /// Close a window.
-    #[cfg_attr(feature = "clap", clap(about = "Close the focused window"))]
+    #[clap(about = "Close the focused window")]
     CloseWindow {
         /// Id of the window to close.
         ///
         /// If `None`, uses the focused window.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         id: Option<u64>,
     },
     /// Toggle fullscreen on a window.
-    #[cfg_attr(
-        feature = "clap",
-        clap(about = "Toggle fullscreen on the focused window")
-    )]
+    #[clap(about = "Toggle fullscreen on the focused window")]
     FullscreenWindow {
         /// Id of the window to toggle fullscreen of.
         ///
         /// If `None`, uses the focused window.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         id: Option<u64>,
     },
     /// Toggle windowed (fake) fullscreen on a window.
-    #[cfg_attr(
-        feature = "clap",
-        clap(about = "Toggle windowed (fake) fullscreen on the focused window")
-    )]
+    #[clap(about = "Toggle windowed (fake) fullscreen on the focused window")]
     ToggleWindowedFullscreen {
         /// Id of the window to toggle windowed fullscreen of.
         ///
         /// If `None`, uses the focused window.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         id: Option<u64>,
     },
     /// Focus a window by id.
     FocusWindow {
         /// Id of the window to focus.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         id: u64,
     },
     /// Focus a window in the focused column by index.
@@ -329,7 +305,7 @@ pub enum Action {
         /// Index of the window in the column.
         ///
         /// The index starts from 1 for the topmost window.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         index: u8,
     },
     /// Focus the previously focused window.
@@ -351,7 +327,7 @@ pub enum Action {
         /// Index of the column to focus.
         ///
         /// The index starts from 1 for the first column.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         index: usize,
     },
     /// Focus the window or the monitor above.
@@ -403,7 +379,7 @@ pub enum Action {
         /// New index for the column.
         ///
         /// The index starts from 1 for the first column.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         index: usize,
     },
     /// Move the focused window down in a column.
@@ -415,27 +391,21 @@ pub enum Action {
     /// Move the focused window up in a column or to the workspace above.
     MoveWindowUpOrToWorkspaceUp {},
     /// Consume or expel a window left.
-    #[cfg_attr(
-        feature = "clap",
-        clap(about = "Consume or expel the focused window left")
-    )]
+    #[clap(about = "Consume or expel the focused window left")]
     ConsumeOrExpelWindowLeft {
         /// Id of the window to consume or expel.
         ///
         /// If `None`, uses the focused window.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         id: Option<u64>,
     },
     /// Consume or expel a window right.
-    #[cfg_attr(
-        feature = "clap",
-        clap(about = "Consume or expel the focused window right")
-    )]
+    #[clap(about = "Consume or expel the focused window right")]
     ConsumeOrExpelWindowRight {
         /// Id of the window to consume or expel.
         ///
         /// If `None`, uses the focused window.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         id: Option<u64>,
     },
     /// Consume the window to the right into the focused column.
@@ -451,21 +421,18 @@ pub enum Action {
     /// Set the display mode of the focused column.
     SetColumnDisplay {
         /// Display mode to set.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         display: ColumnDisplay,
     },
     /// Center the focused column on the screen.
     CenterColumn {},
     /// Center a window on the screen.
-    #[cfg_attr(
-        feature = "clap",
-        clap(about = "Center the focused window on the screen")
-    )]
+    #[clap(about = "Center the focused window on the screen")]
     CenterWindow {
         /// Id of the window to center.
         ///
         /// If `None`, uses the focused window.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         id: Option<u64>,
     },
     /// Center all fully visible columns on the screen.
@@ -477,7 +444,7 @@ pub enum Action {
     /// Focus a workspace by reference (index or name).
     FocusWorkspace {
         /// Reference (index or name) of the workspace to focus.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         reference: WorkspaceReferenceArg,
     },
     /// Focus the previous workspace.
@@ -488,7 +455,7 @@ pub enum Action {
         ///
         /// If `true` (the default), the focus will follow the window to the new workspace. If
         /// `false`, the focus will remain on the original workspace.
-        #[cfg_attr(feature = "clap", arg(long, action = clap::ArgAction::Set, default_value_t = true))]
+        #[arg(long, action = clap::ArgAction::Set, default_value_t = true)]
         focus: bool,
     },
     /// Move the focused window to the workspace above.
@@ -497,23 +464,20 @@ pub enum Action {
         ///
         /// If `true` (the default), the focus will follow the window to the new workspace. If
         /// `false`, the focus will remain on the original workspace.
-        #[cfg_attr(feature = "clap", arg(long, action = clap::ArgAction::Set, default_value_t = true))]
+        #[arg(long, action = clap::ArgAction::Set, default_value_t = true)]
         focus: bool,
     },
     /// Move a window to a workspace.
-    #[cfg_attr(
-        feature = "clap",
-        clap(about = "Move the focused window to a workspace by reference (index or name)")
-    )]
+    #[clap(about = "Move the focused window to a workspace by reference (index or name)")]
     MoveWindowToWorkspace {
         /// Id of the window to move.
         ///
         /// If `None`, uses the focused window.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         window_id: Option<u64>,
 
         /// Reference (index or name) of the workspace to move the window to.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         reference: WorkspaceReferenceArg,
 
         /// Whether the focus should follow the moved window.
@@ -521,7 +485,7 @@ pub enum Action {
         /// If `true` (the default) and the window to move is focused, the focus will follow the
         /// window to the new workspace. If `false`, the focus will remain on the original
         /// workspace.
-        #[cfg_attr(feature = "clap", arg(long, action = clap::ArgAction::Set, default_value_t = true))]
+        #[arg(long, action = clap::ArgAction::Set, default_value_t = true)]
         focus: bool,
     },
     /// Move the focused column to the workspace below.
@@ -530,7 +494,7 @@ pub enum Action {
         ///
         /// If `true` (the default), the focus will follow the column to the new workspace. If
         /// `false`, the focus will remain on the original workspace.
-        #[cfg_attr(feature = "clap", arg(long, action = clap::ArgAction::Set, default_value_t = true))]
+        #[arg(long, action = clap::ArgAction::Set, default_value_t = true)]
         focus: bool,
     },
     /// Move the focused column to the workspace above.
@@ -539,20 +503,20 @@ pub enum Action {
         ///
         /// If `true` (the default), the focus will follow the column to the new workspace. If
         /// `false`, the focus will remain on the original workspace.
-        #[cfg_attr(feature = "clap", arg(long, action = clap::ArgAction::Set, default_value_t = true))]
+        #[arg(long, action = clap::ArgAction::Set, default_value_t = true)]
         focus: bool,
     },
     /// Move the focused column to a workspace by reference (index or name).
     MoveColumnToWorkspace {
         /// Reference (index or name) of the workspace to move the column to.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         reference: WorkspaceReferenceArg,
 
         /// Whether the focus should follow the target workspace.
         ///
         /// If `true` (the default), the focus will follow the column to the new workspace. If
         /// `false`, the focus will remain on the original workspace.
-        #[cfg_attr(feature = "clap", arg(long, action = clap::ArgAction::Set, default_value_t = true))]
+        #[arg(long, action = clap::ArgAction::Set, default_value_t = true)]
         focus: bool,
     },
     /// Move the focused workspace down.
@@ -560,47 +524,38 @@ pub enum Action {
     /// Move the focused workspace up.
     MoveWorkspaceUp {},
     /// Move a workspace to a specific index on its monitor.
-    #[cfg_attr(
-        feature = "clap",
-        clap(about = "Move the focused workspace to a specific index on its monitor")
-    )]
+    #[clap(about = "Move the focused workspace to a specific index on its monitor")]
     MoveWorkspaceToIndex {
         /// New index for the workspace.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         index: usize,
 
         /// Reference (index or name) of the workspace to move.
         ///
         /// If `None`, uses the focused workspace.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         reference: Option<WorkspaceReferenceArg>,
     },
     /// Set the name of a workspace.
-    #[cfg_attr(
-        feature = "clap",
-        clap(about = "Set the name of the focused workspace")
-    )]
+    #[clap(about = "Set the name of the focused workspace")]
     SetWorkspaceName {
         /// New name for the workspace.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         name: String,
 
         /// Reference (index or name) of the workspace to name.
         ///
         /// If `None`, uses the focused workspace.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         workspace: Option<WorkspaceReferenceArg>,
     },
     /// Unset the name of a workspace.
-    #[cfg_attr(
-        feature = "clap",
-        clap(about = "Unset the name of the focused workspace")
-    )]
+    #[clap(about = "Unset the name of the focused workspace")]
     UnsetWorkspaceName {
         /// Reference (index or name) of the workspace to unname.
         ///
         /// If `None`, uses the focused workspace.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         reference: Option<WorkspaceReferenceArg>,
     },
     /// Focus the monitor to the left.
@@ -618,7 +573,7 @@ pub enum Action {
     /// Focus a monitor by name.
     FocusMonitor {
         /// Name of the output to focus.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         output: String,
     },
     /// Move the focused window to the monitor to the left.
@@ -634,19 +589,16 @@ pub enum Action {
     /// Move the focused window to the next monitor.
     MoveWindowToMonitorNext {},
     /// Move a window to a specific monitor.
-    #[cfg_attr(
-        feature = "clap",
-        clap(about = "Move the focused window to a specific monitor")
-    )]
+    #[clap(about = "Move the focused window to a specific monitor")]
     MoveWindowToMonitor {
         /// Id of the window to move.
         ///
         /// If `None`, uses the focused window.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         id: Option<u64>,
 
         /// The target output name.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         output: String,
     },
     /// Move the focused column to the monitor to the left.
@@ -664,51 +616,42 @@ pub enum Action {
     /// Move the focused column to a specific monitor.
     MoveColumnToMonitor {
         /// The target output name.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         output: String,
     },
     /// Change the width of a window.
-    #[cfg_attr(
-        feature = "clap",
-        clap(about = "Change the width of the focused window")
-    )]
+    #[clap(about = "Change the width of the focused window")]
     SetWindowWidth {
         /// Id of the window whose width to set.
         ///
         /// If `None`, uses the focused window.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         id: Option<u64>,
 
         /// How to change the width.
-        #[cfg_attr(feature = "clap", arg(allow_hyphen_values = true))]
+        #[arg(allow_hyphen_values = true)]
         change: SizeChange,
     },
     /// Change the height of a window.
-    #[cfg_attr(
-        feature = "clap",
-        clap(about = "Change the height of the focused window")
-    )]
+    #[clap(about = "Change the height of the focused window")]
     SetWindowHeight {
         /// Id of the window whose height to set.
         ///
         /// If `None`, uses the focused window.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         id: Option<u64>,
 
         /// How to change the height.
-        #[cfg_attr(feature = "clap", arg(allow_hyphen_values = true))]
+        #[arg(allow_hyphen_values = true)]
         change: SizeChange,
     },
     /// Reset the height of a window back to automatic.
-    #[cfg_attr(
-        feature = "clap",
-        clap(about = "Reset the height of the focused window back to automatic")
-    )]
+    #[clap(about = "Reset the height of the focused window back to automatic")]
     ResetWindowHeight {
         /// Id of the window whose height to reset.
         ///
         /// If `None`, uses the focused window.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         id: Option<u64>,
     },
     /// Switch between preset column widths.
@@ -720,7 +663,7 @@ pub enum Action {
         /// Id of the window whose width to switch.
         ///
         /// If `None`, uses the focused window.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         id: Option<u64>,
     },
     /// Switch between preset window widths backwards.
@@ -728,7 +671,7 @@ pub enum Action {
         /// Id of the window whose width to switch.
         ///
         /// If `None`, uses the focused window.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         id: Option<u64>,
     },
     /// Switch between preset window heights.
@@ -736,7 +679,7 @@ pub enum Action {
         /// Id of the window whose height to switch.
         ///
         /// If `None`, uses the focused window.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         id: Option<u64>,
     },
     /// Switch between preset window heights backwards.
@@ -744,7 +687,7 @@ pub enum Action {
         /// Id of the window whose height to switch.
         ///
         /// If `None`, uses the focused window.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         id: Option<u64>,
     },
     /// Toggle the maximized state of the focused column.
@@ -754,13 +697,13 @@ pub enum Action {
         /// Id of the window to maximize.
         ///
         /// If `None`, uses the focused window.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         id: Option<u64>,
     },
     /// Change the width of the focused column.
     SetColumnWidth {
         /// How to change the width.
-        #[cfg_attr(feature = "clap", arg(allow_hyphen_values = true))]
+        #[arg(allow_hyphen_values = true)]
         change: SizeChange,
     },
     /// Expand the focused column to space not taken up by other fully visible columns.
@@ -768,7 +711,7 @@ pub enum Action {
     /// Switch between keyboard layouts.
     SwitchLayout {
         /// Layout to switch to.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         layout: LayoutSwitchTarget,
     },
     /// Show the hotkey overlay.
@@ -786,19 +729,16 @@ pub enum Action {
     /// Move the focused workspace to the next monitor.
     MoveWorkspaceToMonitorNext {},
     /// Move a workspace to a specific monitor.
-    #[cfg_attr(
-        feature = "clap",
-        clap(about = "Move the focused workspace to a specific monitor")
-    )]
+    #[clap(about = "Move the focused workspace to a specific monitor")]
     MoveWorkspaceToMonitor {
         /// The target output name.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         output: String,
 
         // Reference (index or name) of the workspace to move.
         ///
         /// If `None`, uses the focused workspace.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         reference: Option<WorkspaceReferenceArg>,
     },
     /// Toggle a debug tint on windows.
@@ -812,7 +752,7 @@ pub enum Action {
         /// Id of the window to move.
         ///
         /// If `None`, uses the focused window.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         id: Option<u64>,
     },
     /// Move the focused window to the floating layout.
@@ -820,7 +760,7 @@ pub enum Action {
         /// Id of the window to move.
         ///
         /// If `None`, uses the focused window.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         id: Option<u64>,
     },
     /// Move the focused window to the tiling layout.
@@ -828,7 +768,7 @@ pub enum Action {
         /// Id of the window to move.
         ///
         /// If `None`, uses the focused window.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         id: Option<u64>,
     },
     /// Switches focus to the floating layout.
@@ -838,75 +778,30 @@ pub enum Action {
     /// Toggles the focus between the floating and the tiling layout.
     SwitchFocusBetweenFloatingAndTiling {},
     /// Move a floating window on screen.
-    #[cfg_attr(feature = "clap", clap(about = "Move the floating window on screen"))]
+    #[clap(about = "Move the floating window on screen")]
     MoveFloatingWindow {
         /// Id of the window to move.
         ///
         /// If `None`, uses the focused window.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         id: Option<u64>,
 
         /// How to change the X position.
-        #[cfg_attr(
-            feature = "clap",
-            arg(short, long, default_value = "+0", allow_hyphen_values = true)
-        )]
+        #[arg(short, long, default_value = "+0", allow_hyphen_values = true)]
         x: PositionChange,
 
         /// How to change the Y position.
-        #[cfg_attr(
-            feature = "clap",
-            arg(short, long, default_value = "+0", allow_hyphen_values = true)
-        )]
+        #[arg(short, long, default_value = "+0", allow_hyphen_values = true)]
         y: PositionChange,
     },
     /// Toggle the opacity of a window.
-    #[cfg_attr(
-        feature = "clap",
-        clap(about = "Toggle the opacity of the focused window")
-    )]
+    #[clap(about = "Toggle the opacity of the focused window")]
     ToggleWindowRuleOpacity {
         /// Id of the window.
         ///
         /// If `None`, uses the focused window.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         id: Option<u64>,
-    },
-    /// Set the dynamic cast target to a window.
-    #[cfg_attr(
-        feature = "clap",
-        clap(about = "Set the dynamic cast target to the focused window")
-    )]
-    SetDynamicCastWindow {
-        /// Id of the window to target.
-        ///
-        /// If `None`, uses the focused window.
-        #[cfg_attr(feature = "clap", arg(long))]
-        id: Option<u64>,
-    },
-    /// Set the dynamic cast target to a monitor.
-    #[cfg_attr(
-        feature = "clap",
-        clap(about = "Set the dynamic cast target to the focused monitor")
-    )]
-    SetDynamicCastMonitor {
-        /// Name of the output to target.
-        ///
-        /// If `None`, uses the focused output.
-        #[cfg_attr(feature = "clap", arg())]
-        output: Option<String>,
-    },
-    /// Clear the dynamic cast target, making it show nothing.
-    ClearDynamicCastTarget {},
-    /// Stop a PipeWire screencast.
-    ///
-    /// wlr-screencopy screencasts cannot currently be stopped via IPC.
-    StopCast {
-        /// Session ID of the screencast to stop.
-        ///
-        /// If the session has multiple screencast streams, this will stop all of them.
-        #[cfg_attr(feature = "clap", arg(long))]
-        session_id: u64,
     },
     /// Toggle (open/close) the Overview.
     ToggleOverview {},
@@ -917,19 +812,19 @@ pub enum Action {
     /// Toggle urgent status of a window.
     ToggleWindowUrgent {
         /// Id of the window to toggle urgent.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         id: u64,
     },
     /// Set urgent status of a window.
     SetWindowUrgent {
         /// Id of the window to set urgent.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         id: u64,
     },
     /// Unset urgent status of a window.
     UnsetWindowUrgent {
         /// Id of the window to unset urgent.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         id: u64,
     },
     /// Reload the config file.
@@ -940,14 +835,13 @@ pub enum Action {
         /// Path of a new config file to load.
         ///
         /// If unset, reloads the current config file.
-        #[cfg_attr(feature = "clap", arg(long))]
+        #[arg(long)]
         path: Option<String>,
     },
 }
 
 /// Change in window or column size.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum SizeChange {
     /// Set the size in logical pixels.
     SetFixed(i32),
@@ -961,7 +855,6 @@ pub enum SizeChange {
 
 /// Change in floating window position.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum PositionChange {
     /// Set the position in logical pixels.
     SetFixed(f64),
@@ -975,7 +868,6 @@ pub enum PositionChange {
 
 /// Workspace reference (id, index or name) to operate on.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum WorkspaceReferenceArg {
     /// Id of the workspace.
     Id(u64),
@@ -987,7 +879,6 @@ pub enum WorkspaceReferenceArg {
 
 /// Layout to switch to.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum LayoutSwitchTarget {
     /// The next configured layout.
     Next,
@@ -999,7 +890,6 @@ pub enum LayoutSwitchTarget {
 
 /// How windows display in a column.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum ColumnDisplay {
     /// Windows are tiled vertically across the working area height.
     Normal,
@@ -1010,11 +900,9 @@ pub enum ColumnDisplay {
 /// Output actions that niri can perform.
 // Variants in this enum should match the spelling of the ones in niri-config. Most thigs from
 // niri-config should be present here.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[cfg_attr(feature = "clap", derive(clap::Parser))]
-#[cfg_attr(feature = "clap", command(subcommand_value_name = "ACTION"))]
-#[cfg_attr(feature = "clap", command(subcommand_help_heading = "Actions"))]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
+#[derive(Serialize, Deserialize, Debug, Clone, clap::Parser)]
+#[command(subcommand_value_name = "ACTION")]
+#[command(subcommand_help_heading = "Actions")]
 pub enum OutputAction {
     /// Turn off the output.
     Off,
@@ -1025,89 +913,88 @@ pub enum OutputAction {
         /// Mode to set, or "auto" for automatic selection.
         ///
         /// Run `niri msg outputs` to see the available modes.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         mode: ModeToSet,
     },
     /// Set a custom output mode.
     CustomMode {
         /// Custom mode to set.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         mode: ConfiguredMode,
     },
     /// Set a custom VESA CVT modeline.
-    #[cfg_attr(feature = "clap", arg())]
+    #[arg()]
     Modeline {
         /// The rate at which pixels are drawn in MHz.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         clock: f64,
         /// Horizontal active pixels.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         hdisplay: u16,
         /// Horizontal sync pulse start position in pixels.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         hsync_start: u16,
         /// Horizontal sync pulse end position in pixels.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         hsync_end: u16,
         /// Total horizontal number of pixels before resetting the horizontal drawing position to
         /// zero.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         htotal: u16,
 
         /// Vertical active pixels.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         vdisplay: u16,
         /// Vertical sync pulse start position in pixels.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         vsync_start: u16,
         /// Vertical sync pulse end position in pixels.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         vsync_end: u16,
         /// Total vertical number of pixels before resetting the vertical drawing position to zero.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         vtotal: u16,
         /// Horizontal sync polarity: "+hsync" or "-hsync".
-        #[cfg_attr(feature = "clap", arg(allow_hyphen_values = true))]
+        #[arg(allow_hyphen_values = true)]
         hsync_polarity: HSyncPolarity,
         /// Vertical sync polarity: "+vsync" or "-vsync".
-        #[cfg_attr(feature = "clap", arg(allow_hyphen_values = true))]
+        #[arg(allow_hyphen_values = true)]
         vsync_polarity: VSyncPolarity,
     },
     /// Set the output scale.
     Scale {
         /// Scale factor to set, or "auto" for automatic selection.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         scale: ScaleToSet,
     },
     /// Set the output transform.
     Transform {
         /// Transform to set, counter-clockwise.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         transform: Transform,
     },
     /// Set the output position.
     Position {
         /// Position to set, or "auto" for automatic selection.
-        #[cfg_attr(feature = "clap", command(subcommand))]
+        #[command(subcommand)]
         position: PositionToSet,
     },
     /// Set the variable refresh rate mode.
     Vrr {
         /// Variable refresh rate mode to set.
-        #[cfg_attr(feature = "clap", command(flatten))]
+        #[command(flatten)]
         vrr: VrrToSet,
     },
     /// Set the maximum bits per channel (bit depth).
     MaxBpc {
         /// Maximum bits per channel to set.
-        #[cfg_attr(feature = "clap", arg())]
+        #[arg()]
         max_bpc: MaxBpc,
     },
 }
 
 /// Output mode to set.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum ModeToSet {
     /// Niri will pick the mode automatically.
     Automatic,
@@ -1117,7 +1004,6 @@ pub enum ModeToSet {
 
 /// Output mode as set in the config file.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct ConfiguredMode {
     /// Width in physical pixels.
     pub width: u16,
@@ -1129,7 +1015,6 @@ pub struct ConfiguredMode {
 
 /// Modeline horizontal syncing polarity.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum HSyncPolarity {
     /// Positive polarity.
     PHSync,
@@ -1139,7 +1024,6 @@ pub enum HSyncPolarity {
 
 /// Modeline vertical syncing polarity.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum VSyncPolarity {
     /// Positive polarity.
     PVSync,
@@ -1149,7 +1033,6 @@ pub enum VSyncPolarity {
 
 /// Output scale to set.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum ScaleToSet {
     /// Niri will pick the scale automatically.
     Automatic,
@@ -1158,24 +1041,20 @@ pub enum ScaleToSet {
 }
 
 /// Output position to set.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
-#[cfg_attr(feature = "clap", derive(clap::Subcommand))]
-#[cfg_attr(feature = "clap", command(subcommand_value_name = "POSITION"))]
-#[cfg_attr(feature = "clap", command(subcommand_help_heading = "Position Values"))]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, clap::Subcommand)]
+#[command(subcommand_value_name = "POSITION")]
+#[command(subcommand_help_heading = "Position Values")]
 pub enum PositionToSet {
     /// Position the output automatically.
-    #[cfg_attr(feature = "clap", command(name = "auto"))]
+    #[command(name = "auto")]
     Automatic,
     /// Set a specific position.
-    #[cfg_attr(feature = "clap", command(name = "set"))]
+    #[command(name = "set")]
     Specific(ConfiguredPosition),
 }
 
 /// Output position as set in the config file.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
-#[cfg_attr(feature = "clap", derive(clap::Args))]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, clap::Args)]
 pub struct ConfiguredPosition {
     /// Logical X position.
     pub x: i32,
@@ -1184,29 +1063,23 @@ pub struct ConfiguredPosition {
 }
 
 /// Output VRR to set.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
-#[cfg_attr(feature = "clap", derive(clap::Args))]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, clap::Args)]
 pub struct VrrToSet {
     /// Whether to enable variable refresh rate.
-    #[cfg_attr(
-        feature = "clap",
-        arg(
+    #[arg(
             value_name = "ON|OFF",
             action = clap::ArgAction::Set,
             value_parser = clap::builder::BoolishValueParser::new(),
             hide_possible_values = true,
-        ),
-    )]
+        )]
     pub vrr: bool,
     /// Only enable when the output shows a window matching the variable-refresh-rate window rule.
-    #[cfg_attr(feature = "clap", arg(long))]
+    #[arg(long)]
     pub on_demand: bool,
 }
 
 /// Connected output.
 #[derive(Debug, Serialize, Deserialize, Clone)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct Output {
     /// Name of the output.
     pub name: String,
@@ -1240,7 +1113,6 @@ pub struct Output {
 
 /// Output mode.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct Mode {
     /// Width in physical pixels.
     pub width: u16,
@@ -1254,7 +1126,6 @@ pub struct Mode {
 
 /// Logical output in the compositor's coordinate space.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct LogicalOutput {
     /// Logical X position.
     pub x: i32,
@@ -1271,9 +1142,7 @@ pub struct LogicalOutput {
 }
 
 /// Output transform, which goes counter-clockwise.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum Transform {
     /// Untransformed.
     Normal,
@@ -1289,20 +1158,18 @@ pub enum Transform {
     /// Flipped horizontally.
     Flipped,
     /// Rotated by 90° and flipped horizontally.
-    #[cfg_attr(feature = "clap", value(name("flipped-90")))]
+    #[value(name("flipped-90"))]
     Flipped90,
     /// Flipped vertically.
-    #[cfg_attr(feature = "clap", value(name("flipped-180")))]
+    #[value(name("flipped-180"))]
     Flipped180,
     /// Rotated by 270° and flipped horizontally.
-    #[cfg_attr(feature = "clap", value(name("flipped-270")))]
+    #[value(name("flipped-270"))]
     Flipped270,
 }
 
 /// Output maximum bits per channel.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
 pub enum MaxBpc {
     /// 6-bit.
     #[serde(rename = "6")]
@@ -1327,7 +1194,6 @@ pub enum MaxBpc {
 
 /// Toplevel window.
 #[derive(Serialize, Deserialize, Debug, Clone)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct Window {
     /// Unique id of this window.
     ///
@@ -1372,7 +1238,6 @@ pub struct Window {
 
 /// A moment in time.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct Timestamp {
     /// Number of whole seconds.
     pub secs: u64,
@@ -1397,7 +1262,6 @@ pub struct Timestamp {
 /// hand are mainly useful when you need to know the underlying Wayland window sizes, e.g. for
 /// application debugging.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct WindowLayout {
     /// Location of a tiled window within a workspace: (column index, tile index in column).
     ///
@@ -1428,7 +1292,6 @@ pub struct WindowLayout {
 
 /// Output configuration change result.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum OutputConfigChanged {
     /// The target output was connected and the change was applied.
     Applied,
@@ -1438,7 +1301,6 @@ pub enum OutputConfigChanged {
 
 /// A workspace.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct Workspace {
     /// Unique id of this workspace.
     ///
@@ -1479,7 +1341,6 @@ pub struct Workspace {
 
 /// Configured keyboard layouts.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct KeyboardLayouts {
     /// XKB names of the configured layouts.
     pub names: Vec<String>,
@@ -1489,7 +1350,6 @@ pub struct KeyboardLayouts {
 
 /// A layer-shell layer.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum Layer {
     /// The background layer.
     Background,
@@ -1503,7 +1363,6 @@ pub enum Layer {
 
 /// Keyboard interactivity modes for a layer-shell surface.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum LayerSurfaceKeyboardInteractivity {
     /// Surface cannot receive keyboard focus.
     None,
@@ -1515,7 +1374,6 @@ pub enum LayerSurfaceKeyboardInteractivity {
 
 /// A layer-shell surface.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct LayerSurface {
     /// Namespace provided by the layer-shell client.
     pub namespace: String,
@@ -1529,7 +1387,6 @@ pub struct LayerSurface {
 
 /// A screencast.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct Cast {
     /// Stream ID of the screencast that uniquely identifies it.
     pub stream_id: u64,
@@ -1544,12 +1401,6 @@ pub struct Cast {
     pub kind: CastKind,
     /// Target being captured.
     pub target: CastTarget,
-    /// Whether this is a Dynamic Cast Target screencast.
-    ///
-    /// Meaning that actions like `SetDynamicCastWindow` will act on this screencast.
-    ///
-    /// Keep in mind that the target can change even if this is `false`.
-    pub is_dynamic_target: bool,
     /// Whether the cast is currently streaming frames.
     ///
     /// This can be `false` for example when switching away to a different scene in OBS, which
@@ -1559,19 +1410,11 @@ pub struct Cast {
     ///
     /// Currently, only wlr-screencopy screencasts can have a pid.
     pub pid: Option<i32>,
-    /// PipeWire node ID of the screencast stream.
-    ///
-    /// This is `None` for wlr-screencopy casts, and also for PipeWire casts before the node is
-    /// created (when the cast is just starting up).
-    pub pw_node_id: Option<u32>,
 }
 
 /// Kind of screencast.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum CastKind {
-    /// PipeWire screencast, typically via xdg-desktop-portal-gnome.
-    PipeWire,
     /// wlr-screencopy protocol screencast.
     ///
     /// Tools like wf-recorder, and the xdg-desktop-portal-wlr portal.
@@ -1583,7 +1426,6 @@ pub enum CastKind {
 
 /// Target of a screencast.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum CastTarget {
     /// The target is not yet set, or was cleared.
     Nothing {},
@@ -1601,7 +1443,6 @@ pub enum CastTarget {
 
 /// A compositor event.
 #[derive(Serialize, Deserialize, Debug, Clone)]
-#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum Event {
     /// The workspace configuration has changed.
     WorkspacesChanged {

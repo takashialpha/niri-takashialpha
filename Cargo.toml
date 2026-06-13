@@ -2,12 +2,13 @@
 members = ["niri-config", "niri-ipc"]
 
 [workspace.package]
-version = "26.4.0"
 description = "[ALL CREDITS TO YaLTeR] A scrollable-tiling Wayland compositor (takashialpha's personal fork!)"
 authors = [
   "Ivan Molodetskikh <yalterz@gmail.com>",
   "takashialpha <takashialpha@protonmail.com>",
 ]
+# intentionally null; builds are identified by commit hash (see utils::version).
+version = "0.0.0"
 license = "GPL-3.0-or-later"
 edition = "2024"
 
@@ -45,16 +46,12 @@ keywords = ["wayland", "compositor", "tiling", "smithay", "wm"]
 
 [dependencies]
 anyhow.workspace = true
-arrayvec = "0.7" # should analyze
+arrayvec = "0.7"
 async-channel = "2.5"
-atomic = "0.6" # should analyze
 bitflags.workspace = true
 bytemuck = { version = "1.25", features = ["derive"] }
 calloop = { version = "0.14", features = ["executor", "futures-io", "signals"] }
 clap = { workspace = true, features = ["string"] }
-clap_complete = "4.6" # i see that as useless (and doesn't even work on my shell)
-clap_complete_nushell = "4.6" # even more useless
-directories = "6.0"
 drm-ffi = "0.9"
 fastrand = "2.4"
 futures-util = { version = "0.3", default-features = false, features = [
@@ -63,24 +60,24 @@ futures-util = { version = "0.3", default-features = false, features = [
 ] }
 git-version = "0.3"
 glam = "0.33"
-input = { version = "0.10", features = ["libinput_1_21"] }
+input = { version = "0.10", features = ["libinput_1_30"] }
 keyframe = { version = "1.1", default-features = false }
-libc = "0.2" # to rustix!
+libc = "0.2"
 libdisplay-info = "0.3"
-niri-config = { version = "26.4.0", path = "niri-config" }
-niri-ipc = { version = "26.4.0", path = "niri-ipc", features = ["clap"] }
+niri-config = { path = "niri-config" }
+niri-ipc = { path = "niri-ipc" }
 ordered-float = "5.3"
 pango = { version = "0.22", features = ["v1_44"] }
 pangocairo = "0.22"
 png = "0.18"
-sd-notify = "0.5"
 serde_json.workspace = true
 smithay-drm-extras.workspace = true
 tracing-subscriber.workspace = true
 tracing.workspace = true
 wayland-backend = "0.3"
 wayland-server = "0.31"
-xcursor = "0.3" # e.g of some crates that could be replaced?
+xcursor = "0.3"
+xdg = "3.0"
 
 [dependencies.smithay]
 workspace = true
@@ -100,9 +97,8 @@ features = [
 ]
 
 [profile.release]
-debug = "line-tables-only"
-overflow-checks = true
-lto = "thin"
-
-[profile.release.package.niri-config]
-debug = false # knus .. ?
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"
+# overflow-checks = true # might want enabled

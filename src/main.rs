@@ -10,23 +10,20 @@ use std::sync::atomic::Ordering;
 use std::{env, mem};
 
 use calloop::EventLoop;
-use clap::{CommandFactory, Parser};
-use clap_complete::Shell;
-use clap_complete_nushell::Nushell;
-use directories::ProjectDirs;
-use niri::cli::{Cli, CompletionShell, Sub};
+use clap::Parser;
+use niri::cli::{Cli, Sub};
 use niri::ipc::client::handle_msg;
 use niri::niri::State;
 use niri::utils::spawning::{
     CHILD_ENV, REMOVE_ENV_RUST_BACKTRACE, REMOVE_ENV_RUST_LIB_BACKTRACE, spawn, spawn_sh,
     store_and_increase_nofile_rlimit,
 };
-use niri::utils::{IS_SYSTEMD_SERVICE, cause_panic, version, watcher};
+use niri::utils::{version, watcher};
 use niri_config::{Config, ConfigPath};
 use niri_ipc::socket::SOCKET_PATH_ENV;
-use sd_notify::NotifyState;
 use smithay::reexports::wayland_server::Display;
 use tracing_subscriber::EnvFilter;
+use xdg::BaseDirectories;
 
 const DEFAULT_LOG_FILTER: &str = "niri=debug,smithay::backend::renderer::gles=error";
 
@@ -50,10 +47,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_ansi_sanitization(false)
         .init();
 
-    if env::var_os("NOTIFY_SOCKET").is_some() {
-        IS_SYSTEMD_SERVICE.store(true, Ordering::Relaxed);
-    }
-
     let cli = Cli::parse();
 
     if cli.session {
@@ -75,36 +68,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 handle_msg(msg, json)?;
                 return Ok(());
             }
-            Sub::Panic => cause_panic(),
-            Sub::Completions { shell } => {
-                match shell {
-                    CompletionShell::Nushell => {
-                        clap_complete::generate(
-                            Nushell,
-                            &mut Cli::command(),
-                            "niri",
-                            &mut io::stdout(),
-                        );
-                    }
-                    other => {
-                        let generator = Shell::try_from(other).unwrap();
-                        clap_complete::generate(
-                            generator,
-                            &mut Cli::command(),
-                            "niri",
-                            &mut io::stdout(),
-                        );
-                    }
-                }
-                return Ok(());
-            }
         }
     }
 
-    // Needs to be done before starting Tracy, so that it applies to Tracy's threads.
+    // Block signals early so the masking is inherited by all threads spawned later.
     niri::utils::signals::block_early().unwrap();
 
-    info!("starting version {}", &version());
+    info!("starting niri-takashialpha commit {}", &version());
 
     // Load the config.
     let config_path = config_path(cli.config);
@@ -170,11 +140,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if env::var_os("NIRI_DISABLE_SYSTEM_MANAGER_NOTIFY").is_none_or(|x| x != "1") {
-        // Notify systemd we're ready.
-        if let Err(err) = sd_notify::notify(&[NotifyState::Ready]) {
-            warn!("error notifying systemd: {err:?}");
-        };
-
         // Send ready notification to the NOTIFY_FD file descriptor.
         if let Err(err) = notify_fd() {
             warn!("error notifying fd: {err:?}");
@@ -254,12 +219,11 @@ fn env_config_path() -> Option<PathBuf> {
 }
 
 fn default_config_path() -> Option<PathBuf> {
-    let Some(dirs) = ProjectDirs::from("", "", "niri") else {
-        warn!("error retrieving home directory");
+    let Some(mut path) = BaseDirectories::with_prefix("niri").get_config_home() else {
+        warn!("error retrieving config home directory");
         return None;
     };
 
-    let mut path = dirs.config_dir().to_owned();
     path.push("config.kdl");
     Some(path)
 }

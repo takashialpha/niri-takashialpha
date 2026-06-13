@@ -3321,9 +3321,9 @@ unsafe fn init_libinput_plugin_system(libinput: &Libinput) {
         use std::ffi::{CString, c_char, c_int};
         use std::os::unix::ffi::OsStringExt;
 
-        use directories::BaseDirs;
         use input::AsRaw as _;
         use input::ffi::libinput;
+        use xdg::BaseDirectories;
 
         unsafe extern "C" {
             fn libinput_plugin_system_append_path(libinput: *const libinput, path: *const c_char);
@@ -3337,8 +3337,7 @@ unsafe fn init_libinput_plugin_system(libinput: &Libinput) {
         let libinput = libinput.as_raw();
 
         // Also load plugins from $XDG_CONFIG_HOME/libinput/plugins.
-        if let Some(dirs) = BaseDirs::new() {
-            let mut plugins_dir = dirs.config_dir().to_path_buf();
+        if let Some(mut plugins_dir) = BaseDirectories::new().get_config_home() {
             plugins_dir.push("libinput");
             plugins_dir.push("plugins");
             if let Ok(plugins_dir) = CString::new(plugins_dir.into_os_string().into_vec()) {

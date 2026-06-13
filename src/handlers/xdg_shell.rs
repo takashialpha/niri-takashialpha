@@ -42,7 +42,7 @@ use crate::input::resize_grab::ResizeGrab;
 use crate::input::touch_resize_grab::TouchResizeGrab;
 use crate::input::{DOUBLE_CLICK_TIME, PointerOrTouchStartData};
 use crate::layout::ActivateWindow;
-use crate::niri::{CastTarget, PopupGrabState, State};
+use crate::niri::{PopupGrabState, State};
 use crate::utils::transaction::Transaction;
 use crate::utils::{
     ResizeEdge, get_monotonic_time, output_matches_name, send_scale_transform, update_tiled_state,
@@ -838,8 +838,6 @@ impl XdgShellHandler for State {
         let output = output.cloned();
 
         let id = mapped.id();
-        self.niri
-            .stop_casts_for_target(CastTarget::Window { id: id.get() });
 
         self.store_unmap_snapshot(&window, output.as_ref());
 

@@ -5,13 +5,11 @@ use std::io::Write;
 use std::os::unix::prelude::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::ptr::null_mut;
-use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 use std::{f64, fmt};
 
 use anyhow::{Context, ensure};
 use bitflags::bitflags;
-use directories::UserDirs;
 use git_version::git_version;
 use niri_config::{Config, OutputName};
 use smithay::backend::renderer::utils::{
@@ -45,8 +43,6 @@ pub mod transaction;
 pub mod vblank_throttle;
 pub mod watcher;
 
-pub static IS_SYSTEMD_SERVICE: AtomicBool = AtomicBool::new(false);
-
 use id::IdCounter;
 
 /// Unique ID for a screencast session.
@@ -67,12 +63,6 @@ impl CastSessionId {
 impl Display for CastSessionId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
-    }
-}
-
-impl From<u64> for CastSessionId {
-    fn from(value: u64) -> Self {
-        Self(value)
     }
 }
 
@@ -139,23 +129,11 @@ impl ResizeEdge {
     }
 }
 
+/// Build identifier: just the commit hash. There is no semantic version.
 pub fn version() -> String {
-    if let Some(v) = option_env!("NIRI_BUILD_VERSION_STRING") {
-        return String::from(v);
-    }
-
-    const MAJOR: &str = env!("CARGO_PKG_VERSION_MAJOR");
-    const MINOR: &str = env!("CARGO_PKG_VERSION_MINOR");
-    const PATCH: &str = env!("CARGO_PKG_VERSION_PATCH");
-
-    let commit =
-        option_env!("NIRI_BUILD_COMMIT").unwrap_or(git_version!(fallback = "unknown commit"));
-
-    if PATCH == "0" {
-        format!("{MAJOR}.{MINOR:0>2} ({commit})")
-    } else {
-        format!("{MAJOR}.{MINOR:0>2}.{PATCH} ({commit})")
-    }
+    option_env!("NIRI_BUILD_COMMIT")
+        .unwrap_or(git_version!(fallback = "unknown commit"))
+        .to_string()
 }
 
 pub fn get_monotonic_time() -> Duration {
@@ -268,8 +246,8 @@ pub fn send_scale_transform(
 
 pub fn expand_home(path: &Path) -> anyhow::Result<Option<PathBuf>> {
     if let Ok(rest) = path.strip_prefix("~") {
-        let dirs = UserDirs::new().context("error retrieving home directory")?;
-        Ok(Some([dirs.home_dir(), rest].iter().collect()))
+        let home = std::env::home_dir().context("error retrieving home directory")?;
+        Ok(Some([home.as_path(), rest].iter().collect()))
     } else {
         Ok(None)
     }
@@ -537,11 +515,4 @@ pub fn baba_is_float_offset(now: Duration, view_height: f64) -> f64 {
     let now = now.as_secs_f64();
     let amplitude = view_height / 96.;
     amplitude * ((f64::consts::TAU * now / 3.6).sin() - 1.)
-}
-
-#[inline(never)]
-pub fn cause_panic() {
-    let a = Duration::from_secs(1);
-    let b = Duration::from_secs(2);
-    let _ = a - b;
 }

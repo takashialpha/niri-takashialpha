@@ -1,11 +1,10 @@
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
-use atomic::Ordering;
 use calloop::LoopHandle;
 use calloop::ping::{Ping, make_ping};
 use calloop::timer::{TimeoutAction, Timer};

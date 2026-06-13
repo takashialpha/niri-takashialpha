@@ -10,11 +10,6 @@ categories = ["api-bindings", "os"]
 readme = "README.md"
 
 [dependencies]
-clap = { workspace = true, optional = true }
-schemars = { version = "1.2", optional = true }
+clap = { workspace = true }
 serde.workspace = true
 serde_json.workspace = true
-
-[features]
-clap = ["dep:clap"]
-json-schema = ["dep:schemars"]

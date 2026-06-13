@@ -52,7 +52,7 @@ use smithay::input::pointer::{
     GrabStartData as PointerGrabStartData, MotionEvent,
 };
 use smithay::input::{Seat, SeatState};
-use smithay::output::{self, Output, OutputModeSource, PhysicalProperties, Subpixel, WeakOutput};
+use smithay::output::{self, Output, OutputModeSource, PhysicalProperties, Subpixel};
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::{
@@ -534,54 +534,6 @@ pub enum CenterCoords {
     Both,
     // Force centering even if the cursor is already in the rectangle.
     BothAlways,
-}
-
-#[derive(Clone, PartialEq, Eq)]
-pub enum CastTarget {
-    // Dynamic cast before selecting anything.
-    Nothing,
-    Output {
-        output: WeakOutput,
-        /// Cached name of the output.
-        name: String,
-    },
-    Window {
-        id: u64,
-    },
-}
-
-impl CastTarget {
-    pub fn output(output: &Output) -> Self {
-        Self::Output {
-            output: output.downgrade(),
-            name: output.name(),
-        }
-    }
-
-    pub fn matches_output(&self, weak: &WeakOutput) -> bool {
-        matches!(self, CastTarget::Output { output, .. } if output == weak)
-    }
-
-    pub fn matches(&self, ipc: &niri_ipc::CastTarget) -> bool {
-        use CastTarget::*;
-        match (self, ipc) {
-            (Nothing, niri_ipc::CastTarget::Nothing {}) => true,
-            (Output { name, .. }, niri_ipc::CastTarget::Output { name: ipc_name }) => {
-                name == ipc_name
-            }
-            (Window { id }, niri_ipc::CastTarget::Window { id: ipc_id }) => id == ipc_id,
-            _ => false,
-        }
-    }
-
-    pub fn make_ipc(&self) -> niri_ipc::CastTarget {
-        use CastTarget::*;
-        match self {
-            Nothing => niri_ipc::CastTarget::Nothing {},
-            Output { name, .. } => niri_ipc::CastTarget::Output { name: name.clone() },
-            Window { id } => niri_ipc::CastTarget::Window { id: *id },
-        }
-    }
 }
 
 /// Pending update to a window's focus timestamp.
@@ -1983,8 +1935,6 @@ impl State {
             }
         });
     }
-
-    pub fn set_dynamic_cast_target(&mut self, _target: CastTarget) {}
 }
 
 impl Niri {
@@ -2619,7 +2569,6 @@ impl Niri {
             RedrawState::WaitingForEstimatedVBlankAndQueued(token) => self.event_loop.remove(token),
         }
 
-        self.stop_casts_for_target(CastTarget::output(output));
         self.screencopy_state.remove_output(output);
 
         // Disable the output global and remove some time later to give the clients some time to
@@ -5091,10 +5040,6 @@ impl Niri {
 
         Ok(sync)
     }
-
-    pub fn stop_casts_for_target(&mut self, _target: CastTarget) {}
-
-    pub fn stop_cast(&mut self, _session_id: crate::utils::CastSessionId) {}
 
     pub fn debug_toggle_damage(&mut self) {
         self.debug_draw_damage = !self.debug_draw_damage;

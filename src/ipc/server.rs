@@ -11,7 +11,6 @@ use anyhow::Context;
 use async_channel::{Receiver, Sender, TrySendError};
 use calloop::futures::Scheduler;
 use calloop::io::Async;
-use directories::BaseDirs;
 use futures_util::io::{AsyncReadExt, BufReader};
 use futures_util::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, FutureExt as _, select_biased};
 use niri_config::OutputName;
@@ -29,6 +28,7 @@ use smithay::reexports::calloop::{Interest, LoopHandle, Mode, PostAction};
 use smithay::reexports::rustix::fs::unlink;
 use smithay::utils::SERIAL_COUNTER;
 use smithay::wayland::shell::wlr_layer::{KeyboardInteractivity, Layer};
+use xdg::BaseDirectories;
 
 use crate::backend::IpcOutputMap;
 use crate::input::pick_window_grab::PickWindowGrab;
@@ -143,11 +143,10 @@ impl Drop for IpcServer {
 }
 
 fn socket_dir() -> PathBuf {
-    BaseDirs::new()
-        .as_ref()
-        .and_then(|x| x.runtime_dir())
+    BaseDirectories::new()
+        .get_runtime_directory()
         .map(|x| x.to_owned())
-        .unwrap_or_else(env::temp_dir)
+        .unwrap_or_else(|_| env::temp_dir())
 }
 
 fn on_new_ipc_client(state: &mut State, stream: UnixStream) {
@@ -834,10 +833,8 @@ impl State {
                         target: niri_ipc::CastTarget::Output {
                             name: cast_info.output_name.clone(),
                         },
-                        is_dynamic_target: false,
                         is_active: true,
                         pid: queue.credentials().map(|creds| creds.pid),
-                        pw_node_id: None,
                     };
                     events.push(Event::CastStartedOrChanged { cast });
                 }

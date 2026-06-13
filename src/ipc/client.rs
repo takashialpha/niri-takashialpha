@@ -748,7 +748,6 @@ fn print_cast(cast: &Cast) {
     println!("  Session ID: {}", cast.session_id);
 
     let kind = match cast.kind {
-        CastKind::PipeWire => "PipeWire",
         CastKind::WlrScreencopy => "wlr-screencopy",
     };
     println!("  Kind: {kind}");
@@ -765,16 +764,8 @@ fn print_cast(cast: &Cast) {
         }
     }
 
-    if cast.is_dynamic_target {
-        println!("  Dynamic cast target");
-    }
-
     if let Some(pid) = cast.pid {
         println!("  PID: {pid}");
-    }
-
-    if let Some(node_id) = cast.pw_node_id {
-        println!("  PipeWire node ID: {node_id}");
     }
 }
 

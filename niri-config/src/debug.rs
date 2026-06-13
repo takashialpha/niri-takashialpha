@@ -5,7 +5,6 @@ use crate::utils::{Flag, MergeWith};
 #[derive(Debug, Default, PartialEq)]
 pub struct Debug {
     pub preview_render: Option<PreviewRender>,
-    pub dbus_interfaces_in_non_session_instances: bool,
     pub wait_for_frame_completion_before_queueing: bool,
     pub enable_overlay_planes: bool,
     pub disable_cursor_plane: bool,
@@ -14,7 +13,6 @@ pub struct Debug {
     pub force_disable_connectors_on_resume: bool,
     pub render_drm_device: Option<PathBuf>,
     pub ignored_drm_devices: Vec<PathBuf>,
-    pub force_pipewire_invalid_modifier: bool,
     pub emulate_zero_presentation_time: bool,
     pub disable_resize_throttling: bool,
     pub disable_transactions: bool,
@@ -31,8 +29,6 @@ pub struct DebugPart {
     #[knus(child, unwrap(argument))]
     pub preview_render: Option<PreviewRender>,
     #[knus(child)]
-    pub dbus_interfaces_in_non_session_instances: Option<Flag>,
-    #[knus(child)]
     pub wait_for_frame_completion_before_queueing: Option<Flag>,
     #[knus(child)]
     pub enable_overlay_planes: Option<Flag>,
@@ -48,8 +44,6 @@ pub struct DebugPart {
     pub render_drm_device: Option<PathBuf>,
     #[knus(children(name = "ignore-drm-device"), unwrap(argument))]
     pub ignored_drm_devices: Vec<PathBuf>,
-    #[knus(child)]
-    pub force_pipewire_invalid_modifier: Option<Flag>,
     #[knus(child)]
     pub emulate_zero_presentation_time: Option<Flag>,
     #[knus(child)]
@@ -74,14 +68,12 @@ impl MergeWith<DebugPart> for Debug {
     fn merge_with(&mut self, part: &DebugPart) {
         merge!(
             (self, part),
-            dbus_interfaces_in_non_session_instances,
             wait_for_frame_completion_before_queueing,
             enable_overlay_planes,
             disable_cursor_plane,
             disable_direct_scanout,
             restrict_primary_scanout_to_matching_format,
             force_disable_connectors_on_resume,
-            force_pipewire_invalid_modifier,
             emulate_zero_presentation_time,
             disable_resize_throttling,
             disable_transactions,

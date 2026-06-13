@@ -3,11 +3,10 @@ use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::RwLock;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::{io, thread};
 
-use atomic::Atomic;
-use libc::{RLIMIT_NOFILE, getrlimit, rlim_t, rlimit, setrlimit};
+use libc::{RLIMIT_NOFILE, getrlimit, rlimit, setrlimit};
 use niri_config::Environment;
 use smithay::wayland::xdg_activation::XdgActivationToken;
 
@@ -17,8 +16,8 @@ pub static REMOVE_ENV_RUST_BACKTRACE: AtomicBool = AtomicBool::new(false);
 pub static REMOVE_ENV_RUST_LIB_BACKTRACE: AtomicBool = AtomicBool::new(false);
 pub static CHILD_ENV: RwLock<Environment> = RwLock::new(Environment(Vec::new()));
 
-static ORIGINAL_NOFILE_RLIMIT_CUR: Atomic<rlim_t> = Atomic::new(0);
-static ORIGINAL_NOFILE_RLIMIT_MAX: Atomic<rlim_t> = Atomic::new(0);
+static ORIGINAL_NOFILE_RLIMIT_CUR: AtomicU64 = AtomicU64::new(0);
+static ORIGINAL_NOFILE_RLIMIT_MAX: AtomicU64 = AtomicU64::new(0);
 
 /// Increases the nofile rlimit to the maximum and stores the original value.
 pub fn store_and_increase_nofile_rlimit() {
