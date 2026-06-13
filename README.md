@@ -1,16 +1,14 @@
-notes: still early, still deciding about architecture.
+doc:
+req >=libinput 1.30
 
 todo:
-- that build.rs really necessary?
 - new contents for that readme! it should give all credits to YaLTeR
 and point to the niri-wm repo but not document anything
 - make correct workflows
-- see if that 3 features profile with tracy are necessary or what are them really for
-- more opt build profile
-- try reducing libc usage to prioritize rustix
-- instead of x.y lock to x all over the workspace
+- more opt build profile (why is there debug on build when should'nt have any)
+- try reducing libc usage to prioritize rustix (replace other crates too)
+- consider getting rid of knus/kdl
+- versioning should be null like 0.0.0 and based on commits
+so logging not print version but just commit hash
 - cleanups + reviews
-
-features it must drop:
-- think on dropping xwayland entirely??
-- look for them
+- search for more it should drop

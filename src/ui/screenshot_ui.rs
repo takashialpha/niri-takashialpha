@@ -623,8 +623,6 @@ impl ScreenshotUi {
         target: RenderTarget,
         push: &mut dyn FnMut(ScreenshotUiRenderElement),
     ) {
-        let _span = tracy_client::span!("ScreenshotUi::render_output");
-
         let Self::Open {
             output_data,
             show_pointer,
@@ -694,8 +692,6 @@ impl ScreenshotUi {
         &self,
         renderer: &mut GlesRenderer,
     ) -> anyhow::Result<(Size<i32, Physical>, Vec<u8>)> {
-        let _span = tracy_client::span!("ScreenshotUi::capture");
-
         let Self::Open {
             selection,
             output_data,
@@ -1129,8 +1125,6 @@ fn render_panel(
     scale: f64,
     text: &str,
 ) -> anyhow::Result<TextureBuffer<GlesTexture>> {
-    let _span = tracy_client::span!("screenshot_ui::render_panel");
-
     let padding: i32 = to_physical_precise_round(scale, PADDING);
     // Keep the border width even to avoid blurry edges.
     let border_width = (f64::from(BORDER) / 2. * scale).round() * 2.;

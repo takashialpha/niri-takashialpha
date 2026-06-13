@@ -174,7 +174,6 @@ impl RenderElement<GlesRenderer> for ResizeRenderElement {
         opaque_regions: &[Rectangle<i32, Physical>],
         cache: Option<&UserDataMap>,
     ) -> Result<(), GlesError> {
-        let _span = tracy_client::span!("ResizeRenderElement::draw");
         frame.with_gpu_span(gpu_span_location!("ResizeRenderElement::draw"), |frame| {
             RenderElement::<GlesRenderer>::draw(
                 &self.0,

@@ -56,8 +56,6 @@ const fn triangle_verts() -> [ffi::types::GLfloat; 12 * MAX_RECTS_PER_DRAW] {
 
 impl Resources {
     fn create(renderer: &mut GlesRenderer) -> Result<Self, GlesError> {
-        let _span = tracy_client::span!("Resources::init");
-
         let supports_instancing = renderer.capabilities().contains(&Capability::Instancing);
         renderer.with_context(|gl| unsafe {
             let vertices: &[ffi::types::GLfloat] = if supports_instancing {

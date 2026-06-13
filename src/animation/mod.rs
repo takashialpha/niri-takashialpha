@@ -176,8 +176,6 @@ impl Animation {
     }
 
     pub fn spring(clock: Clock, spring: Spring) -> Self {
-        let _span = tracy_client::span!("Animation::spring");
-
         let duration = spring.duration();
         let clamped_duration = spring.clamped_duration().unwrap_or(duration);
         let kind = Kind::Spring(spring);

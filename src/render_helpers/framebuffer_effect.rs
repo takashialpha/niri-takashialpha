@@ -166,7 +166,6 @@ impl RenderElement<GlesRenderer> for FramebufferEffectElement {
         dst: Rectangle<i32, Physical>,
         cache: &UserDataMap,
     ) -> Result<(), GlesError> {
-        let _span = tracy_client::span!("FramebufferEffectElement::capture_framebuffer");
         let location = gpu_span_location!("FramebufferEffectElement::capture_framebuffer");
         frame.with_gpu_span(location, |frame| {
             let output_rect = Rectangle::from_size(frame.output_size());

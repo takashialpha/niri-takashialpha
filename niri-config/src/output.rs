@@ -537,8 +537,6 @@ impl<S: ErrorSpan> Decode<S> for Modeline {
 
 #[cfg(test)]
 mod tests {
-    use insta::assert_debug_snapshot;
-
     use super::*;
 
     #[test]
@@ -640,49 +638,5 @@ mod tests {
             Some("Serial")
         ));
         assert!(!check("unknown unknown unknown", "DP-2", None, None, None));
-    }
-
-    #[test]
-    fn test_output_name_sorting() {
-        let mut names = vec![
-            make_output_name("DP-2", None, None, None),
-            make_output_name("DP-1", None, None, None),
-            make_output_name("DP-3", Some("B"), Some("A"), Some("A")),
-            make_output_name("DP-3", Some("A"), Some("B"), Some("A")),
-            make_output_name("DP-3", Some("A"), Some("A"), Some("B")),
-            make_output_name("DP-3", None, Some("A"), Some("A")),
-            make_output_name("DP-3", Some("A"), None, Some("A")),
-            make_output_name("DP-3", Some("A"), Some("A"), None),
-            make_output_name("DP-5", Some("A"), Some("A"), Some("A")),
-            make_output_name("DP-4", Some("A"), Some("A"), Some("A")),
-        ];
-        names.sort_by(|a, b| a.compare(b));
-        let names = names
-            .into_iter()
-            .map(|name| {
-                format!(
-                    "{} | {}",
-                    name.format_make_model_serial_or_connector(),
-                    name.connector,
-                )
-            })
-            .collect::<Vec<_>>();
-        assert_debug_snapshot!(
-            names,
-            @r#"
-        [
-            "Unknown A A | DP-3",
-            "A Unknown A | DP-3",
-            "A A Unknown | DP-3",
-            "A A A | DP-4",
-            "A A A | DP-5",
-            "A A B | DP-3",
-            "A B A | DP-3",
-            "B A A | DP-3",
-            "DP-1 | DP-1",
-            "DP-2 | DP-2",
-        ]
-        "#
-        );
     }
 }

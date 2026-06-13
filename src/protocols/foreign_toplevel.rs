@@ -93,8 +93,6 @@ impl ForeignToplevelManagerState {
 }
 
 pub fn refresh(state: &mut State) {
-    let _span = tracy_client::span!("foreign_toplevel::refresh");
-
     let protocol_state = &mut state.niri.foreign_toplevel_state;
 
     // Handle closed windows.
@@ -168,8 +166,6 @@ pub fn refresh(state: &mut State) {
 }
 
 pub fn on_output_bound(state: &mut State, output: &Output, wl_output: &WlOutput) {
-    let _span = tracy_client::span!("foreign_toplevel::on_output_bound");
-
     let Some(client) = wl_output.client() else {
         return;
     };

@@ -54,8 +54,6 @@ pub fn draw_damage<R: NiriRenderer>(
     damage_tracker: &mut OutputDamageTracker,
     elements: &mut Vec<OutputRenderElements<R>>,
 ) {
-    let _span = tracy_client::span!("draw_damage");
-
     let Ok((_, scale, _)) = damage_tracker.mode().try_into() else {
         return;
     };

@@ -115,8 +115,6 @@ impl Blur {
         source: &GlesTexture,
         options: BlurOptions,
     ) -> anyhow::Result<()> {
-        let _span = tracy_client::span!("Blur::prepare_textures");
-
         let passes = options.passes.clamp(1, 31) as usize;
         let size = source.size();
 
@@ -168,7 +166,6 @@ impl Blur {
         source: &GlesTexture,
         options: BlurOptions,
     ) -> anyhow::Result<GlesTexture> {
-        let _span = tracy_client::span!("Blur::render");
         trace!("rendering blur");
 
         ensure!(

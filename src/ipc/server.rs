@@ -74,8 +74,6 @@ impl IpcServer {
         event_loop: &LoopHandle<'static, State>,
         wayland_socket_name: Option<&OsStr>,
     ) -> anyhow::Result<Self> {
-        let _span = tracy_client::span!("Ipc::start");
-
         let socket_path = if let Some(wayland_socket_name) = wayland_socket_name {
             let wayland_socket_name = wayland_socket_name.to_string_lossy();
             let socket_name = format!("niri.{wayland_socket_name}.{}.sock", process::id());
@@ -153,7 +151,6 @@ fn socket_dir() -> PathBuf {
 }
 
 fn on_new_ipc_client(state: &mut State, stream: UnixStream) {
-    let _span = tracy_client::span!("on_new_ipc_client");
     trace!("new IPC client connected");
 
     let stream = match state.niri.event_loop.adapt_io(stream) {
@@ -590,8 +587,6 @@ impl State {
             return;
         };
 
-        let _span = tracy_client::span!("State::ipc_refresh_workspaces");
-
         let mut state = server.event_stream_state.borrow_mut();
         let state = &mut state.workspaces;
 
@@ -688,8 +683,6 @@ impl State {
         let Some(server) = &self.niri.ipc_server else {
             return;
         };
-
-        let _span = tracy_client::span!("State::ipc_refresh_windows");
 
         let mut state = server.event_stream_state.borrow_mut();
         let state = &mut state.windows;
@@ -809,8 +802,6 @@ impl State {
         let Some(server) = &self.niri.ipc_server else {
             return;
         };
-
-        let _span = tracy_client::span!("State::ipc_refresh_casts");
 
         let mut state = server.event_stream_state.borrow_mut();
         let state = &mut state.casts;

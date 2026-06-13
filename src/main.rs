@@ -17,14 +17,10 @@ use directories::ProjectDirs;
 use niri::cli::{Cli, CompletionShell, Sub};
 use niri::ipc::client::handle_msg;
 use niri::niri::State;
-#[cfg(feature = "xwayland")]
-use niri::utils::spawning::CHILD_DISPLAY;
 use niri::utils::spawning::{
     CHILD_ENV, REMOVE_ENV_RUST_BACKTRACE, REMOVE_ENV_RUST_LIB_BACKTRACE, spawn, spawn_sh,
     store_and_increase_nofile_rlimit,
 };
-#[cfg(feature = "xwayland")]
-use niri::utils::xwayland;
 use niri::utils::{IS_SYSTEMD_SERVICE, cause_panic, version, watcher};
 use niri_config::{Config, ConfigPath};
 use niri_ipc::socket::SOCKET_PATH_ENV;
@@ -33,11 +29,6 @@ use smithay::reexports::wayland_server::Display;
 use tracing_subscriber::EnvFilter;
 
 const DEFAULT_LOG_FILTER: &str = "niri=debug,smithay::backend::renderer::gles=error";
-
-#[cfg(feature = "profile-with-tracy-allocations")]
-#[global_allocator]
-static GLOBAL: tracy_client::ProfiledAllocator<std::alloc::System> =
-    tracy_client::ProfiledAllocator::new(std::alloc::System, 100);
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Set backtrace defaults if not set.
@@ -66,25 +57,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     if cli.session {
-        // If we're starting as a session, assume that the intention is to start on a TTY unless
-        // this is a WSL environment. Remove DISPLAY, WAYLAND_DISPLAY or WAYLAND_SOCKET from our
-        // environment if they are set, since they will cause the winit backend to be selected
-        // instead.
-        if env::var_os("WSL_DISTRO_NAME").is_none() {
-            if env::var_os("DISPLAY").is_some() {
-                warn!("running as a session but DISPLAY is set, removing it");
-                unsafe { env::remove_var("DISPLAY") };
-            }
-            if env::var_os("WAYLAND_DISPLAY").is_some() {
-                warn!("running as a session but WAYLAND_DISPLAY is set, removing it");
-                unsafe { env::remove_var("WAYLAND_DISPLAY") };
-            }
-            if env::var_os("WAYLAND_SOCKET").is_some() {
-                warn!("running as a session but WAYLAND_SOCKET is set, removing it");
-                unsafe { env::remove_var("WAYLAND_SOCKET") };
-            }
-        }
-
         // Set the current desktop for xdg-desktop-portal.
         unsafe { env::set_var("XDG_CURRENT_DESKTOP", "niri") };
         // Ensure the session type is set to Wayland for xdg-autostart and Qt apps.
@@ -95,8 +67,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(subcommand) = cli.subcommand {
         match subcommand {
             Sub::Validate { config } => {
-                tracy_client::Client::start();
-
                 config_path(config).load().config?;
                 info!("config is valid");
                 return Ok(());
@@ -133,10 +103,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Needs to be done before starting Tracy, so that it applies to Tracy's threads.
     niri::utils::signals::block_early().unwrap();
-
-    // Avoid starting Tracy for the `niri msg` code path since starting/stopping Tracy is a bit
-    // slow.
-    tracy_client::Client::start();
 
     info!("starting version {}", &version());
 
@@ -195,26 +161,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("IPC listening on: {}", socket_path.to_string_lossy());
     }
 
-    // Setup xwayland-satellite integration.
-    #[cfg(feature = "xwayland")]
-    {
-        xwayland::satellite::setup(&mut state);
-        if let Some(satellite) = &state.niri.satellite {
-            let name = satellite.display_name();
-            *CHILD_DISPLAY.write().unwrap() = Some(name.to_owned());
-            unsafe { env::set_var("DISPLAY", name) };
-            info!("listening on X11 socket: {name}");
-        } else {
-            // Avoid spawning children in the host X11.
-            unsafe { env::remove_var("DISPLAY") };
-        }
-    }
-
     // Avoid spawning children in the host X11.
-    #[cfg(not(feature = "xwayland"))]
-    unsafe {
-        env::remove_var("DISPLAY")
-    };
+    unsafe { env::remove_var("DISPLAY") };
 
     if cli.session {
         // We're starting as a session. Import our variables.

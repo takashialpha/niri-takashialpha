@@ -187,16 +187,6 @@ impl Data {
     pub fn center(&self) -> Point<f64, Logical> {
         self.logical_pos + self.size.downscale(2.)
     }
-
-    #[cfg(test)]
-    fn verify_invariants(&self) {
-        let mut temp = *self;
-        temp.recompute_logical_pos();
-        assert_eq!(
-            self.logical_pos, temp.logical_pos,
-            "cached logical pos must be up to date"
-        );
-    }
 }
 
 impl<W: LayoutElement> FloatingSpace<W> {
@@ -1306,86 +1296,8 @@ impl<W: LayoutElement> FloatingSpace<W> {
         })
     }
 
-    #[cfg(test)]
-    pub fn view_size(&self) -> Size<f64, Logical> {
-        self.view_size
-    }
-
     pub fn working_area(&self) -> Rectangle<f64, Logical> {
         self.working_area
-    }
-
-    #[cfg(test)]
-    pub fn scale(&self) -> f64 {
-        self.scale
-    }
-
-    #[cfg(test)]
-    pub fn clock(&self) -> &Clock {
-        &self.clock
-    }
-
-    #[cfg(test)]
-    pub fn options(&self) -> &Rc<Options> {
-        &self.options
-    }
-
-    #[cfg(test)]
-    pub fn verify_invariants(&self) {
-        assert!(self.scale > 0.);
-        assert!(self.scale.is_finite());
-        assert_eq!(self.tiles.len(), self.data.len());
-
-        for (i, (tile, data)) in zip(&self.tiles, &self.data).enumerate() {
-            use crate::layout::SizingMode;
-
-            assert!(Rc::ptr_eq(&self.options, &tile.options));
-            assert_eq!(self.view_size, tile.view_size());
-            assert_eq!(self.clock, tile.clock);
-            assert_eq!(self.scale, tile.scale());
-            tile.verify_invariants();
-
-            if let Some(idx) = tile.floating_preset_width_idx {
-                assert!(idx < self.options.layout.preset_column_widths.len());
-            }
-            if let Some(idx) = tile.floating_preset_height_idx {
-                assert!(idx < self.options.layout.preset_window_heights.len());
-            }
-
-            assert_eq!(
-                tile.window().pending_sizing_mode(),
-                SizingMode::Normal,
-                "floating windows cannot be maximized or fullscreen"
-            );
-
-            data.verify_invariants();
-
-            let mut data2 = *data;
-            data2.update(tile);
-            data2.update_config(self.working_area);
-            assert_eq!(data, &data2, "tile data must be up to date");
-
-            for tile_below in &self.tiles[i + 1..] {
-                assert!(
-                    !tile_below.window().is_child_of(tile.window()),
-                    "children must be stacked above parents"
-                );
-            }
-        }
-
-        if let Some(id) = &self.active_window_id {
-            assert!(!self.tiles.is_empty());
-            assert!(self.contains(id), "active window must be present in tiles");
-        } else {
-            assert!(self.tiles.is_empty());
-        }
-
-        if let Some(resize) = &self.interactive_resize {
-            assert!(
-                self.contains(&resize.window),
-                "interactive resize window must be present in tiles"
-            );
-        }
     }
 }
 

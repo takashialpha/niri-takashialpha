@@ -157,7 +157,6 @@ impl ExitConfirmDialog {
             State::Showing(anim) | State::Hiding(anim) => (anim.value(), anim.clamped_value()),
             State::Visible => (1., 1.),
         };
-        let _span = tracy_client::span!("ExitConfirmDialog::render");
 
         // Can be out of range when starting from past 0. or 1. from a spring bounce.
         let clamped_value = clamped_value.clamp(0., 1.);
@@ -223,8 +222,6 @@ impl ExitConfirmDialog {
 }
 
 fn render(scale: f64) -> anyhow::Result<MemoryBuffer> {
-    let _span = tracy_client::span!("exit_confirm_dialog::render");
-
     let markup = text(true);
 
     let padding: i32 = to_physical_precise_round(scale, PADDING);

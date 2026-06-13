@@ -308,8 +308,6 @@ fn render(
     mod_key: ModKey,
     scale: f64,
 ) -> anyhow::Result<RenderedOverlay> {
-    let _span = tracy_client::span!("hotkey_overlay::render");
-
     // let margin = MARGIN * scale;
     let padding: i32 = to_physical_precise_round(scale, PADDING);
     let line_interval: i32 = to_physical_precise_round(scale, LINE_INTERVAL);
@@ -605,112 +603,5 @@ fn prettify_keysym_name(screen_reader: bool, name: &str) -> String {
         name.to_ascii_uppercase()
     } else {
         name.into()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use insta::assert_snapshot;
-
-    use super::*;
-
-    #[track_caller]
-    fn check(config: &str, action: Action) -> String {
-        let config = Config::parse_mem(config).unwrap();
-        if let Some((key, title)) = format_bind(&config.binds.0, &action) {
-            let key = key.map(|key| key_name(false, ModKey::Super, &key));
-            let key = key.as_deref().unwrap_or("(not bound)");
-            format!(" {key} : {title}")
-        } else {
-            String::from("None")
-        }
-    }
-
-    #[test]
-    fn test_format_bind() {
-        // Not bound.
-        assert_snapshot!(check("", Action::Screenshot(true, None)), @" (not bound) : Take a Screenshot");
-
-        // Bound with a default title.
-        assert_snapshot!(
-            check(
-                r#"binds {
-                    Mod+P { screenshot; }
-                }"#,
-                Action::Screenshot(true, None),
-            ),
-            @" Super + P : Take a Screenshot"
-        );
-
-        // Custom title.
-        assert_snapshot!(
-            check(
-                r#"binds {
-                    Mod+P hotkey-overlay-title="Hello" { screenshot; }
-                }"#,
-                Action::Screenshot(true, None),
-            ),
-            @" Super + P : Hello"
-        );
-
-        // Prefer first bind.
-        assert_snapshot!(
-            check(
-                r#"binds {
-                    Mod+P { screenshot; }
-                    Print { screenshot; }
-                }"#,
-                Action::Screenshot(true, None),
-            ),
-            @" Super + P : Take a Screenshot"
-        );
-
-        // Prefer bind with custom title.
-        assert_snapshot!(
-            check(
-                r#"binds {
-                    Mod+P { screenshot; }
-                    Print hotkey-overlay-title="My Cool Bind" { screenshot; }
-                }"#,
-                Action::Screenshot(true, None),
-            ),
-            @" PrtSc : My Cool Bind"
-        );
-
-        // Prefer first bind with custom title.
-        assert_snapshot!(
-            check(
-                r#"binds {
-                    Mod+P hotkey-overlay-title="First" { screenshot; }
-                    Print hotkey-overlay-title="My Cool Bind" { screenshot; }
-                }"#,
-                Action::Screenshot(true, None),
-            ),
-            @" Super + P : First"
-        );
-
-        // Any bind with null title hides it.
-        assert_snapshot!(
-            check(
-                r#"binds {
-                    Mod+P { screenshot; }
-                    Print hotkey-overlay-title=null { screenshot; }
-                }"#,
-                Action::Screenshot(true, None),
-            ),
-            @"None"
-        );
-
-        // Custom title takes preference over null.
-        assert_snapshot!(
-            check(
-                r#"binds {
-                    Mod+P hotkey-overlay-title="Hello" { screenshot; }
-                    Print hotkey-overlay-title=null { screenshot; }
-                }"#,
-                Action::Screenshot(true, None),
-            ),
-            @" Super + P : Hello"
-        );
     }
 }

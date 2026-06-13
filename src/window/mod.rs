@@ -181,8 +181,6 @@ impl<'a> WindowRef<'a> {
 
 impl ResolvedWindowRules {
     pub fn compute(rules: &[WindowRule], window: WindowRef, is_at_startup: bool) -> Self {
-        let _span = tracy_client::span!("ResolvedWindowRules::compute");
-
         let mut resolved = ResolvedWindowRules::default();
 
         with_toplevel_role(window.toplevel(), |role| {

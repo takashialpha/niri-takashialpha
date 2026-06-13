@@ -407,8 +407,6 @@ impl Mapped {
 
     /// Renders a snapshot of the window without popups.
     fn render_snapshot(&self, renderer: &mut GlesRenderer) -> LayoutElementRenderSnapshot {
-        let _span = tracy_client::span!("Mapped::render_snapshot");
-
         let size = self.size().to_f64();
 
         let mut buffer = self.block_out_buffer.borrow_mut();

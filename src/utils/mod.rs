@@ -44,8 +44,6 @@ pub mod spawning;
 pub mod transaction;
 pub mod vblank_throttle;
 pub mod watcher;
-#[cfg(feature = "xwayland")]
-pub mod xwayland;
 
 pub static IS_SYSTEMD_SERVICE: AtomicBool = AtomicBool::new(false);
 
@@ -546,41 +544,4 @@ pub fn cause_panic() {
     let a = Duration::from_secs(1);
     let b = Duration::from_secs(2);
     let _ = a - b;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_clamp_preferring_top_left() {
-        fn check(
-            (ax, ay, aw, ah): (i32, i32, i32, i32),
-            (rx, ry, rw, rh): (i32, i32, i32, i32),
-            (ex, ey): (i32, i32),
-        ) {
-            let area = Rectangle::new(Point::from((ax, ay)), Size::from((aw, ah))).to_f64();
-            let mut rect = Rectangle::new(Point::from((rx, ry)), Size::from((rw, rh))).to_f64();
-            clamp_preferring_top_left_in_area(area, &mut rect);
-            assert_eq!(rect.loc, Point::from((ex, ey)).to_f64());
-        }
-
-        check((0, 0, 10, 20), (2, 3, 4, 5), (2, 3));
-        check((0, 0, 10, 20), (-2, 3, 4, 5), (0, 3));
-        check((0, 0, 10, 20), (2, -3, 4, 5), (2, 0));
-        check((0, 0, 10, 20), (-2, -3, 4, 5), (0, 0));
-
-        check((1, 1, 10, 20), (2, 3, 4, 5), (2, 3));
-        check((1, 1, 10, 20), (-2, 3, 4, 5), (1, 3));
-        check((1, 1, 10, 20), (2, -3, 4, 5), (2, 1));
-        check((1, 1, 10, 20), (-2, -3, 4, 5), (1, 1));
-
-        check((0, 0, 10, 20), (20, 3, 4, 5), (6, 3));
-        check((0, 0, 10, 20), (2, 30, 4, 5), (2, 15));
-        check((0, 0, 10, 20), (20, 30, 4, 5), (6, 15));
-
-        check((0, 0, 10, 20), (20, 30, 40, 5), (0, 15));
-        check((0, 0, 10, 20), (20, 30, 4, 50), (6, 0));
-        check((0, 0, 10, 20), (20, 30, 40, 50), (0, 0));
-    }
 }

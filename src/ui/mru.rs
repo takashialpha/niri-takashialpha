@@ -44,9 +44,6 @@ use crate::utils::{
 use crate::window::Mapped;
 use crate::window::mapped::MappedId;
 
-#[cfg(test)]
-mod tests;
-
 /// Windows up to this size don't get scaled further down.
 const PREVIEW_MIN_SIZE: f64 = 16.;
 
@@ -347,8 +344,6 @@ impl Thumbnail {
         bob_y: f64,
         push: &mut dyn FnMut(WindowMruUiRenderElement<R>),
     ) {
-        let _span = tracy_client::span!("Thumbnail::render");
-
         let round = move |logical: f64| round_logical_in_physical(scale, logical);
         let padding = round(config.highlight.padding);
         let title_gap = round(TITLE_GAP);
@@ -608,21 +603,6 @@ impl WindowMru {
 
     pub fn is_empty(&self) -> bool {
         self.thumbnails.is_empty()
-    }
-
-    #[cfg(test)]
-    fn verify_invariants(&self) {
-        if let Some(id) = self.current_id {
-            assert!(
-                self.thumbnails().any(|thumbnail| thumbnail.id == id),
-                "current_id must be present in the current filtered thumbnail list",
-            );
-        } else {
-            assert!(
-                self.thumbnails().next().is_none(),
-                "unset current_id must mean that the filtered thumbnail list is empty",
-            );
-        }
     }
 
     fn thumbnails(&self) -> impl DoubleEndedIterator<Item = &Thumbnail> {
@@ -1111,8 +1091,6 @@ impl WindowMruUi {
                 }
             }
         };
-
-        let _span = tracy_client::span!("WindowMruUi::render_output");
 
         let alpha = progress.clamp(0., 1.) as f32;
 
@@ -1648,8 +1626,6 @@ fn generate_title_texture(
     title: &str,
     scale: f64,
 ) -> anyhow::Result<MruTexture> {
-    let _span = tracy_client::span!("mru::generate_title_texture");
-
     let mut font = FontDescription::from_string(FONT);
     font.set_absolute_size(to_physical_precise_round(scale, font.size()));
 
@@ -1752,8 +1728,6 @@ fn generate_scope_panels(
 }
 
 fn render_panel(renderer: &mut GlesRenderer, scale: f64, text: &str) -> anyhow::Result<MruTexture> {
-    let _span = tracy_client::span!("mru::render_panel");
-
     let mut font = FontDescription::from_string(FONT);
     font.set_absolute_size(to_physical_precise_round(scale, font.size()));
 

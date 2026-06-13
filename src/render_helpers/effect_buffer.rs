@@ -160,8 +160,6 @@ impl EffectBuffer {
     }
 
     fn prepare_offscreen(&mut self, renderer: &mut GlesRenderer) -> anyhow::Result<()> {
-        let _span = tracy_client::span!("EffectBuffer::prepare_offscreen");
-
         // Check if we need to create or recreate the texture.
         let size_string;
         let mut reason = "";
@@ -197,8 +195,6 @@ impl EffectBuffer {
             offscreen
         } else {
             trace!("creating new offscreen texture: {reason}");
-            let span = tracy_client::span!("creating effect offscreen texture");
-            span.emit_text(reason);
 
             let texture: GlesTexture = renderer
                 .create_buffer(Fourcc::Abgr8888, self.size)

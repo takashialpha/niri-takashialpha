@@ -15,9 +15,6 @@ niri-ipc = { version = "26.4.0", path = "../niri-ipc" }
 regex = "1.12"
 smithay = { workspace = true, features = ["backend_libinput"] }
 tracing.workspace = true
-tracy-client.workspace = true
 
 [dev-dependencies]
-insta.workspace = true
 pretty_assertions = "1.4"
-diff = "0.1"

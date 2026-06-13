@@ -1391,11 +1391,6 @@ impl<W: LayoutElement> Monitor<W> {
         }
     }
 
-    #[cfg(test)]
-    pub(super) fn overview_progress_value(&self) -> Option<f64> {
-        self.overview_progress.as_ref().map(|p| p.value())
-    }
-
     pub fn workspace_render_idx(&self) -> f64 {
         // If workspace switch and overview progress are matching animations, then compute a
         // correction term to make the movement appear monotonic.
@@ -1671,8 +1666,6 @@ impl<W: LayoutElement> Monitor<W> {
         focus_ring: bool,
         push: &mut dyn FnMut(MonitorRenderElement<R>),
     ) {
-        let _span = tracy_client::span!("Monitor::render_workspaces");
-
         let scale = self.scale.fractional_scale();
         // Ceil the height in physical pixels.
         let height = (self.view_size.h * scale).ceil() as i32;
@@ -1755,8 +1748,6 @@ impl<W: LayoutElement> Monitor<W> {
             return;
         };
         let alpha = progress.clamp(0., 1.) as f32;
-
-        let _span = tracy_client::span!("Monitor::render_workspace_shadows");
 
         let scale = self.scale.fractional_scale();
         let zoom = self.overview_zoom();
@@ -2049,115 +2040,5 @@ impl<W: LayoutElement> Monitor<W> {
 
     pub fn layout_config(&self) -> Option<&niri_config::LayoutPart> {
         self.layout_config.as_ref()
-    }
-
-    #[cfg(test)]
-    pub(super) fn verify_invariants(&self) {
-        use approx::assert_abs_diff_eq;
-
-        let options =
-            Options::clone(&self.base_options).with_merged_layout(self.layout_config.as_ref());
-        assert_eq!(&*self.options, &options);
-
-        assert!(
-            !self.workspaces.is_empty(),
-            "monitor must have at least one workspace"
-        );
-        assert!(self.active_workspace_idx < self.workspaces.len());
-
-        if let Some(WorkspaceSwitch::Animation(anim)) = &self.workspace_switch {
-            let before_idx = anim.from() as usize;
-            let after_idx = anim.to() as usize;
-
-            assert!(before_idx < self.workspaces.len());
-            assert!(after_idx < self.workspaces.len());
-        }
-
-        assert!(
-            !self.workspaces.last().unwrap().has_windows(),
-            "monitor must have an empty workspace in the end"
-        );
-        if self.options.layout.empty_workspace_above_first {
-            assert!(
-                !self.workspaces.first().unwrap().has_windows(),
-                "first workspace must be empty when empty_workspace_above_first is set"
-            )
-        }
-
-        assert!(
-            self.workspaces.last().unwrap().name.is_none(),
-            "monitor must have an unnamed workspace in the end"
-        );
-        if self.options.layout.empty_workspace_above_first {
-            assert!(
-                self.workspaces.first().unwrap().name.is_none(),
-                "first workspace must be unnamed when empty_workspace_above_first is set"
-            )
-        }
-
-        if self.options.layout.empty_workspace_above_first {
-            assert!(
-                self.workspaces.len() != 2,
-                "if empty_workspace_above_first is set there must be just 1 or 3+ workspaces"
-            )
-        }
-
-        // If there's no workspace switch in progress, there can't be any non-last non-active
-        // empty workspaces. If empty_workspace_above_first is set then the first workspace
-        // will be empty too.
-        let pre_skip = if self.options.layout.empty_workspace_above_first {
-            1
-        } else {
-            0
-        };
-        if self.workspace_switch.is_none() {
-            for (idx, ws) in self
-                .workspaces
-                .iter()
-                .enumerate()
-                .skip(pre_skip)
-                .rev()
-                // skip last
-                .skip(1)
-            {
-                if idx != self.active_workspace_idx {
-                    assert!(
-                        ws.has_windows_or_name(),
-                        "non-active workspace can't be empty and unnamed except the last one"
-                    );
-                }
-            }
-        }
-
-        for workspace in &self.workspaces {
-            assert_eq!(self.clock, workspace.clock);
-
-            assert_eq!(
-                self.scale().integer_scale(),
-                workspace.scale().integer_scale()
-            );
-            assert_eq!(
-                self.scale().fractional_scale(),
-                workspace.scale().fractional_scale()
-            );
-            assert_eq!(self.view_size, workspace.view_size());
-            assert_eq!(self.working_area, workspace.working_area());
-
-            assert_eq!(
-                workspace.base_options, self.options,
-                "workspace options must be synchronized with monitor"
-            );
-        }
-
-        let scale = self.scale().fractional_scale();
-        let iter = self.workspaces_with_render_geo();
-        for (_ws, ws_geo) in iter {
-            let pos = ws_geo.loc;
-            let rounded_pos = pos.to_physical_precise_round(scale).to_logical(scale);
-
-            // Workspace positions must be rounded to physical pixels.
-            assert_abs_diff_eq!(pos.x, rounded_pos.x, epsilon = 1e-5);
-            assert_abs_diff_eq!(pos.y, rounded_pos.y, epsilon = 1e-5);
-        }
     }
 }

@@ -162,39 +162,3 @@ pub struct EnvironmentVariable {
     #[knus(argument)]
     pub value: Option<String>,
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct XwaylandSatellite {
-    pub off: bool,
-    pub path: String,
-}
-
-impl Default for XwaylandSatellite {
-    fn default() -> Self {
-        Self {
-            off: false,
-            path: String::from("xwayland-satellite"),
-        }
-    }
-}
-
-#[derive(knus::Decode, Debug, Clone, PartialEq, Eq)]
-pub struct XwaylandSatellitePart {
-    #[knus(child)]
-    pub off: bool,
-    #[knus(child)]
-    pub on: bool,
-    #[knus(child, unwrap(argument))]
-    pub path: Option<String>,
-}
-
-impl MergeWith<XwaylandSatellitePart> for XwaylandSatellite {
-    fn merge_with(&mut self, part: &XwaylandSatellitePart) {
-        self.off |= part.off;
-        if part.on {
-            self.off = false;
-        }
-
-        merge_clone!((self, part), path);
-    }
-}

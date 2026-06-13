@@ -157,8 +157,6 @@ impl CursorManager {
     /// Load the cursor with the given `name` from the file system picking the closest
     /// one to the given `size`.
     fn load_xcursor(theme: &CursorTheme, name: &str, size: i32) -> anyhow::Result<XCursor> {
-        let _span = tracy_client::span!("load_xcursor");
-
         let path = theme
             .load_icon(name)
             .ok_or_else(|| anyhow!("no default icon"))?;

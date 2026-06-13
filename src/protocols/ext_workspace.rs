@@ -82,8 +82,6 @@ pub struct ExtWorkspaceGlobalData {
 }
 
 pub fn refresh(state: &mut State) {
-    let _span = tracy_client::span!("ext_workspace::refresh");
-
     let protocol_state = &mut state.niri.ext_workspace_state;
 
     let mut changed = false;

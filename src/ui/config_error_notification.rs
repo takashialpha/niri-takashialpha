@@ -179,8 +179,6 @@ fn render(
     scale: f64,
     created_path: Option<&Path>,
 ) -> anyhow::Result<TextureBuffer<GlesTexture>> {
-    let _span = tracy_client::span!("config_error_notification::render");
-
     let padding: i32 = to_physical_precise_round(scale, PADDING);
 
     let mut text = error_text(true);

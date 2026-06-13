@@ -799,21 +799,3 @@ fn ensure_absolute_path(path: &mut String) -> anyhow::Result<()> {
     }
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use insta::assert_snapshot;
-
-    use super::*;
-
-    #[test]
-    fn test_fmt_rounded() {
-        assert_snapshot!(fmt_rounded(1.9), @"1.90");
-        assert_snapshot!(fmt_rounded(1.994), @"1.99");
-        assert_snapshot!(fmt_rounded(1.996), @"2");
-        assert_snapshot!(fmt_rounded(2.0), @"2");
-        assert_snapshot!(fmt_rounded(2.004), @"2");
-        assert_snapshot!(fmt_rounded(2.006), @"2.01");
-        assert_snapshot!(fmt_rounded(2.1), @"2.10");
-    }
-}

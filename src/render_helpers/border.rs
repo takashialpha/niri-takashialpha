@@ -288,7 +288,6 @@ impl RenderElement<GlesRenderer> for BorderRenderElement {
         opaque_regions: &[Rectangle<i32, Physical>],
         cache: Option<&UserDataMap>,
     ) -> Result<(), GlesError> {
-        let _span = tracy_client::span!("BorderRenderElement::draw");
         frame.with_gpu_span(gpu_span_location!("BorderRenderElement::draw"), |frame| {
             RenderElement::<GlesRenderer>::draw(
                 &self.inner,

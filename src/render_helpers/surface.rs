@@ -17,8 +17,6 @@ pub fn render_snapshot_from_surface_tree(
     location: Point<f64, Logical>,
     storage: &mut Vec<BakedBuffer<TextureBuffer<GlesTexture>>>,
 ) {
-    let _span = tracy_client::span!("render_snapshot_from_surface_tree");
-
     with_surface_tree_downward(
         surface,
         location,
@@ -94,8 +92,6 @@ pub fn push_elements_from_surface_tree<R>(
     R: Renderer + ImportAll,
     R::TextureId: Clone + 'static,
 {
-    let _span = tracy_client::span!("push_elements_from_surface_tree");
-
     let location = location.to_f64();
 
     with_surface_tree_downward(

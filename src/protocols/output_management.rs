@@ -110,8 +110,7 @@ impl OutputManagementManagerState {
                     }
                 }
 
-                // Winit and virtual outputs can change modes; on a TTY custom modes can add/remove
-                // a mode.
+                // Virtual outputs can change modes; on a TTY custom modes can add/remove a mode.
                 let modes_changed = old.modes != conf.modes;
                 if modes_changed {
                     changed = true;

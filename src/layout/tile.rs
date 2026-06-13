@@ -1026,8 +1026,6 @@ impl<W: LayoutElement> Tile<W> {
         focus_ring: bool,
         push: &mut dyn FnMut(TileRenderElement<R>),
     ) {
-        let _span = tracy_client::span!("Tile::render_inner");
-
         let scale = Scale::from(self.scale);
         let fullscreen_progress = self.fullscreen_progress();
         let expanded_progress = self.expanded_progress();
@@ -1318,8 +1316,6 @@ impl<W: LayoutElement> Tile<W> {
         focus_ring: bool,
         push: &mut dyn FnMut(TileRenderElement<R>),
     ) {
-        let _span = tracy_client::span!("Tile::render");
-
         let scale = Scale::from(self.scale);
 
         let tile_alpha = self
@@ -1409,8 +1405,6 @@ impl<W: LayoutElement> Tile<W> {
         xray_has_blocked_out_layers: bool,
         xray_pos: XrayPos,
     ) -> TileRenderSnapshot {
-        let _span = tracy_client::span!("Tile::render_snapshot");
-
         let mut contents = Vec::new();
         self.render(
             RenderCtx {
@@ -1532,23 +1526,5 @@ impl<W: LayoutElement> Tile<W> {
 
     pub fn options(&self) -> &Rc<Options> {
         &self.options
-    }
-
-    #[cfg(test)]
-    pub fn view_size(&self) -> Size<f64, Logical> {
-        self.view_size
-    }
-
-    #[cfg(test)]
-    pub fn verify_invariants(&self) {
-        use approx::assert_abs_diff_eq;
-
-        assert_eq!(self.sizing_mode, self.window.sizing_mode());
-
-        let scale = self.scale;
-        let size = self.tile_size();
-        let rounded = size.to_physical_precise_round(scale).to_logical(scale);
-        assert_abs_diff_eq!(size.w, rounded.w, epsilon = 1e-5);
-        assert_abs_diff_eq!(size.h, rounded.h, epsilon = 1e-5);
     }
 }

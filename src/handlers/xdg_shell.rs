@@ -1020,8 +1020,6 @@ delegate_xdg_foreign!(State);
 
 impl State {
     pub fn send_initial_configure(&mut self, toplevel: &ToplevelSurface) {
-        let _span = tracy_client::span!("State::send_initial_configure");
-
         let Some(unmapped) = self.niri.unmapped_windows.get_mut(toplevel.wl_surface()) else {
             error!("window must be present in unmapped_windows in send_initial_configure()");
             return;
@@ -1226,8 +1224,6 @@ impl State {
     }
 
     pub fn unconstrain_popup(&self, popup: &PopupKind) {
-        let _span = tracy_client::span!("Niri::unconstrain_popup");
-
         // Popups with a NULL parent will get repositioned in their respective protocol handlers
         // (i.e. layer-shell).
         let Ok(root) = find_popup_root_surface(popup) else {
@@ -1340,8 +1336,6 @@ impl State {
     }
 
     pub fn update_reactive_popups(&self, window: &Window) {
-        let _span = tracy_client::span!("Niri::update_reactive_popups");
-
         for (popup, _) in PopupManager::popups_for_surface(
             window.toplevel().expect("no x11 support").wl_surface(),
         ) {
@@ -1433,7 +1427,6 @@ fn unconstrain_with_padding(
 
 pub fn add_mapped_toplevel_pre_commit_hook(toplevel: &ToplevelSurface) -> HookId {
     add_pre_commit_hook::<State, _>(toplevel.wl_surface(), move |state, _dh, surface| {
-        let _span = tracy_client::span!("mapped toplevel pre-commit");
         let span =
             trace_span!("toplevel pre-commit", surface = %surface.id(), serial = Empty).entered();
 

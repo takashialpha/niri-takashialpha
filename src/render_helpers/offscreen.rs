@@ -75,8 +75,6 @@ impl OffscreenBuffer {
         scale: Scale<f64>,
         elements: &[impl RenderElement<GlesRenderer>],
     ) -> anyhow::Result<(OffscreenRenderElement, SyncPoint, OffscreenData)> {
-        let _span = tracy_client::span!("OffscreenBuffer::render");
-
         let geo = encompassing_geo(scale, elements.iter());
         let elements = Vec::from_iter(elements.iter().map(|ele| {
             RelocateRenderElement::from_element(ele, geo.loc.upscale(-1), Relocate::Relative)
@@ -128,8 +126,6 @@ impl OffscreenBuffer {
             inner
         } else {
             trace!("creating new texture: {reason}");
-            let span = tracy_client::span!("creating offscreen buffer");
-            span.emit_text(reason);
 
             let texture: GlesTexture = renderer
                 .create_buffer(Fourcc::Abgr8888, src_size)

@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use std::{env, mem, thread};
+use std::{mem, thread};
 
 use _server_decoration::server::org_kde_kwin_server_decoration_manager::Mode as KdeDecorationsMode;
 use anyhow::{Context, bail, ensure};
@@ -102,8 +102,6 @@ use smithay::wayland::shell::wlr_layer::{self, Layer, WlrLayerShellState};
 use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shm::ShmState;
-#[cfg(test)]
-use smithay::wayland::single_pixel_buffer::SinglePixelBufferState;
 use smithay::wayland::socket::ListeningSocketSource;
 use smithay::wayland::tablet_manager::TabletManagerState;
 use smithay::wayland::text_input::TextInputManagerState;
@@ -115,7 +113,7 @@ use wayland_server::protocol::wl_output::WlOutput;
 
 use crate::animation::Clock;
 use crate::backend::tty::SurfaceDmabufFeedback;
-use crate::backend::{Backend, Headless, RenderResult, Tty, Winit};
+use crate::backend::{Backend, Headless, RenderResult, Tty};
 use crate::cursor::{CursorManager, CursorTextureCache, RenderCursor, XCursor};
 use crate::frame_clock::FrameClock;
 use crate::handlers::{XDG_ACTIVATION_TOKEN_TIMEOUT, configure_lock_surface};
@@ -138,8 +136,6 @@ use crate::niri_render_elements;
 use crate::protocols::ext_workspace::{self, ExtWorkspaceManagerState};
 use crate::protocols::foreign_toplevel::{self, ForeignToplevelManagerState};
 use crate::protocols::gamma_control::GammaControlManagerState;
-#[cfg(feature = "xwayland")]
-use crate::protocols::mutter_x11_interop::MutterX11InteropManagerState;
 use crate::protocols::output_management::OutputManagementManagerState;
 use crate::protocols::screencopy::{Screencopy, ScreencopyBuffer, ScreencopyManagerState};
 use crate::protocols::virtual_pointer::VirtualPointerManagerState;
@@ -162,13 +158,9 @@ use crate::ui::mru::{MruCloseRequest, WindowMruUi, WindowMruUiRenderElement};
 use crate::ui::screen_transition::{self, ScreenTransition};
 use crate::ui::screenshot_ui::{OutputScreenshot, ScreenshotUi, ScreenshotUiRenderElement};
 use crate::utils::scale::{closest_representable_scale, guess_monitor_scale};
-#[cfg(feature = "xwayland")]
-use crate::utils::spawning::CHILD_DISPLAY;
 use crate::utils::spawning::CHILD_ENV;
 use crate::utils::vblank_throttle::VBlankThrottle;
 use crate::utils::watcher::Watcher;
-#[cfg(feature = "xwayland")]
-use crate::utils::xwayland::{self, satellite::Satellite};
 use crate::utils::{
     center, center_f64, expand_home, get_monotonic_time, ipc_transform_to_smithay, is_mapped,
     logical_output, make_screenshot_path, output_matches_name, output_size, panel_orientation,
@@ -303,17 +295,6 @@ pub struct Niri {
     pub security_context_state: SecurityContextState,
     pub gamma_control_manager_state: GammaControlManagerState,
     pub activation_state: XdgActivationState,
-    #[cfg(feature = "xwayland")]
-    pub mutter_x11_interop_state: MutterX11InteropManagerState,
-
-    // This will not work as is outside of tests, so it is gated with #[cfg(test)] for now. In
-    // particular, shaders will need to learn about the single pixel buffer. Also, it must be
-    // verified that a black single-pixel-buffer background lets the foreground surface to be
-    // unredirected.
-    //
-    // https://github.com/niri-wm/niri/issues/619
-    #[cfg(test)]
-    pub single_pixel_buffer_state: SinglePixelBufferState,
 
     pub seat: Seat<State>,
     /// Scancodes of the keys to suppress.
@@ -395,9 +376,6 @@ pub struct Niri {
 
     pub ipc_server: Option<IpcServer>,
     pub ipc_outputs_changed: bool,
-
-    #[cfg(feature = "xwayland")]
-    pub satellite: Option<Satellite>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -692,20 +670,11 @@ impl State {
         create_wayland_socket: bool,
         is_session_instance: bool,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let _span = tracy_client::span!("State::new");
-
         let config = Rc::new(RefCell::new(config));
-
-        let has_display = env::var_os("WAYLAND_DISPLAY").is_some()
-            || env::var_os("WAYLAND_SOCKET").is_some()
-            || env::var_os("DISPLAY").is_some();
 
         let mut backend = if headless {
             let headless = Headless::new();
             Backend::Headless(headless)
-        } else if has_display {
-            let winit = Winit::new(config.clone(), event_loop.clone())?;
-            Backend::Winit(winit)
         } else {
             let tty = Tty::new(config.clone(), event_loop.clone())
                 .context("error initializing the TTY backend")?;
@@ -736,8 +705,6 @@ impl State {
     }
 
     pub fn refresh_and_flush_clients(&mut self) {
-        let _span = tracy_client::span!("State::refresh_and_flush_clients");
-
         self.refresh();
 
         // Advance animations to the current time (not target render time) before rendering outputs
@@ -749,7 +716,6 @@ impl State {
         self.niri.redraw_queued_outputs(&mut self.backend);
 
         {
-            let _span = tracy_client::span!("flush_clients");
             self.niri.display_handle.flush_clients().unwrap();
         }
 
@@ -772,8 +738,6 @@ impl State {
     }
 
     fn refresh(&mut self) {
-        let _span = tracy_client::span!("State::refresh");
-
         // Handle commits for surfaces whose blockers cleared this cycle. This should happen before
         // layout.refresh() since this is where these surfaces handle commits.
         self.notify_blocker_cleared();
@@ -1001,8 +965,6 @@ impl State {
     }
 
     pub fn refresh_pointer_contents(&mut self) {
-        let _span = tracy_client::span!("Niri::refresh_pointer_contents");
-
         let pointer = &self.niri.seat.get_pointer().unwrap();
         let location = pointer.current_location();
 
@@ -1033,8 +995,6 @@ impl State {
     }
 
     pub fn update_pointer_contents(&mut self) -> bool {
-        let _span = tracy_client::span!("Niri::update_pointer_contents");
-
         let pointer = &self.niri.seat.get_pointer().unwrap();
         let location = pointer.current_location();
         let mut under = match self.niri.pointer_visibility {
@@ -1397,8 +1357,6 @@ impl State {
     }
 
     pub fn reload_config(&mut self, config: Result<Config, ()>) {
-        let _span = tracy_client::span!("State::reload_config");
-
         let mut config = match config {
             Ok(config) => config,
             Err(()) => {
@@ -1449,8 +1407,6 @@ impl State {
         let mut shaders_changed = false;
         let mut cursor_inactivity_timeout_changed = false;
         let mut recent_windows_changed = false;
-        #[cfg(feature = "xwayland")]
-        let mut xwls_changed = false;
         let mut old_config = self.niri.config.borrow_mut();
 
         // Reload the cursor.
@@ -1579,11 +1535,6 @@ impl State {
             recent_windows_changed = true;
         }
 
-        #[cfg(feature = "xwayland")]
-        if config.xwayland_satellite != old_config.xwayland_satellite {
-            xwls_changed = true;
-        }
-
         *old_config = config;
 
         if let Some(outputs) = preserved_output_config {
@@ -1662,31 +1613,6 @@ impl State {
             self.niri.window_mru_ui.update_config();
         }
 
-        #[cfg(feature = "xwayland")]
-        if xwls_changed {
-            // If xwl-s was previously working and is now off, we don't try to kill it or stop
-            // watching the sockets, for simplicity's sake.
-            let was_working = self.niri.satellite.is_some();
-
-            // Try to start, or restart in case the user corrected the path or something.
-            xwayland::satellite::setup(self);
-
-            let config = self.niri.config.borrow();
-            let display_name = (!config.xwayland_satellite.off)
-                .then_some(self.niri.satellite.as_ref())
-                .flatten()
-                .map(|satellite| satellite.display_name().to_owned());
-
-            if let Some(name) = &display_name
-                && !was_working
-            {
-                info!("listening on X11 socket: {name}");
-            }
-
-            // This won't change the systemd environment, but oh well.
-            *CHILD_DISPLAY.write().unwrap() = display_name;
-        }
-
         // Can't really update xdg-decoration settings since we have to hide the globals for CSD
         // due to the SDL2 bug... I don't imagine clients are prepared for the xdg-decoration
         // global suddenly appearing? Either way, right now it's live-reloaded in a sense that new
@@ -1714,14 +1640,10 @@ impl State {
                 });
             let scale = closest_representable_scale(scale.clamp(0.1, 10.));
 
-            let mut transform = panel_orientation(output)
+            let transform = panel_orientation(output)
                 + config
                     .map(|c| ipc_transform_to_smithay(c.transform))
                     .unwrap_or(Transform::Normal);
-            // FIXME: fix winit damage on other transforms.
-            if name.connector == "winit" {
-                transform = Transform::Flipped180;
-            }
 
             if output.current_scale().fractional_scale() != scale
                 || output.current_transform() != transform
@@ -1917,8 +1839,6 @@ impl State {
         }
         self.niri.ipc_outputs_changed = false;
 
-        let _span = tracy_client::span!("State::refresh_ipc_outputs");
-
         for ipc_output in self.backend.ipc_outputs().lock().unwrap().values_mut() {
             let logical = self
                 .niri
@@ -2077,8 +1997,6 @@ impl Niri {
         create_wayland_socket: bool,
         is_session_instance: bool,
     ) -> Self {
-        let _span = tracy_client::span!("Niri::new");
-
         let (executor, scheduler) = calloop::futures::executor().unwrap();
         event_loop.insert_source(executor, |_, _, _| ()).unwrap();
 
@@ -2208,13 +2126,6 @@ impl Niri {
             )
             .unwrap();
 
-        #[cfg(feature = "xwayland")]
-        let mutter_x11_interop_state =
-            MutterX11InteropManagerState::new::<State, _>(&display_handle, move |_| true);
-
-        #[cfg(test)]
-        let single_pixel_buffer_state = SinglePixelBufferState::new::<State>(&display_handle);
-
         let mut seat: Seat<State> = seat_state.new_wl_seat(&display_handle, backend.seat_name());
         let keyboard = match seat.add_keyboard(
             config_.input.keyboard.xkb.to_xkb_config(),
@@ -2313,7 +2224,6 @@ impl Niri {
             .insert_source(
                 Timer::from_duration(Duration::from_secs(60)),
                 |_, _, state| {
-                    let _span = tracy_client::span!("startup timeout");
                     state.niri.is_at_startup = false;
                     state.niri.recompute_window_rules();
                     state.niri.recompute_layer_rules();
@@ -2399,10 +2309,6 @@ impl Niri {
             security_context_state,
             gamma_control_manager_state,
             activation_state,
-            #[cfg(feature = "xwayland")]
-            mutter_x11_interop_state,
-            #[cfg(test)]
-            single_pixel_buffer_state,
 
             seat,
             keyboard_focus: KeyboardFocus::Layout { surface: None },
@@ -2454,9 +2360,6 @@ impl Niri {
 
             ipc_server,
             ipc_outputs_changed: false,
-
-            #[cfg(feature = "xwayland")]
-            satellite: None,
         };
 
         niri.reset_pointer_inactivity_timer();
@@ -2487,8 +2390,6 @@ impl Niri {
 
     /// Repositions all outputs, optionally adding a new output.
     pub fn reposition_outputs(&mut self, new_output: Option<&Output>) {
-        let _span = tracy_client::span!("Niri::reposition_outputs");
-
         #[derive(Debug)]
         struct Data {
             output: Output,
@@ -2623,7 +2524,7 @@ impl Niri {
         });
         let scale = closest_representable_scale(scale.clamp(0.1, 10.));
 
-        let mut transform = panel_orientation(&output)
+        let transform = panel_orientation(&output)
             + c.map(|c| ipc_transform_to_smithay(c.transform))
                 .unwrap_or(Transform::Normal);
 
@@ -2632,11 +2533,6 @@ impl Niri {
             .unwrap_or(config.overview.backdrop_color)
             .to_array_unpremul();
         backdrop_color[3] = 1.;
-
-        // FIXME: fix winit damage on other transforms.
-        if name.connector == "winit" {
-            transform = Transform::Flipped180;
-        }
 
         let mut layout_config = c.and_then(|c| c.layout.clone());
         // Support the deprecated non-layout background-color key.
@@ -3475,8 +3371,6 @@ impl Niri {
     }
 
     pub fn redraw_queued_outputs(&mut self, backend: &mut Backend) {
-        let _span = tracy_client::span!("Niri::redraw_queued_outputs");
-
         while let Some((output, _)) = self.output_state.iter().find(|(_, state)| {
             matches!(
                 state.redraw_state,
@@ -3495,7 +3389,6 @@ impl Niri {
         output: &Output,
         push: &mut dyn FnMut(PointerRenderElements<R>),
     ) {
-        let _span = tracy_client::span!("Niri::render_pointer");
         let output_scale = output.current_scale();
         let output_pos = self.global_space.output_geometry(output).unwrap().loc;
 
@@ -3634,8 +3527,6 @@ impl Niri {
         if !self.pointer_visibility.is_visible() {
             return;
         }
-
-        let _span = tracy_client::span!("Niri::refresh_pointer_outputs");
 
         // Check whether we need to draw the tablet cursor or the regular cursor.
         let pointer_pos = self
@@ -3797,8 +3688,6 @@ impl Niri {
     }
 
     pub fn refresh_idle_inhibit(&mut self) {
-        let _span = tracy_client::span!("Niri::refresh_idle_inhibit");
-
         self.idle_inhibiting_surfaces.retain(|s| s.is_alive());
 
         let is_inhibited = self.is_fdo_idle_inhibited.load(Ordering::SeqCst)
@@ -3811,8 +3700,6 @@ impl Niri {
     }
 
     pub fn refresh_window_states(&mut self) {
-        let _span = tracy_client::span!("Niri::refresh_window_states");
-
         let config = self.config.borrow();
         self.layout.with_windows_mut(|mapped, _output| {
             mapped.update_tiled_state(config.prefer_no_csd);
@@ -3821,8 +3708,6 @@ impl Niri {
     }
 
     pub fn refresh_window_rules(&mut self) {
-        let _span = tracy_client::span!("Niri::refresh_window_rules");
-
         let config = self.config.borrow();
         let window_rules = &config.window_rules;
 
@@ -3856,8 +3741,6 @@ impl Niri {
     }
 
     pub fn advance_animations(&mut self) {
-        let _span = tracy_client::span!("Niri::advance_animations");
-
         self.layout.advance_animations();
         self.config_error_notification.advance_animations();
         self.exit_confirm_dialog.advance_animations();
@@ -3972,8 +3855,6 @@ impl Niri {
         include_pointer: bool,
         push: &mut dyn FnMut(OutputRenderElements<R>),
     ) {
-        let _span = tracy_client::span!("Niri::render");
-
         if ctx.target == RenderTarget::Output
             && let Some(preview) = self.config.borrow().debug.preview_render
         {
@@ -4241,8 +4122,6 @@ impl Niri {
     }
 
     pub fn fill_xray_elements(&self, mut ctx: RenderCtx<GlesRenderer>, output: &Output) {
-        let _span = tracy_client::span!("Niri::fill_xray_elements");
-
         // Make sure the xrayed elements themselves cannot use xray by mistake.
         ctx.xray = None;
 
@@ -4382,8 +4261,6 @@ impl Niri {
     }
 
     fn redraw(&mut self, backend: &mut Backend, output: &Output) {
-        let _span = tracy_client::span!("Niri::redraw");
-
         // Verify our invariant.
         let state = self.output_state.get_mut(output).unwrap();
         assert!(matches!(
@@ -4499,8 +4376,6 @@ impl Niri {
     }
 
     pub fn refresh_on_demand_vrr(&mut self, backend: &mut Backend, output: &Output) {
-        let _span = tracy_client::span!("Niri::refresh_on_demand_vrr");
-
         let name = output.user_data().get::<OutputName>().unwrap();
         let on_demand = self
             .config
@@ -4722,8 +4597,6 @@ impl Niri {
         feedback: &SurfaceDmabufFeedback,
         render_element_states: &RenderElementStates,
     ) {
-        let _span = tracy_client::span!("Niri::send_dmabuf_feedbacks");
-
         // We can unconditionally send the current output's feedback to regular and layer-shell
         // surfaces, as they can only be displayed on a single output at a time. Even if a surface
         // is currently invisible, this is the DMABUF feedback that it should know about.
@@ -4807,8 +4680,6 @@ impl Niri {
     }
 
     pub fn send_frame_callbacks(&mut self, output: &Output) {
-        let _span = tracy_client::span!("Niri::send_frame_callbacks");
-
         let state = self.output_state.get(output).unwrap();
         let sequence = state.frame_callback_sequence;
 
@@ -4898,8 +4769,6 @@ impl Niri {
     }
 
     pub fn send_frame_callbacks_on_fallback_timer(&mut self) {
-        let _span = tracy_client::span!("Niri::send_frame_callbacks_on_fallback_timer");
-
         // Make up a bogus output; we don't care about it here anyway, just the throttling timer.
         let output = Output::new(
             String::new(),
@@ -5054,8 +4923,6 @@ impl Niri {
         renderer: &mut GlesRenderer,
         output: &Output,
     ) {
-        let _span = tracy_client::span!("Niri::render_for_screencopy_with_damage");
-
         let mut screencopy_state = mem::take(&mut self.screencopy_state);
 
         screencopy_state.with_queues_mut(|queue| {
@@ -5126,8 +4993,6 @@ impl Niri {
         manager: &ZwlrScreencopyManagerV1,
         screencopy: Screencopy,
     ) -> anyhow::Result<()> {
-        let _span = tracy_client::span!("Niri::render_for_screencopy");
-
         let output = screencopy.output();
         ensure!(
             self.output_state.contains_key(output),
@@ -5332,8 +5197,6 @@ impl Niri {
         include_pointer: bool,
         path: Option<String>,
     ) -> anyhow::Result<()> {
-        let _span = tracy_client::span!("Niri::screenshot");
-
         self.update_render_elements(Some(output));
 
         let size = output.current_mode().unwrap().size;
@@ -5370,8 +5233,6 @@ impl Niri {
         show_pointer: bool,
         path: Option<String>,
     ) -> anyhow::Result<()> {
-        let _span = tracy_client::span!("Niri::screenshot_window");
-
         let scale = Scale::from(output.current_scale().fractional_scale());
         let alpha =
             if mapped.sizing_mode().is_fullscreen() || mapped.is_ignoring_opacity_window_rule() {
@@ -5821,8 +5682,6 @@ impl Niri {
     }
 
     pub fn do_screen_transition(&mut self, renderer: &mut GlesRenderer, delay_ms: Option<u16>) {
-        let _span = tracy_client::span!("Niri::do_screen_transition");
-
         self.update_render_elements(None);
 
         let textures: Vec<_> = self
@@ -5901,8 +5760,6 @@ impl Niri {
     }
 
     pub fn recompute_window_rules(&mut self) {
-        let _span = tracy_client::span!("Niri::recompute_window_rules");
-
         let changed = {
             let window_rules = &self.config.borrow().window_rules;
 
@@ -5937,8 +5794,6 @@ impl Niri {
     }
 
     pub fn recompute_layer_rules(&mut self) {
-        let _span = tracy_client::span!("Niri::recompute_layer_rules");
-
         let mut changed = false;
         {
             let config = self.config.borrow();
@@ -5962,8 +5817,6 @@ impl Niri {
         if self.pointer_inactivity_timer_got_reset {
             return;
         }
-
-        let _span = tracy_client::span!("Niri::reset_pointer_inactivity_timer");
 
         if let Some(token) = self.pointer_inactivity_timer.take() {
             self.event_loop.remove(token);
@@ -5999,8 +5852,6 @@ impl Niri {
         if self.notified_activity_this_iteration {
             return;
         }
-
-        let _span = tracy_client::span!("Niri::notify_activity");
 
         self.idle_notifier_state.notify_activity(&self.seat);
 

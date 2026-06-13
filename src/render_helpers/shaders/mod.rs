@@ -34,8 +34,6 @@ pub enum ProgramType {
 
 impl Shaders {
     fn compile(renderer: &mut GlesRenderer) -> Self {
-        let _span = tracy_client::span!("Shaders::compile");
-
         let border = ShaderProgram::compile(
             renderer,
             concat!(

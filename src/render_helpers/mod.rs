@@ -215,8 +215,6 @@ pub fn render_to_texture(
     fourcc: Fourcc,
     elements: impl Iterator<Item = impl RenderElement<GlesRenderer>>,
 ) -> anyhow::Result<(GlesTexture, SyncPoint)> {
-    let _span = tracy_client::span!();
-
     let mut texture = create_texture(renderer, size, fourcc).context("error creating texture")?;
 
     let sync_point = {
@@ -238,8 +236,6 @@ pub fn render_and_download(
     fourcc: Fourcc,
     elements: impl Iterator<Item = impl RenderElement<GlesRenderer>>,
 ) -> anyhow::Result<GlesMapping> {
-    let _span = tracy_client::span!();
-
     let mut texture = create_texture(renderer, size, fourcc).context("error creating texture")?;
     let mut target = renderer
         .bind(&mut texture)
@@ -259,8 +255,6 @@ pub fn render_to_vec(
     fourcc: Fourcc,
     elements: impl Iterator<Item = impl RenderElement<GlesRenderer>>,
 ) -> anyhow::Result<Vec<u8>> {
-    let _span = tracy_client::span!();
-
     let mapping = render_and_download(renderer, size, scale, transform, fourcc, elements)
         .context("error rendering")?;
     let copy = renderer
@@ -276,7 +270,6 @@ pub fn render_to_dmabuf(
     elements: &[impl RenderElement<GlesRenderer>],
     states: RenderElementStates,
 ) -> anyhow::Result<SyncPoint> {
-    let _span = tracy_client::span!();
     let (size, _scale, _transform) = damage_tracker.mode().try_into().unwrap();
     ensure!(
         dmabuf.width() == size.w as u32 && dmabuf.height() == size.h as u32,
@@ -304,7 +297,6 @@ pub fn render_to_shm(
     elements: &[impl RenderElement<GlesRenderer>],
     states: RenderElementStates,
 ) -> anyhow::Result<()> {
-    let _span = tracy_client::span!();
     shm::with_buffer_contents_mut(buffer, |shm_buffer, shm_len, buffer_data| {
         let (size, _scale, _transform) = damage_tracker.mode().try_into().unwrap();
         let fourcc = Fourcc::Xrgb8888;
@@ -343,7 +335,6 @@ pub fn render_to_shm(
             .context("error mapping texture")?;
 
         unsafe {
-            let _span = tracy_client::span!("copy_nonoverlapping");
             ptr::copy_nonoverlapping(bytes.as_ptr(), shm_buffer.cast(), shm_len);
         }
 

@@ -165,8 +165,6 @@ where
                 let buf = bytemuck::cast_slice_mut(&mut gamma);
                 let mut file = File::from(fd);
                 {
-                    let _span = tracy_client::span!("read gamma from fd");
-
                     if let Err(err) = file.read_exact(buf) {
                         warn!("failed to read gamma data: {err:?}");
                         resource.failed();

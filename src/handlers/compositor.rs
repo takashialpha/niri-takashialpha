@@ -55,7 +55,6 @@ impl CompositorHandler for State {
     }
 
     fn commit(&mut self, surface: &WlSurface) {
-        let _span = tracy_client::span!("CompositorHandler::commit");
         let _span = trace_span!("commit", surface = %surface.id()).entered();
         trace!("commit");
 
@@ -482,8 +481,7 @@ impl CompositorHandler for State {
         // Clients may destroy their subsurfaces before the main surface. Ensure we have a snapshot
         // when that happens, so that the closing animation includes all these subsurfaces.
         //
-        // Test client: alacritty with CSD <= 0.13 (it was fixed in winit afterwards:
-        // https://github.com/rust-windowing/winit/pull/3625).
+        // Test client: alacritty with CSD <= 0.13 (fixed in later versions).
         //
         // This is still not perfect, as this function is called already after the (first)
         // subsurface is destroyed; in the case of alacritty, this is the top CSD shadow. But, it

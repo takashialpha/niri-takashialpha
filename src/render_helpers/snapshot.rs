@@ -58,8 +58,6 @@ where
     ) -> Option<&(GlesTexture, Rectangle<i32, Physical>)> {
         if ctx.target.should_block_out(self.block_out_from) {
             self.blocked_out_texture.get_or_init(|| {
-                let _span = tracy_client::span!("RenderSnapshot::texture");
-
                 let elements: Vec<_> = self
                     .blocked_out_contents
                     .iter()
@@ -86,8 +84,6 @@ where
         {
             let contents = self.contents_with_blocked_out_bg.as_ref().unwrap();
             self.texture_with_blocked_out_bg.get_or_init(|| {
-                let _span = tracy_client::span!("RenderSnapshot::texture");
-
                 let elements: Vec<_> = contents
                     .iter()
                     .map(|baked| {
@@ -111,8 +107,6 @@ where
             })
         } else {
             self.texture.get_or_init(|| {
-                let _span = tracy_client::span!("RenderSnapshot::texture");
-
                 let elements: Vec<_> = self
                     .contents
                     .iter()

@@ -37,8 +37,6 @@ pub struct ResolvedLayerRules {
 
 impl ResolvedLayerRules {
     pub fn compute(rules: &[LayerRule], surface: &LayerSurface, is_at_startup: bool) -> Self {
-        let _span = tracy_client::span!("ResolvedLayerRules::compute");
-
         let mut resolved = ResolvedLayerRules::default();
 
         for rule in rules {

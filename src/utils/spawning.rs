@@ -16,7 +16,6 @@ use crate::utils::expand_home;
 pub static REMOVE_ENV_RUST_BACKTRACE: AtomicBool = AtomicBool::new(false);
 pub static REMOVE_ENV_RUST_LIB_BACKTRACE: AtomicBool = AtomicBool::new(false);
 pub static CHILD_ENV: RwLock<Environment> = RwLock::new(Environment(Vec::new()));
-pub static CHILD_DISPLAY: RwLock<Option<String>> = RwLock::new(None);
 
 static ORIGINAL_NOFILE_RLIMIT_CUR: Atomic<rlim_t> = Atomic::new(0);
 static ORIGINAL_NOFILE_RLIMIT_MAX: Atomic<rlim_t> = Atomic::new(0);
@@ -63,8 +62,6 @@ pub fn restore_nofile_rlimit() {
 
 /// Spawns the command to run independently of the compositor.
 pub fn spawn<T: AsRef<OsStr> + Send + 'static>(command: Vec<T>, token: Option<XdgActivationToken>) {
-    let _span = tracy_client::span!();
-
     if command.is_empty() {
         return;
     }
@@ -97,8 +94,6 @@ fn spawn_sync(
     args: impl IntoIterator<Item = impl AsRef<OsStr>>,
     token: Option<XdgActivationToken>,
 ) {
-    let _span = tracy_client::span!();
-
     let mut command = command.as_ref();
 
     // Expand `~` at the start.
@@ -129,13 +124,8 @@ fn spawn_sync(
     // Remove the systemd NOTIFY_SOCKET variable.
     process.env_remove("NOTIFY_SOCKET");
 
-    // Set DISPLAY if needed.
-    let display = CHILD_DISPLAY.read().unwrap();
-    if let Some(display) = &*display {
-        process.env("DISPLAY", display);
-    } else {
-        process.env_remove("DISPLAY");
-    }
+    // Never leak a host X11 DISPLAY to children.
+    process.env_remove("DISPLAY");
 
     // Set configured environment.
     let env = CHILD_ENV.read().unwrap();

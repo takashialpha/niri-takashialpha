@@ -230,8 +230,6 @@ impl OutputDevice {
         &self,
         should_be_off: &dyn Fn(crtc::Handle, &connector::Info) -> bool,
     ) -> anyhow::Result<()> {
-        let _span = tracy_client::span!("OutputDevice::cleanup_disconnected_resources");
-
         let res_handles = self
             .drm
             .resource_handles()
@@ -382,15 +380,6 @@ struct Surface {
     gamma_props: Option<GammaProps>,
     /// Gamma change to apply upon session resume.
     pending_gamma_change: Option<Option<Vec<u16>>>,
-    /// Tracy frame that goes from vblank to vblank.
-    vblank_frame: Option<tracy_client::Frame>,
-    /// Frame name for the VBlank frame.
-    vblank_frame_name: tracy_client::FrameName,
-    /// Plot name for the time since presentation plot.
-    time_since_presentation_plot_name: tracy_client::PlotName,
-    /// Plot name for the presentation misprediction plot.
-    presentation_misprediction_plot_name: tracy_client::PlotName,
-    sequence_delta_plot_name: tracy_client::PlotName,
 }
 
 pub struct SurfaceDmabufFeedback {
@@ -418,8 +407,6 @@ impl Tty {
         config: Rc<RefCell<Config>>,
         event_loop: LoopHandle<'static, State>,
     ) -> anyhow::Result<Self> {
-        let _span = tracy_client::span!("Tty::new");
-
         let (session, notifier) = LibSeatSession::new().context(
             "Error creating a session. This might mean that you're trying to run niri on a TTY \
              that is already busy, for example if you're running this inside tmux that had been \
@@ -438,11 +425,8 @@ impl Tty {
 
         let mut libinput = Libinput::new_with_udev(LibinputSessionInterface::from(session.clone()));
         unsafe { init_libinput_plugin_system(&libinput) };
-        {
-            let _span = tracy_client::span!("Libinput::udev_assign_seat");
-            libinput.udev_assign_seat(&seat_name)
-        }
-        .map_err(|()| anyhow!("error assigning the seat to libinput"))?;
+        { libinput.udev_assign_seat(&seat_name) }
+            .map_err(|()| anyhow!("error assigning the seat to libinput"))?;
 
         // If the session is not active at startup (e.g. niri was launched from a different TTY),
         // suspend libinput now so that when ActivateSession fires, libinput.resume() performs a
@@ -557,8 +541,6 @@ impl Tty {
     }
 
     fn on_udev_event(&mut self, niri: &mut Niri, event: UdevEvent) {
-        let _span = tracy_client::span!("Tty::on_udev_event");
-
         match event {
             UdevEvent::Added { device_id, path } => {
                 if !self.session.is_active() {
@@ -594,8 +576,6 @@ impl Tty {
     }
 
     fn on_session_event(&mut self, niri: &mut Niri, event: SessionEvent) {
-        let _span = tracy_client::span!("Tty::on_session_event");
-
         match event {
             SessionEvent::PauseSession => {
                 debug!("pausing session");
@@ -768,23 +748,12 @@ impl Tty {
             return Ok(());
         }
 
-        let _span = tracy_client::span!("Tty::device_added");
-
         let open_flags = OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK;
-        let fd = {
-            let _span = tracy_client::span!("LibSeatSession::open");
-            self.session.open(path, open_flags)
-        }?;
+        let fd = { self.session.open(path, open_flags) }?;
         let device_fd = DrmDeviceFd::new(DeviceFd::from(fd));
 
-        let (drm, drm_notifier) = {
-            let _span = tracy_client::span!("DrmDevice::new");
-            DrmDevice::new(device_fd.clone(), false)
-        }?;
-        let gbm = {
-            let _span = tracy_client::span!("GbmDevice::new");
-            GbmDevice::new(device_fd)
-        }?;
+        let (drm, drm_notifier) = { DrmDevice::new(device_fd.clone(), false) }?;
+        let gbm = { GbmDevice::new(device_fd) }?;
 
         let mut try_initialize_gpu = || {
             let display = unsafe { EGLDisplay::new(gbm.clone())? };
@@ -1520,17 +1489,6 @@ impl Tty {
 
         let vrr_enabled = compositor.vrr_enabled();
 
-        let vblank_frame_name =
-            tracy_client::FrameName::new_leak(format!("vblank on {connector_name}"));
-        let time_since_presentation_plot_name = tracy_client::PlotName::new_leak(format!(
-            "{connector_name} time since presentation, ms"
-        ));
-        let presentation_misprediction_plot_name = tracy_client::PlotName::new_leak(format!(
-            "{connector_name} presentation misprediction, ms"
-        ));
-        let sequence_delta_plot_name =
-            tracy_client::PlotName::new_leak(format!("{connector_name} sequence delta"));
-
         let surface = Surface {
             name: output_name,
             connector: connector.handle(),
@@ -1538,11 +1496,6 @@ impl Tty {
             dmabuf_feedback,
             gamma_props,
             pending_gamma_change: None,
-            vblank_frame: None,
-            vblank_frame_name,
-            time_since_presentation_plot_name,
-            presentation_misprediction_plot_name,
-            sequence_delta_plot_name,
         };
 
         let res = device.surfaces.insert(crtc, surface);
@@ -1617,8 +1570,6 @@ impl Tty {
         crtc: crtc::Handle,
         meta: DrmEventMetadata,
     ) {
-        let span = tracy_client::span!("Tty::on_vblank");
-
         let now = get_monotonic_time();
 
         let Some(device) = self.devices.get_mut(&node) else {
@@ -1632,12 +1583,8 @@ impl Tty {
             return;
         };
 
-        // Finish the Tracy frame, if any.
-        drop(surface.vblank_frame.take());
-
         let name = &surface.name.connector;
         trace!("vblank on {name} {meta:?}");
-        span.emit_text(name);
 
         let presentation_time = match meta.time {
             DrmEventTime::Monotonic(time) => time,
@@ -1653,27 +1600,6 @@ impl Tty {
         } else {
             presentation_time
         };
-
-        let message = if presentation_time.is_zero() {
-            format!("vblank on {name}, presentation time unknown")
-        } else if presentation_time > now {
-            let diff = presentation_time - now;
-            tracy_client::Client::running().unwrap().plot(
-                surface.time_since_presentation_plot_name,
-                -diff.as_secs_f64() * 1000.,
-            );
-            format!("vblank on {name}, presentation is {diff:?} later")
-        } else {
-            let diff = now - presentation_time;
-            tracy_client::Client::running().unwrap().plot(
-                surface.time_since_presentation_plot_name,
-                diff.as_secs_f64() * 1000.,
-            );
-            format!("vblank on {name}, presentation was {diff:?} ago")
-        };
-        tracy_client::Client::running()
-            .unwrap()
-            .message(&message, 0);
 
         let Some(output) = niri
             .global_space
@@ -1738,7 +1664,7 @@ impl Tty {
 
         // Mark the last frame as submitted.
         match surface.compositor.frame_submitted() {
-            Ok(Some((mut feedback, target_presentation_time))) => {
+            Ok(Some((mut feedback, _))) => {
                 let refresh = match refresh_interval {
                     Some(refresh) => {
                         if output_state.frame_clock.vrr() {
@@ -1760,15 +1686,6 @@ impl Tty {
                 }
 
                 feedback.presented::<_, smithay::utils::Monotonic>(time, refresh, seq, flags);
-
-                if !presentation_time.is_zero() {
-                    let misprediction_s =
-                        presentation_time.as_secs_f64() - target_presentation_time.as_secs_f64();
-                    tracy_client::Client::running().unwrap().plot(
-                        surface.presentation_misprediction_plot_name,
-                        misprediction_s * 1000.,
-                    );
-                }
             }
             Ok(None) => (),
             Err(err) => {
@@ -1776,22 +1693,9 @@ impl Tty {
             }
         }
 
-        if let Some(last_sequence) = output_state.last_drm_sequence {
-            let delta = meta.sequence as f64 - last_sequence as f64;
-            tracy_client::Client::running()
-                .unwrap()
-                .plot(surface.sequence_delta_plot_name, delta);
-        }
-        output_state.last_drm_sequence = Some(meta.sequence);
-
         output_state.frame_clock.presented(presentation_time);
 
         if redraw_needed || output_state.unfinished_animations_remain {
-            let vblank_frame = tracy_client::Client::running()
-                .unwrap()
-                .non_continuous_frame(surface.vblank_frame_name);
-            surface.vblank_frame = Some(vblank_frame);
-
             niri.queue_redraw(&output);
         } else {
             niri.send_frame_callbacks(&output);
@@ -1799,10 +1703,7 @@ impl Tty {
     }
 
     fn on_estimated_vblank_timer(&self, niri: &mut Niri, output: Output) {
-        let span = tracy_client::span!("Tty::on_estimated_vblank_timer");
-
         let name = output.name();
-        span.emit_text(&name);
 
         let Some(output_state) = niri.output_state.get_mut(&output) else {
             error!("missing output state for {name}");
@@ -1852,8 +1753,6 @@ impl Tty {
         output: &Output,
         target_presentation_time: Duration,
     ) -> RenderResult {
-        let span = tracy_client::span!("Tty::render");
-
         let mut rv = RenderResult::Skipped;
 
         let tty_state: &TtyOutputState = output.user_data().get().unwrap();
@@ -1866,8 +1765,6 @@ impl Tty {
             error!("missing surface");
             return rv;
         };
-
-        span.emit_text(&surface.name.connector);
 
         if !device.drm.is_active() {
             // This branch hits any time we try to render while the user had switched to a
@@ -1943,11 +1840,11 @@ impl Tty {
                         .borrow()
                         .debug
                         .wait_for_frame_completion_before_queueing;
-                if needs_sync && let PrimaryPlaneElement::Swapchain(element) = res.primary_element {
-                    let _span = tracy_client::span!("wait for completion");
-                    if let Err(err) = element.sync.wait() {
-                        warn!("error waiting for frame completion: {err:?}");
-                    }
+                if needs_sync
+                    && let PrimaryPlaneElement::Swapchain(element) = res.primary_element
+                    && let Err(err) = element.sync.wait()
+                {
+                    warn!("error waiting for frame completion: {err:?}");
                 }
 
                 niri.update_primary_scanout_output(output, &res.states);
@@ -1997,9 +1894,6 @@ impl Tty {
                 warn!("error rendering frame: {err}");
             }
         }
-
-        // We're not expecting a vblank right after this.
-        drop(surface.vblank_frame.take());
 
         // Queue a timer to fire at the predicted vblank time.
         queue_estimated_vblank_timer(niri, output.clone(), target_presentation_time);
@@ -2106,8 +2000,6 @@ impl Tty {
     }
 
     fn refresh_ipc_outputs(&self, niri: &mut Niri) {
-        let _span = tracy_client::span!("Tty::refresh_ipc_outputs");
-
         let mut ipc_outputs = HashMap::new();
         let disable_monitor_names = self.config.borrow().debug.disable_monitor_names;
 
@@ -2250,8 +2142,6 @@ impl Tty {
     }
 
     pub fn set_output_on_demand_vrr(&mut self, niri: &mut Niri, output: &Output, enable_vrr: bool) {
-        let _span = tracy_client::span!("Tty::set_output_on_demand_vrr");
-
         let output_state = niri.output_state.get_mut(output).unwrap();
         output_state.on_demand_vrr_enabled = enable_vrr;
         if output_state.frame_clock.vrr() == enable_vrr {
@@ -2290,8 +2180,6 @@ impl Tty {
     }
 
     pub fn update_ignored_nodes_config(&mut self, niri: &mut Niri) {
-        let _span = tracy_client::span!("Tty::update_ignored_nodes_config");
-
         // If we're inactive, we can't do anything, but we'll recompute in ActivateSession.
         if !self.session.is_active() {
             return;
@@ -2356,8 +2244,6 @@ impl Tty {
     }
 
     pub fn on_output_config_changed(&mut self, niri: &mut Niri) {
-        let _span = tracy_client::span!("Tty::on_output_config_changed");
-
         // If we're inactive, we can't do anything, so just set a flag for later.
         if !self.session.is_active() {
             self.update_output_config_on_resume = true;
@@ -2641,8 +2527,6 @@ impl GammaProps {
     }
 
     fn set_gamma(&mut self, device: &DrmDevice, gamma: Option<&[u16]>) -> anyhow::Result<()> {
-        let _span = tracy_client::span!("GammaProps::set_gamma");
-
         let blob = if let Some(gamma) = gamma {
             let gamma_size = self
                 .gamma_size(device)
@@ -2680,8 +2564,6 @@ impl GammaProps {
         };
 
         {
-            let _span = tracy_client::span!("set_property");
-
             let blob = blob.map(NonZeroU64::get).unwrap_or(0);
             device
                 .set_property(
@@ -2710,8 +2592,6 @@ impl GammaProps {
     }
 
     fn restore_gamma(&self, device: &DrmDevice) -> anyhow::Result<()> {
-        let _span = tracy_client::span!("GammaProps::restore_gamma");
-
         let blob = self.previous_blob.map(NonZeroU64::get).unwrap_or(0);
         device
             .set_property(
@@ -2943,8 +2823,8 @@ fn queue_estimated_vblank_timer(
         duration += output_state
             .frame_clock
             .refresh_interval()
-            // Unknown refresh interval, i.e. winit backend. Would be good to estimate it somehow
-            // but it's not that important for this code path.
+            // Unknown refresh interval. Would be good to estimate it somehow but it's not that
+            // important for this code path.
             .unwrap_or(Duration::from_micros(16_667));
     }
 
@@ -3370,8 +3250,6 @@ pub fn set_gamma_for_crtc(
     crtc: crtc::Handle,
     ramp: Option<&[u16]>,
 ) -> anyhow::Result<()> {
-    let _span = tracy_client::span!("set_gamma_for_crtc");
-
     let info = device.get_crtc(crtc).context("error getting crtc info")?;
     let gamma_length = info.gamma_length() as usize;
 
@@ -3382,8 +3260,6 @@ pub fn set_gamma_for_crtc(
         ensure!(ramp.len() == gamma_length * 3, "wrong gamma length");
         ramp
     } else {
-        let _span = tracy_client::span!("generate linear gamma");
-
         // The legacy API provides no way to reset the gamma, so set a linear one manually.
         temp = vec![0u16; gamma_length * 3];
 
@@ -3441,7 +3317,6 @@ fn make_output_name(
 /// This function must be called before libinput iterates through the devices, i.e. before
 /// libinput_udev_assign_seat() or the first call to libinput_path_add_device().
 unsafe fn init_libinput_plugin_system(libinput: &Libinput) {
-    #[cfg(have_libinput_plugin_system)]
     unsafe {
         use std::ffi::{CString, c_char, c_int};
         use std::os::unix::ffi::OsStringExt;
@@ -3473,155 +3348,5 @@ unsafe fn init_libinput_plugin_system(libinput: &Libinput) {
 
         libinput_plugin_system_append_default_paths(libinput);
         libinput_plugin_system_load_plugins(libinput, LIBINPUT_PLUGIN_SYSTEM_FLAG_NONE);
-    }
-    #[cfg(not(have_libinput_plugin_system))]
-    let _ = libinput;
-}
-
-#[cfg(test)]
-mod tests {
-    use insta::assert_debug_snapshot;
-    use niri_config::output::Modeline;
-    use niri_ipc::{HSyncPolarity, VSyncPolarity};
-
-    use crate::backend::tty::{calculate_drm_mode_from_modeline, calculate_mode_cvt};
-
-    #[test]
-    fn test_calculate_drmmode_from_modeline() {
-        let modeline1 = Modeline {
-            clock: 173.0,
-            hdisplay: 1920,
-            vdisplay: 1080,
-            hsync_start: 2048,
-            hsync_end: 2248,
-            htotal: 2576,
-            vsync_start: 1083,
-            vsync_end: 1088,
-            vtotal: 1120,
-            hsync_polarity: HSyncPolarity::NHSync,
-            vsync_polarity: VSyncPolarity::PVSync,
-        };
-        assert_debug_snapshot!(calculate_drm_mode_from_modeline(&modeline1).unwrap(), @r#"
-        Mode {
-            name: "1920x1080@59.96",
-            clock: 173000,
-            size: (
-                1920,
-                1080,
-            ),
-            hsync: (
-                2048,
-                2248,
-                2576,
-            ),
-            vsync: (
-                1083,
-                1088,
-                1120,
-            ),
-            hskew: 0,
-            vscan: 0,
-            vrefresh: 60,
-            mode_type: ModeTypeFlags(
-                USERDEF,
-            ),
-        }
-        "#);
-        let modeline2 = Modeline {
-            clock: 452.5,
-            hdisplay: 1920,
-            vdisplay: 1080,
-            hsync_start: 2088,
-            hsync_end: 2296,
-            htotal: 2672,
-            vsync_start: 1083,
-            vsync_end: 1088,
-            vtotal: 1177,
-            hsync_polarity: HSyncPolarity::NHSync,
-            vsync_polarity: VSyncPolarity::PVSync,
-        };
-        assert_debug_snapshot!(calculate_drm_mode_from_modeline(&modeline2).unwrap(), @r#"
-        Mode {
-            name: "1920x1080@143.88",
-            clock: 452500,
-            size: (
-                1920,
-                1080,
-            ),
-            hsync: (
-                2088,
-                2296,
-                2672,
-            ),
-            vsync: (
-                1083,
-                1088,
-                1177,
-            ),
-            hskew: 0,
-            vscan: 0,
-            vrefresh: 144,
-            mode_type: ModeTypeFlags(
-                USERDEF,
-            ),
-        }
-        "#);
-    }
-
-    #[test]
-    fn test_calc_cvt() {
-        // Crosschecked with other calculators like the cvt commandline utility.
-        assert_debug_snapshot!(calculate_mode_cvt(1920, 1080, 60.0), @r#"
-        Mode {
-            name: "1920x1080@59.96",
-            clock: 173000,
-            size: (
-                1920,
-                1080,
-            ),
-            hsync: (
-                2048,
-                2248,
-                2576,
-            ),
-            vsync: (
-                1083,
-                1088,
-                1120,
-            ),
-            hskew: 0,
-            vscan: 0,
-            vrefresh: 60,
-            mode_type: ModeTypeFlags(
-                USERDEF,
-            ),
-        }
-        "#);
-        assert_debug_snapshot!(calculate_mode_cvt(1920, 1080, 144.0), @r#"
-        Mode {
-            name: "1920x1080@143.88",
-            clock: 452500,
-            size: (
-                1920,
-                1080,
-            ),
-            hsync: (
-                2088,
-                2296,
-                2672,
-            ),
-            vsync: (
-                1083,
-                1088,
-                1177,
-            ),
-            hskew: 0,
-            vscan: 0,
-            vrefresh: 144,
-            mode_type: ModeTypeFlags(
-                USERDEF,
-            ),
-        }
-        "#);
     }
 }

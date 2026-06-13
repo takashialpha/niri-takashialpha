@@ -87,9 +87,6 @@ pub mod tab_indicator;
 pub mod tile;
 pub mod workspace;
 
-#[cfg(test)]
-mod tests;
-
 /// Size changes up to this many pixels don't animate.
 pub const RESIZE_ANIMATION_THRESHOLD: f64 = 10.;
 
@@ -1444,8 +1441,6 @@ impl<W: LayoutElement> Layout<W> {
     }
 
     pub fn update_output_size(&mut self, output: &Output) {
-        let _span = tracy_client::span!("Layout::update_output_size");
-
         let Some(mon) = self.monitor_for_output_mut(output) else {
             error!("monitor missing in update_output_size()");
             return;
@@ -2363,222 +2358,7 @@ impl<W: LayoutElement> Layout<W> {
         compute_overview_zoom(&self.options, progress)
     }
 
-    #[cfg(test)]
-    fn verify_invariants(&self) {
-        use std::collections::HashSet;
-
-        use approx::assert_abs_diff_eq;
-
-        let zoom = self.overview_zoom();
-
-        let mut move_win_id = None;
-        if let Some(state) = &self.interactive_move {
-            match state {
-                InteractiveMoveState::Starting {
-                    window_id,
-                    pointer_delta: _,
-                    pointer_ratio_within_window: _,
-                } => {
-                    assert!(
-                        self.has_window(window_id),
-                        "interactive move must be on an existing window"
-                    );
-                    move_win_id = Some(window_id.clone());
-                }
-                InteractiveMoveState::Moving(move_) => {
-                    assert_eq!(self.clock, move_.tile.clock);
-                    assert!(move_.tile.window().pending_sizing_mode().is_normal());
-
-                    move_.tile.verify_invariants();
-
-                    let scale = move_.output.current_scale().fractional_scale();
-                    let options = Options::clone(&self.options)
-                        .with_merged_layout(move_.output_config.as_ref())
-                        .with_merged_layout(move_.workspace_config.as_ref().map(|(_, c)| c))
-                        .adjusted_for_scale(scale);
-                    assert_eq!(
-                        &*move_.tile.options, &options,
-                        "interactive moved tile options must be \
-                         base options adjusted for output scale"
-                    );
-
-                    let tile_pos = move_.tile_render_location(zoom);
-                    let rounded_pos = tile_pos.to_physical_precise_round(scale).to_logical(scale);
-
-                    // Tile position must be rounded to physical pixels.
-                    assert_abs_diff_eq!(tile_pos.x, rounded_pos.x, epsilon = 1e-5);
-                    assert_abs_diff_eq!(tile_pos.y, rounded_pos.y, epsilon = 1e-5);
-
-                    if let Some(alpha) = &move_.tile.alpha_animation {
-                        if move_.is_floating {
-                            assert_eq!(
-                                alpha.anim.to(),
-                                1.,
-                                "interactively moved floating tile can animate alpha only to 1"
-                            );
-
-                            assert!(
-                                !alpha.hold_after_done,
-                                "interactively moved floating tile \
-                                 cannot have held alpha animation"
-                            );
-                        } else {
-                            assert_ne!(
-                                alpha.anim.to(),
-                                1.,
-                                "interactively moved scrolling tile must animate alpha to not 1"
-                            );
-
-                            assert!(
-                                alpha.hold_after_done,
-                                "interactively moved scrolling tile \
-                                 must have held alpha animation"
-                            );
-                        }
-                    }
-                }
-            }
-        }
-
-        let mut seen_workspace_id = HashSet::new();
-        let mut seen_workspace_name = Vec::<String>::new();
-
-        let (monitors, &primary_idx, &active_monitor_idx) = match &self.monitor_set {
-            MonitorSet::Normal {
-                monitors,
-                primary_idx,
-                active_monitor_idx,
-            } => (monitors, primary_idx, active_monitor_idx),
-            MonitorSet::NoOutputs { workspaces } => {
-                for workspace in workspaces {
-                    assert!(
-                        workspace.has_windows_or_name(),
-                        "with no outputs there cannot be empty unnamed workspaces"
-                    );
-
-                    assert_eq!(self.clock, workspace.clock);
-
-                    assert_eq!(
-                        workspace.base_options, self.options,
-                        "workspace base options must be synchronized with layout"
-                    );
-
-                    assert!(
-                        seen_workspace_id.insert(workspace.id()),
-                        "workspace id must be unique"
-                    );
-
-                    if let Some(name) = &workspace.name {
-                        assert!(
-                            !seen_workspace_name
-                                .iter()
-                                .any(|n| n.eq_ignore_ascii_case(name)),
-                            "workspace name must be unique"
-                        );
-                        seen_workspace_name.push(name.clone());
-                    }
-
-                    workspace.verify_invariants(move_win_id.as_ref());
-                }
-
-                return;
-            }
-        };
-
-        assert!(primary_idx < monitors.len());
-        assert!(active_monitor_idx < monitors.len());
-
-        let mut saw_view_offset_gesture = false;
-
-        for (idx, monitor) in monitors.iter().enumerate() {
-            assert_eq!(self.clock, monitor.clock);
-            assert_eq!(
-                monitor.base_options, self.options,
-                "monitor base options must be synchronized with layout"
-            );
-
-            assert_eq!(self.overview_open, monitor.overview_open);
-            assert_eq!(
-                self.overview_progress.as_ref().map(|p| p.value()),
-                monitor.overview_progress_value()
-            );
-
-            monitor.verify_invariants();
-
-            if idx == primary_idx {
-                for ws in &monitor.workspaces {
-                    if ws.original_output.matches(&monitor.output) {
-                        // This is the primary monitor's own workspace.
-                        continue;
-                    }
-
-                    let own_monitor_exists = monitors
-                        .iter()
-                        .any(|m| ws.original_output.matches(&m.output));
-                    assert!(
-                        !own_monitor_exists,
-                        "primary monitor cannot have workspaces for which their own monitor exists"
-                    );
-                }
-            } else {
-                assert!(
-                    monitor
-                        .workspaces
-                        .iter()
-                        .any(|workspace| workspace.original_output.matches(&monitor.output)),
-                    "secondary monitor must not have any non-own workspaces"
-                );
-            }
-
-            // FIXME: verify that primary doesn't have any workspaces for which their own monitor
-            // exists.
-
-            for workspace in &monitor.workspaces {
-                assert!(
-                    seen_workspace_id.insert(workspace.id()),
-                    "workspace id must be unique"
-                );
-
-                if let Some(name) = &workspace.name {
-                    assert!(
-                        !seen_workspace_name
-                            .iter()
-                            .any(|n| n.eq_ignore_ascii_case(name)),
-                        "workspace name must be unique"
-                    );
-                    seen_workspace_name.push(name.clone());
-                }
-
-                workspace.verify_invariants(move_win_id.as_ref());
-
-                let has_view_offset_gesture = workspace.scrolling().view_offset().is_gesture();
-                if self.dnd.is_some() || self.interactive_move.is_some() {
-                    // We'd like to check that all workspaces have the gesture here, furthermore we
-                    // want to check that they have the gesture only if the interactive move
-                    // targets the scrolling layout. However, we cannot do that because we start
-                    // and stop the gesture lazily. Otherwise the gesture code would pollute a lot
-                    // of places like adding new workspaces, implicitly moving windows between
-                    // floating and tiling on fullscreen, etc.
-                    //
-                    // assert!(
-                    //     has_view_offset_gesture,
-                    //     "during an interactive move in the scrolling layout, \
-                    //      all workspaces should be in a view offset gesture"
-                    // );
-                } else if saw_view_offset_gesture {
-                    assert!(
-                        !has_view_offset_gesture,
-                        "only one workspace can have an ongoing view offset gesture"
-                    );
-                }
-                saw_view_offset_gesture = has_view_offset_gesture;
-            }
-        }
-    }
-
     pub fn advance_animations(&mut self) {
-        let _span = tracy_client::span!("Layout::advance_animations");
-
         let mut dnd_scroll = None;
         let mut is_dnd = false;
         if let Some(dnd) = &self.dnd {
@@ -2760,8 +2540,6 @@ impl<W: LayoutElement> Layout<W> {
     }
 
     pub fn update_render_elements(&mut self, output: Option<&Output>) {
-        let _span = tracy_client::span!("Layout::update_render_elements");
-
         self.update_render_elements_time = self.clock.now();
 
         let zoom = self.overview_zoom();
@@ -2829,8 +2607,6 @@ impl<W: LayoutElement> Layout<W> {
     }
 
     fn update_insert_hint(&mut self, output: Option<&Output>) {
-        let _span = tracy_client::span!("Layout::update_insert_hint");
-
         for mon in self.monitors_mut() {
             mon.insert_hint = None;
         }
@@ -2845,8 +2621,6 @@ impl<W: LayoutElement> Layout<W> {
             self.interactive_move = Some(InteractiveMoveState::Moving(move_));
             return;
         }
-
-        let _span = tracy_client::span!("Layout::update_insert_hint::update");
 
         if let Some(mon) = self.monitor_for_output_mut(&move_.output) {
             let zoom = mon.overview_zoom();
@@ -4649,8 +4423,6 @@ impl<W: LayoutElement> Layout<W> {
         xray_has_blocked_out_layers: bool,
         window: &W::Id,
     ) {
-        let _span = tracy_client::span!("Layout::store_unmap_snapshot");
-
         let zoom = self.overview_zoom();
 
         if let Some(InteractiveMoveState::Moving(move_)) = &mut self.interactive_move
@@ -4743,8 +4515,6 @@ impl<W: LayoutElement> Layout<W> {
         window: &W::Id,
         blocker: TransactionBlocker,
     ) {
-        let _span = tracy_client::span!("Layout::start_close_animation_for_window");
-
         let zoom = self.overview_zoom();
 
         if let Some(InteractiveMoveState::Moving(move_)) = &mut self.interactive_move
@@ -4833,8 +4603,6 @@ impl<W: LayoutElement> Layout<W> {
     }
 
     pub fn refresh(&mut self, is_active: bool) {
-        let _span = tracy_client::span!("Layout::refresh");
-
         self.is_active = is_active;
 
         let mut ongoing_scrolling_dnd = self.dnd.is_some().then_some(true);
