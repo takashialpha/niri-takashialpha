@@ -6,5 +6,6 @@ todo:
 and point to the niri-wm repo but not document anything
 - make correct workflows
 - get rid of knus/kdl (also why serde_json?)
+- shouldn't --version advertise niri-takashialpha?
 - cleanups + reviews
 - search for more it should drop
