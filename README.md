@@ -29,8 +29,6 @@ intentionally does **not** duplicate niri's documentation:
 | Dependencies | full set | trimmed (a lot) where practical |
 | Features | upstream of record | (tries) to follow upstream when possible; no intentional divergence |
 
-The differences are deliberately small. When in doubt, upstream is the source of truth.
-
 ## Requirements
 
 - **libinput ≥ 1.30**
@@ -48,6 +46,6 @@ GPL-3.0-or-later, same as upstream niri. See [LICENSE](LICENSE).
 
 ---
 
-## TODO
+## TODO (add work here)
 
 - Finish dependency/code reviews, focusing on cleanups and anything else droppable.
