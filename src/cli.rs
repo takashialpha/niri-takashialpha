@@ -7,7 +7,7 @@ use niri_ipc::{Action, OutputAction};
 use crate::utils::version;
 
 #[derive(Parser)]
-#[command(author, version = version(), about, long_about = None)]
+#[command(name = "niri-takashialpha", author, version = version(), about, long_about = None)]
 #[command(args_conflicts_with_subcommands = true)]
 #[command(subcommand_value_name = "SUBCOMMAND")]
 #[command(subcommand_help_heading = "Subcommands")]
