@@ -50,5 +50,4 @@ GPL-3.0-or-later, same as upstream niri. See [LICENSE](LICENSE).
 
 ## TODO
 
-- Set up CI workflows (none exist yet).
 - Finish dependency/code reviews, focusing on cleanups and anything else droppable.
