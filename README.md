@@ -10,3 +10,5 @@ and point to the niri-wm repo but not document anything
 - shouldn't --version advertise niri-takashialpha?
 - finish reviews focusing on cleanups
 - look for more it should drop
+- when niri's upstream gets a commit of a feature/fix that is wanted
+here that should be instantly documented and worked on
