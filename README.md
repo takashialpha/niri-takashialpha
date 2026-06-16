@@ -51,4 +51,4 @@ GPL-3.0-or-later, same as upstream niri. See [LICENSE](LICENSE).
 
 ## TODO (add work here)
 
-- Finish dependency/code reviews, focusing on cleanups and anything else droppable.
+- Cleanup debug and some other stuff around the codebase
