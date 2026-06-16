@@ -1,6 +1,6 @@
 use niri_config::layer_rule::{LayerRule, Match};
 use niri_config::utils::MergeWith as _;
-use niri_config::{BackgroundEffect, BlockOutFrom, CornerRadius, ResolvedPopupsRules, ShadowRule};
+use niri_config::{BlockOutFrom, CornerRadius, ResolvedPopupsRules, ShadowRule};
 use smithay::desktop::LayerSurface;
 use smithay::wayland::shell::wlr_layer::Layer;
 
@@ -27,9 +27,6 @@ pub struct ResolvedLayerRules {
 
     /// Whether to bob this window up and down.
     pub baba_is_float: bool,
-
-    /// Background effect configuration.
-    pub background_effect: BackgroundEffect,
 
     /// Rules for this layer surface's popups.
     pub popups: ResolvedPopupsRules,
@@ -75,10 +72,6 @@ impl ResolvedLayerRules {
             }
 
             resolved.shadow.merge_with(&rule.shadow);
-
-            resolved
-                .background_effect
-                .merge_with(&rule.background_effect);
 
             resolved.popups.merge_with(&rule.popups);
         }

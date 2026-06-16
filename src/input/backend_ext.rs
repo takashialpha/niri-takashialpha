@@ -3,7 +3,6 @@ use smithay::backend::input;
 use smithay::output::Output;
 
 use crate::niri::State;
-use crate::protocols::virtual_pointer::VirtualPointer;
 
 pub trait NiriInputBackend: input::InputBackend<Device = Self::NiriDevice> {
     type NiriDevice: NiriInputDevice;
@@ -26,11 +25,5 @@ impl NiriInputDevice for libinput::Device {
     fn output(&self, _state: &State) -> Option<Output> {
         // FIXME: Allow specifying the output per-device?
         None
-    }
-}
-
-impl NiriInputDevice for VirtualPointer {
-    fn output(&self, _: &State) -> Option<Output> {
-        self.output().cloned()
     }
 }

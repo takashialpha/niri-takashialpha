@@ -194,10 +194,7 @@ impl CompositorHandler for State {
                     // The mapped pre-commit hook deals with dma-bufs on its own.
                     self.remove_default_dmabuf_pre_commit_hook(surface);
                     let hook = add_mapped_toplevel_pre_commit_hook(toplevel);
-                    let mapped = {
-                        let config = self.niri.config.borrow();
-                        Mapped::new(window, rules, hook, &config)
-                    };
+                    let mapped = Mapped::new(window, rules, hook);
                     let window = mapped.window.clone();
 
                     let target = if let Some(p) = &parent {
@@ -263,8 +260,6 @@ impl CompositorHandler for State {
                 let window = mapped.window.clone();
                 let output = output.cloned();
 
-                let id = mapped.id();
-
                 // This is a commit of a previously-mapped toplevel.
                 let is_mapped = is_mapped(surface);
 
@@ -290,7 +285,6 @@ impl CompositorHandler for State {
                     let active_window = self.niri.layout.focus().map(|m| &m.window);
                     let was_active = active_window == Some(&window);
 
-                    self.niri.window_mru_ui.remove_window(id);
                     self.niri.layout.remove_window(&window, transaction.clone());
                     self.add_default_dmabuf_pre_commit_hook(surface);
 
@@ -311,7 +305,6 @@ impl CompositorHandler for State {
 
                     if let Some(output) = output {
                         self.niri.queue_redraw(&output);
-                        self.niri.queue_redraw_mru_output();
                     }
                     return;
                 }
@@ -338,7 +331,6 @@ impl CompositorHandler for State {
                 }
 
                 // The toplevel remains mapped.
-                self.niri.window_mru_ui.update_window(&self.niri.layout, id);
                 self.niri.layout.update_window(&window, serial);
 
                 // Move the toplevel according to the attach offset.
@@ -359,7 +351,6 @@ impl CompositorHandler for State {
 
                 if let Some(output) = output {
                     self.niri.queue_redraw(&output);
-                    self.niri.queue_redraw_mru_output();
                 }
                 return;
             }
@@ -373,13 +364,9 @@ impl CompositorHandler for State {
             let window = mapped.window.clone();
             let output = output.cloned();
             window.on_commit();
-            self.niri
-                .window_mru_ui
-                .update_window(&self.niri.layout, mapped.id());
             self.niri.layout.update_window(&window, None);
             if let Some(output) = output {
                 self.niri.queue_redraw(&output);
-                self.niri.queue_redraw_mru_output();
             }
             return;
         }
@@ -484,11 +471,10 @@ impl CompositorHandler for State {
         // subsurface is destroyed; in the case of alacritty, this is the top CSD shadow. But, it
         // gets most of the job done.
         if let Some(root) = self.niri.root_surface.get(surface)
-            && let Some((mapped, output)) = self.niri.layout.find_window_and_output(root)
+            && let Some((mapped, _output)) = self.niri.layout.find_window_and_output(root)
         {
             let window = mapped.window.clone();
-            let output = output.cloned();
-            self.store_unmap_snapshot(&window, output.as_ref());
+            self.store_unmap_snapshot(&window);
         }
 
         self.niri

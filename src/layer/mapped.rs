@@ -3,7 +3,7 @@ use niri_config::{Config, LayerRule};
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::desktop::{LayerSurface, PopupKind, PopupManager};
-use smithay::utils::{Logical, Point, Rectangle, Scale, Size};
+use smithay::utils::{Logical, Point, Scale, Size};
 use smithay::wayland::compositor::{HookId, remove_pre_commit_hook};
 use smithay::wayland::shell::wlr_layer::{ExclusiveZone, Layer};
 
@@ -11,13 +11,11 @@ use super::ResolvedLayerRules;
 use crate::animation::Clock;
 use crate::layout::shadow::Shadow;
 use crate::niri_render_elements;
-use crate::render_helpers::background_effect::BackgroundEffectElement;
+use crate::render_helpers::RenderCtx;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::shadow::ShadowRenderElement;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use crate::render_helpers::surface::push_elements_from_surface_tree;
-use crate::render_helpers::xray::XrayPos;
-use crate::render_helpers::{RenderCtx, background_effect};
 use crate::utils::{baba_is_float_offset, round_logical_in_physical};
 
 #[derive(Debug)]
@@ -42,9 +40,6 @@ pub struct MappedLayer {
     /// The shadow around the surface.
     shadow: Shadow,
 
-    /// The blur config, passed for background effect rendering.
-    blur_config: niri_config::Blur,
-
     /// The view size for the layer surface's output.
     view_size: Size<f64, Logical>,
 
@@ -60,7 +55,6 @@ niri_render_elements! {
         Wayland = WaylandSurfaceRenderElement<R>,
         SolidColor = SolidColorRenderElement,
         Shadow = ShadowRenderElement,
-        BackgroundEffect = BackgroundEffectElement,
     }
 }
 
@@ -88,7 +82,6 @@ impl MappedLayer {
             view_size,
             scale,
             shadow: Shadow::new(shadow_config),
-            blur_config: config.blur,
             clock,
         }
     }
@@ -99,8 +92,6 @@ impl MappedLayer {
         shadow_config.on = false;
         shadow_config.merge_with(&self.rules.shadow);
         self.shadow.update_config(shadow_config);
-
-        self.blur_config = config.blur;
     }
 
     pub fn update_shaders(&mut self) {
@@ -186,10 +177,8 @@ impl MappedLayer {
 
     pub fn render_normal<R: NiriRenderer>(
         &self,
-        mut ctx: RenderCtx<R>,
-        ns: Option<usize>,
+        ctx: RenderCtx<R>,
         location: Point<f64, Logical>,
-        xray_pos: XrayPos,
         push: &mut dyn FnMut(LayerSurfaceRenderElement<R>),
     ) {
         let scale = Scale::from(self.scale);
@@ -197,7 +186,6 @@ impl MappedLayer {
 
         let bob_offset = self.bob_offset();
         let location = location + bob_offset;
-        let xray_pos = xray_pos.offset(bob_offset);
 
         let surface = self.surface.wl_surface();
 
@@ -232,35 +220,12 @@ impl MappedLayer {
         let location = location.to_physical_precise_round(scale).to_logical(scale);
         self.shadow
             .render(ctx.renderer, location, &mut |elem| push(elem.into()));
-
-        let geometry = Rectangle::new(location, self.block_out_buffer.size());
-        let surface_off = Point::new(0., 0.); // No geometry on layer surfaces.
-        let surface_anim_scale = Scale::from(1.);
-        let radius = self.rules.geometry_corner_radius.unwrap_or_default();
-        background_effect::render_for_tile(
-            ctx.as_gles(),
-            ns,
-            geometry,
-            self.scale,
-            false,
-            surface,
-            surface_off,
-            surface_anim_scale,
-            self.blur_config,
-            radius,
-            self.rules.background_effect,
-            should_block_out,
-            xray_pos,
-            &mut |elem| push(elem.into()),
-        );
     }
 
     pub fn render_popups<R: NiriRenderer>(
         &self,
-        mut ctx: RenderCtx<R>,
-        ns: Option<usize>,
+        ctx: RenderCtx<R>,
         location: Point<f64, Logical>,
-        xray_pos: XrayPos,
         push: &mut dyn FnMut(LayerSurfaceRenderElement<R>),
     ) {
         if ctx.target.should_block_out(self.rules.block_out_from) {
@@ -272,7 +237,6 @@ impl MappedLayer {
 
         let bob_offset = self.bob_offset();
         let location = location + bob_offset;
-        let xray_pos = xray_pos.offset(bob_offset);
 
         let surface = self.surface.wl_surface();
         for (popup, offset) in PopupManager::popups_for_surface(surface) {
@@ -294,32 +258,6 @@ impl MappedLayer {
                 scale,
                 alpha,
                 Kind::ScanoutCandidate,
-                &mut |elem| push(elem.into()),
-            );
-
-            let geometry = Rectangle::new(location + offset.to_f64(), popup_geo.size.to_f64());
-            let surface_off = popup_geo.loc.upscale(-1).to_f64();
-            let surface_anim_scale = Scale::from(1.);
-            let mut effect = popup_rules.background_effect;
-            // Default xray to false for pop-ups since they're always on top of something.
-            if effect.xray.is_none() {
-                effect.xray = Some(false);
-            }
-            let xray_pos = xray_pos.offset(offset.to_f64());
-            background_effect::render_for_tile(
-                ctx.as_gles(),
-                ns,
-                geometry,
-                self.scale,
-                false,
-                surface,
-                surface_off,
-                surface_anim_scale,
-                self.blur_config,
-                popup_rules.geometry_corner_radius.unwrap_or_default(),
-                effect,
-                false,
-                xray_pos,
                 &mut |elem| push(elem.into()),
             );
         }

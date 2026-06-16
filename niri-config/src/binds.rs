@@ -13,7 +13,6 @@ use smithay::input::keyboard::Keysym;
 use smithay::input::keyboard::keysyms::KEY_NoSymbol;
 use smithay::input::keyboard::xkb::{KEYSYM_CASE_INSENSITIVE, KEYSYM_NO_FLAGS, keysym_from_name};
 
-use crate::recent_windows::{MruDirection, MruFilter, MruScope};
 use crate::utils::{MergeWith, expect_only_children};
 
 #[derive(Debug, Default, PartialEq)]
@@ -366,26 +365,6 @@ pub enum Action {
     UnsetWindowUrgent(u64),
     #[knus(skip)]
     LoadConfigFile(#[knus(argument)] Option<String>),
-    #[knus(skip)]
-    MruAdvance {
-        direction: MruDirection,
-        scope: Option<MruScope>,
-        filter: Option<MruFilter>,
-    },
-    #[knus(skip)]
-    MruConfirm,
-    #[knus(skip)]
-    MruCancel,
-    #[knus(skip)]
-    MruCloseCurrentWindow,
-    #[knus(skip)]
-    MruFirst,
-    #[knus(skip)]
-    MruLast,
-    #[knus(skip)]
-    MruSetScope(MruScope),
-    #[knus(skip)]
-    MruCycleScope,
 }
 
 impl From<niri_ipc::Action> for Action {

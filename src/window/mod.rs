@@ -3,8 +3,8 @@ use std::cmp::{max, min};
 use niri_config::utils::MergeWith as _;
 use niri_config::window_rule::{Match, WindowRule};
 use niri_config::{
-    BackgroundEffect, BlockOutFrom, BorderRule, CornerRadius, FloatingPosition, PresetSize,
-    ResolvedPopupsRules, ShadowRule, TabIndicatorRule,
+    BlockOutFrom, BorderRule, CornerRadius, FloatingPosition, PresetSize, ResolvedPopupsRules,
+    ShadowRule, TabIndicatorRule,
 };
 use niri_ipc::ColumnDisplay;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
@@ -119,9 +119,6 @@ pub struct ResolvedWindowRules {
 
     /// Override whether to set the Tiled xdg-toplevel state on the window.
     pub tiled_state: Option<bool>,
-
-    /// Background effect configuration.
-    pub background_effect: BackgroundEffect,
 
     /// Rules for this window's popups.
     pub popups: ResolvedPopupsRules,
@@ -300,10 +297,6 @@ impl ResolvedWindowRules {
                 if let Some(x) = rule.tiled_state {
                     resolved.tiled_state = Some(x);
                 }
-
-                resolved
-                    .background_effect
-                    .merge_with(&rule.background_effect);
 
                 resolved.popups.merge_with(&rule.popups);
             }

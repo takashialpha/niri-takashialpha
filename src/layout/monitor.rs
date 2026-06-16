@@ -25,7 +25,6 @@ use crate::render_helpers::RenderCtx;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::shadow::ShadowRenderElement;
 use crate::render_helpers::solid_color::SolidColorRenderElement;
-use crate::render_helpers::xray::XrayPos;
 use crate::rubber_band::RubberBand;
 use crate::utils::transaction::Transaction;
 use crate::utils::{
@@ -1724,9 +1723,7 @@ impl<W: LayoutElement> Monitor<W> {
                 };
             }
 
-            let xray_pos = XrayPos::new(geo.loc, zoom);
-
-            ws.render_floating(ctx.r(), xray_pos, focus_ring, push!());
+            ws.render_floating(ctx.r(), focus_ring, push!());
 
             if let Some(loc) = insert_hint_render_loc
                 && loc.workspace == InsertWorkspace::Existing(ws.id())
@@ -1735,7 +1732,7 @@ impl<W: LayoutElement> Monitor<W> {
                     .render(ctx.renderer, loc.location, push!());
             }
 
-            ws.render_scrolling(ctx.r(), xray_pos, focus_ring, push!());
+            ws.render_scrolling(ctx.r(), focus_ring, push!());
         }
     }
 

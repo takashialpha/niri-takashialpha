@@ -9,9 +9,10 @@ Wayland compositor.
 ## What this is
 
 This is *takashialpha's personal fork* of niri. It is not a rewrite, a competitor,
-or a separate project — it tracks upstream niri and exists for maintenance-flavored
-changes: dependency dieting, build/packaging tweaks, and review-driven cleanups.
-Feature behavior is intended to stay as close to upstream as possible.
+or a separate project — it follows upstream niri and exists for maintenance-flavored
+changes: dependency dieting, build/packaging tweaks, and review-driven cleanups. It
+also deliberately **removes** features and protocols this fork doesn't use, in favor
+of a smaller, cleaner codebase — so behavior can diverge from upstream on purpose.
 
 If you want **niri itself** — what it is, how to install it, how to configure it,
 the keybindings, the IPC, screencasting, everything — go to upstream. This README
@@ -27,7 +28,8 @@ intentionally does **not** duplicate niri's documentation:
 | Goal | the compositor | a leaner personal build of it |
 | Versioning | tagged releases | `0.0.0`; builds identified by commit hash (`--version`) |
 | Dependencies | full set | trimmed (a lot) where practical |
-| Features | upstream of record | (tries) to follow upstream when possible; no intentional divergence |
+| Features | upstream of record | a deliberately reduced subset; unused features/protocols removed |
+| Upstream changes | the source | ported **by hand**, commit by commit (no clean tracking) |
 
 ## Requirements
 
@@ -36,9 +38,10 @@ intentionally does **not** duplicate niri's documentation:
 
 ## Upstream sync policy
 
-When niri upstream lands a feature or fix that's wanted here, it should be pulled in
-and documented promptly rather than left to drift. The intent is to stay current with
-upstream, not to fork away from it.
+There is **no automatic tracking of upstream.** Because this fork removes code and
+diverges on purpose, it does not merge upstream wholesale. Everything wanted from
+upstream — features and fixes — is reviewed and **ported by hand**, commit by commit.
+Merge conflicts are expected and accepted as the cost of a smaller, hand-curated tree.
 
 ## License
 

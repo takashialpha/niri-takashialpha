@@ -24,16 +24,11 @@ use solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use self::primary_gpu_texture::PrimaryGpuTextureRenderElement;
 use self::texture::{TextureBuffer, TextureRenderElement};
 use crate::render_helpers::renderer::AsGlesRenderer;
-use crate::render_helpers::xray::Xray;
 
-pub mod background_effect;
-pub mod blur;
 pub mod border;
 pub mod clipped_surface;
 pub mod damage;
 pub mod debug;
-pub mod effect_buffer;
-pub mod framebuffer_effect;
 pub mod gradient_fade_texture;
 pub mod memory;
 pub mod offscreen;
@@ -49,7 +44,6 @@ pub mod snapshot;
 pub mod solid_color;
 pub mod surface;
 pub mod texture;
-pub mod xray;
 
 /// A rendering context.
 ///
@@ -57,7 +51,6 @@ pub mod xray;
 pub struct RenderCtx<'a, R> {
     pub renderer: &'a mut R,
     pub target: RenderTarget,
-    pub xray: Option<&'a Xray>,
 }
 
 impl<'a, R> RenderCtx<'a, R> {
@@ -67,7 +60,6 @@ impl<'a, R> RenderCtx<'a, R> {
         RenderCtx {
             renderer: self.renderer,
             target: self.target,
-            xray: self.xray,
         }
     }
 }
@@ -77,7 +69,6 @@ impl<'a, R: AsGlesRenderer> RenderCtx<'a, R> {
         RenderCtx {
             renderer: self.renderer.as_gles_renderer(),
             target: self.target,
-            xray: self.xray,
         }
     }
 }

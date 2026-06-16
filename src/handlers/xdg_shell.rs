@@ -837,9 +837,7 @@ impl XdgShellHandler for State {
         let window = mapped.window.clone();
         let output = output.cloned();
 
-        let id = mapped.id();
-
-        self.store_unmap_snapshot(&window, output.as_ref());
+        self.store_unmap_snapshot(&window);
 
         let transaction = Transaction::new();
         let blocker = transaction.blocker();
@@ -852,7 +850,6 @@ impl XdgShellHandler for State {
         let active_window = self.niri.layout.focus().map(|m| &m.window);
         let was_active = active_window == Some(&window);
 
-        self.niri.window_mru_ui.remove_window(id);
         self.niri.layout.remove_window(&window, transaction.clone());
 
         let surface = surface.wl_surface();
@@ -876,7 +873,6 @@ impl XdgShellHandler for State {
 
         if let Some(output) = output {
             self.niri.queue_redraw(&output);
-            self.niri.queue_redraw_mru_output();
         }
     }
 
@@ -1428,7 +1424,7 @@ pub fn add_mapped_toplevel_pre_commit_hook(toplevel: &ToplevelSurface) -> HookId
         let span =
             trace_span!("toplevel pre-commit", surface = %surface.id(), serial = Empty).entered();
 
-        let Some((mapped, output)) = state.niri.layout.find_window_and_output_mut(surface) else {
+        let Some((mapped, _output)) = state.niri.layout.find_window_and_output_mut(surface) else {
             error!("pre-commit hook for mapped surfaces must be removed upon unmapping");
             return;
         };
@@ -1529,8 +1525,7 @@ pub fn add_mapped_toplevel_pre_commit_hook(toplevel: &ToplevelSurface) -> HookId
 
         let window = mapped.window.clone();
         if got_unmapped {
-            let output = output.cloned();
-            state.store_unmap_snapshot(&window, output.as_ref());
+            state.store_unmap_snapshot(&window);
         } else {
             if animate {
                 state.backend.with_primary_renderer(|renderer| {

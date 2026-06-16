@@ -1,10 +1,7 @@
 use niri_ipc::ColumnDisplay;
 
 use crate::FloatOrInt;
-use crate::appearance::{
-    BackgroundEffect, BackgroundEffectRule, BlockOutFrom, BorderRule, CornerRadius, ShadowRule,
-    TabIndicatorRule,
-};
+use crate::appearance::{BlockOutFrom, BorderRule, CornerRadius, ShadowRule, TabIndicatorRule};
 use crate::layout::DefaultPresetSize;
 use crate::utils::{MergeWith, RegexEq};
 
@@ -76,8 +73,6 @@ pub struct WindowRule {
     #[knus(child, unwrap(argument))]
     pub tiled_state: Option<bool>,
     #[knus(child, default)]
-    pub background_effect: BackgroundEffectRule,
-    #[knus(child, default)]
     pub popups: PopupsRule,
 }
 
@@ -88,8 +83,6 @@ pub struct PopupsRule {
     pub opacity: Option<f32>,
     #[knus(child)]
     pub geometry_corner_radius: Option<CornerRadius>,
-    #[knus(child, default)]
-    pub background_effect: BackgroundEffectRule,
 }
 
 /// Resolved popup-specific rules.
@@ -100,9 +93,6 @@ pub struct ResolvedPopupsRules {
 
     /// Corner radius to assume the popups have.
     pub geometry_corner_radius: Option<CornerRadius>,
-
-    /// Background effect configuration for popups.
-    pub background_effect: BackgroundEffect,
 }
 
 impl MergeWith<PopupsRule> for ResolvedPopupsRules {
@@ -113,7 +103,6 @@ impl MergeWith<PopupsRule> for ResolvedPopupsRules {
         if let Some(x) = part.geometry_corner_radius {
             self.geometry_corner_radius = Some(x);
         }
-        self.background_effect.merge_with(&part.background_effect);
     }
 }
 

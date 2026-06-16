@@ -13,7 +13,7 @@
 #[macro_use]
 extern crate tracing;
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fs::{self, File};
@@ -39,7 +39,6 @@ pub mod layer_rule;
 pub mod layout;
 pub mod misc;
 pub mod output;
-pub mod recent_windows;
 pub mod utils;
 pub mod window_rule;
 pub mod workspace;
@@ -55,8 +54,6 @@ pub use crate::layer_rule::LayerRule;
 pub use crate::layout::*;
 pub use crate::misc::*;
 pub use crate::output::{Output, OutputName, Outputs, Position, Vrr};
-use crate::recent_windows::RecentWindowsPart;
-pub use crate::recent_windows::{MruDirection, MruFilter, MruPreviews, MruScope, RecentWindows};
 pub use crate::utils::FloatOrInt;
 use crate::utils::{Flag, MergeWith as _};
 pub use crate::window_rule::{
@@ -80,7 +77,6 @@ pub struct Config {
     pub hotkey_overlay: HotkeyOverlay,
     pub config_notification: ConfigNotification,
     pub animations: Animations,
-    pub blur: Blur,
     pub gestures: Gestures,
     pub overview: Overview,
     pub environment: Environment,
@@ -90,7 +86,6 @@ pub struct Config {
     pub switch_events: SwitchBinds,
     pub debug: Debug,
     pub workspaces: Vec<Workspace>,
-    pub recent_windows: RecentWindows,
 }
 
 #[derive(Debug, Clone)]
@@ -124,7 +119,6 @@ struct IncludeErrors(Vec<knus::Error>);
 //
 // We don't *need* it because we have a recursion limit, but it makes for nicer error messages.
 struct IncludeStack(HashSet<PathBuf>);
-struct SawMruBinds(Rc<Cell<bool>>);
 
 // Rather than listing all fields and deriving knus::Decode, we implement
 // knus::DecodeChildren by hand, since we need custom logic for every field anyway: we want to
@@ -145,7 +139,6 @@ where
         let includes = ctx.get::<Rc<RefCell<Includes>>>().unwrap().clone();
         let include_errors = ctx.get::<Rc<RefCell<IncludeErrors>>>().unwrap().clone();
         let recursion = ctx.get::<Recursion>().unwrap().0;
-        let saw_mru_binds = ctx.get::<SawMruBinds>().unwrap().0.clone();
 
         let mut seen = HashSet::new();
 
@@ -194,7 +187,6 @@ where
                 "hotkey-overlay" => m_merge!(hotkey_overlay),
                 "config-notification" => m_merge!(config_notification),
                 "animations" => m_merge!(animations),
-                "blur" => m_merge!(blur),
                 "gestures" => m_merge!(gestures),
                 "overview" => m_merge!(overview),
                 "switch-events" => m_merge!(switch_events),
@@ -273,21 +265,6 @@ where
                     }
 
                     config.borrow_mut().layout.merge_with(&part);
-                }
-
-                "recent-windows" => {
-                    let part = RecentWindowsPart::decode_node(node, ctx)?;
-
-                    let mut config = config.borrow_mut();
-
-                    // When an MRU binds section is encountered for the first time, clear out the
-                    // default MRU binds.
-                    if !saw_mru_binds.get() && part.binds.is_some() {
-                        saw_mru_binds.set(true);
-                        config.recent_windows.binds.clear();
-                    }
-
-                    config.recent_windows.merge_with(&part);
                 }
 
                 "include" => {
@@ -409,7 +386,6 @@ where
                                     ctx.set(includes.clone());
                                     ctx.set(include_errors.clone());
                                     ctx.set(IncludeStack(include_stack));
-                                    ctx.set(SawMruBinds(saw_mru_binds.clone()));
                                     ctx.set(config.clone());
                                 },
                             );
@@ -508,7 +484,6 @@ impl Config {
                 ctx.set(includes.clone());
                 ctx.set(include_errors.clone());
                 ctx.set(IncludeStack(include_stack));
-                ctx.set(SawMruBinds(Rc::new(Cell::new(false))));
                 ctx.set(config.clone());
             });
 

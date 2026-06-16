@@ -1788,7 +1788,6 @@ impl Tty {
         let ctx = RenderCtx {
             renderer: &mut renderer,
             target: RenderTarget::Output,
-            xray: None,
         };
         let mut elements = niri.render_to_vec(ctx, output, true);
 
@@ -1951,51 +1950,6 @@ impl Tty {
             surface,
         ) {
             warn!("error doing early import: {err:?}");
-        }
-    }
-
-    pub fn get_gamma_size(&self, output: &Output) -> anyhow::Result<u32> {
-        let tty_state = output.user_data().get::<TtyOutputState>().unwrap();
-        let crtc = tty_state.crtc;
-
-        let device = self
-            .devices
-            .get(&tty_state.node)
-            .context("missing device")?;
-
-        let surface = device.surfaces.get(&crtc).context("missing surface")?;
-        if let Some(gamma_props) = &surface.gamma_props {
-            gamma_props.gamma_size(&device.drm)
-        } else {
-            let info = device
-                .drm
-                .get_crtc(crtc)
-                .context("error getting crtc info")?;
-            Ok(info.gamma_length())
-        }
-    }
-
-    pub fn set_gamma(&mut self, output: &Output, ramp: Option<Vec<u16>>) -> anyhow::Result<()> {
-        let tty_state = output.user_data().get::<TtyOutputState>().unwrap();
-        let crtc = tty_state.crtc;
-
-        let device = self
-            .devices
-            .get_mut(&tty_state.node)
-            .context("missing device")?;
-        let surface = device.surfaces.get_mut(&crtc).context("missing surface")?;
-
-        // Cannot change properties while the device is inactive.
-        if !self.session.is_active() {
-            surface.pending_gamma_change = Some(ramp);
-            return Ok(());
-        }
-
-        let ramp = ramp.as_deref();
-        if let Some(gamma_props) = &mut surface.gamma_props {
-            gamma_props.set_gamma(&device.drm, ramp)
-        } else {
-            set_gamma_for_crtc(&device.drm, crtc, ramp)
         }
     }
 

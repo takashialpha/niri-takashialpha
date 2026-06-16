@@ -72,7 +72,6 @@ use smithay::utils::{
     ClockSource, IsAlive as _, Logical, Monotonic, Physical, Point, Rectangle, SERIAL_COUNTER,
     Scale, Size, Transform,
 };
-use smithay::wayland::background_effect::BackgroundEffectState;
 use smithay::wayland::compositor::{
     CompositorClientState, CompositorHandler, CompositorState, HookId, SurfaceData,
     TraversalAction, with_states, with_surface_tree_downward,
@@ -135,18 +134,14 @@ use crate::layout::{
 use crate::niri_render_elements;
 use crate::protocols::ext_workspace::{self, ExtWorkspaceManagerState};
 use crate::protocols::foreign_toplevel::{self, ForeignToplevelManagerState};
-use crate::protocols::gamma_control::GammaControlManagerState;
 use crate::protocols::output_management::OutputManagementManagerState;
 use crate::protocols::screencopy::{Screencopy, ScreencopyBuffer, ScreencopyManagerState};
-use crate::protocols::virtual_pointer::VirtualPointerManagerState;
-use crate::render_helpers::blur::BlurOptions;
 use crate::render_helpers::debug::push_opaque_regions;
 use crate::render_helpers::primary_gpu_texture::PrimaryGpuTextureRenderElement;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use crate::render_helpers::surface::push_elements_from_surface_tree;
 use crate::render_helpers::texture::TextureBuffer;
-use crate::render_helpers::xray::{Xray, XrayPos};
 use crate::render_helpers::{
     RenderCtx, RenderTarget, encompassing_geo, render_to_dmabuf, render_to_encompassing_texture,
     render_to_shm, render_to_texture, render_to_vec, shaders,
@@ -154,7 +149,6 @@ use crate::render_helpers::{
 use crate::ui::config_error_notification::ConfigErrorNotification;
 use crate::ui::exit_confirm_dialog::{ExitConfirmDialog, ExitConfirmDialogRenderElement};
 use crate::ui::hotkey_overlay::HotkeyOverlay;
-use crate::ui::mru::{MruCloseRequest, WindowMruUi, WindowMruUiRenderElement};
 use crate::ui::screen_transition::{self, ScreenTransition};
 use crate::ui::screenshot_ui::{OutputScreenshot, ScreenshotUi, ScreenshotUiRenderElement};
 use crate::utils::scale::{closest_representable_scale, guess_monitor_scale};
@@ -267,7 +261,6 @@ pub struct Niri {
     pub screencopy_state: ScreencopyManagerState,
     pub output_management_state: OutputManagementManagerState,
     pub viewporter_state: ViewporterState,
-    pub background_effect_state: BackgroundEffectState,
     pub xdg_foreign_state: XdgForeignState,
     pub shm_state: ShmState,
     pub output_manager_state: OutputManagerState,
@@ -279,7 +272,6 @@ pub struct Niri {
     pub input_method_state: InputMethodManagerState,
     pub keyboard_shortcuts_inhibit_state: KeyboardShortcutsInhibitState,
     pub virtual_keyboard_state: VirtualKeyboardManagerState,
-    pub virtual_pointer_state: VirtualPointerManagerState,
     pub pointer_gestures_state: PointerGesturesState,
     pub relative_pointer_state: RelativePointerManagerState,
     pub pointer_constraints_state: PointerConstraintsState,
@@ -293,7 +285,6 @@ pub struct Niri {
     pub popup_grab: Option<PopupGrabState>,
     pub presentation_state: PresentationState,
     pub security_context_state: SecurityContextState,
-    pub gamma_control_manager_state: GammaControlManagerState,
     pub activation_state: XdgActivationState,
 
     pub seat: Seat<State>,
@@ -364,9 +355,6 @@ pub struct Niri {
     pub config_error_notification: ConfigErrorNotification,
     pub hotkey_overlay: HotkeyOverlay,
     pub exit_confirm_dialog: ExitConfirmDialog,
-
-    pub window_mru_ui: WindowMruUi,
-    pub pending_mru_commit: Option<PendingMruCommit>,
 
     pub pick_window: Option<async_channel::Sender<Option<MappedId>>>,
     pub pick_color: Option<async_channel::Sender<Option<niri_ipc::PickedColor>>>,
@@ -439,7 +427,6 @@ pub struct OutputState {
     /// Solid color buffer for the backdrop that we use instead of clearing to avoid damage
     /// tracking issues and make screenshots easier.
     pub backdrop_buffer: SolidColorBuffer,
-    pub xray: Xray,
     pub lock_render_state: LockRenderState,
     pub lock_surface: Option<LockSurface>,
     pub lock_color_buffer: SolidColorBuffer,
@@ -481,7 +468,6 @@ pub enum KeyboardFocus {
     ScreenshotUi,
     ExitConfirmDialog,
     Overview,
-    Mru,
 }
 
 #[derive(Default, Clone, PartialEq)]
@@ -536,14 +522,6 @@ pub enum CenterCoords {
     BothAlways,
 }
 
-/// Pending update to a window's focus timestamp.
-#[derive(Debug)]
-pub struct PendingMruCommit {
-    id: MappedId,
-    token: RegistrationToken,
-    stamp: Duration,
-}
-
 impl RedrawState {
     fn queue_redraw(self) -> Self {
         match self {
@@ -582,7 +560,6 @@ impl KeyboardFocus {
             KeyboardFocus::ScreenshotUi => None,
             KeyboardFocus::ExitConfirmDialog => None,
             KeyboardFocus::Overview => None,
-            KeyboardFocus::Mru => None,
         }
     }
 
@@ -594,7 +571,6 @@ impl KeyboardFocus {
             KeyboardFocus::ScreenshotUi => None,
             KeyboardFocus::ExitConfirmDialog => None,
             KeyboardFocus::Overview => None,
-            KeyboardFocus::Mru => None,
         }
     }
 
@@ -880,18 +856,6 @@ impl State {
         self.niri.queue_redraw_all();
     }
 
-    pub fn confirm_mru(&mut self) {
-        if let Some(window) = self.niri.close_mru(MruCloseRequest::Confirm) {
-            // focus_window() will warp the cursor to the window only when the keyboard focus is on
-            // the layout. However, right now the keyboard focus is still on the MRU (that we had
-            // just closed) since it's only updated at the end of the event loop cycle. Force-update
-            // the keyboard focus here to make cursor warping work.
-            self.update_keyboard_focus();
-
-            self.focus_window(&window);
-        }
-    }
-
     pub fn maybe_warp_cursor_to_focus(&mut self) -> bool {
         let focused = match self.niri.config.borrow().input.warp_mouse_to_focus {
             None => return false,
@@ -1035,8 +999,6 @@ impl State {
             }
         } else if self.niri.screenshot_ui.is_open() {
             KeyboardFocus::ScreenshotUi
-        } else if self.niri.window_mru_ui.is_open() {
-            KeyboardFocus::Mru
         } else if let Some(output) = self.niri.layout.active_output() {
             let mon = self.niri.layout.monitor_for_output(output).unwrap();
             let layers = layer_map_for_output(output);
@@ -1160,39 +1122,8 @@ impl State {
             {
                 mapped.set_is_focused(true);
 
-                // If `mapped` does not have a focus timestamp, then the window is newly
-                // created/mapped and a timestamp is unconditionally created.
-                //
-                // If `mapped` already has a timestamp only update it after the focus lock-in
-                // period has gone by without the focus having elsewhere.
-                let stamp = get_monotonic_time();
-
-                let debounce = self.niri.config.borrow().recent_windows.debounce_ms;
-                let debounce = Duration::from_millis(u64::from(debounce));
-
-                if mapped.get_focus_timestamp().is_none() || debounce.is_zero() {
-                    mapped.set_focus_timestamp(stamp);
-                } else {
-                    let timer = Timer::from_duration(debounce);
-
-                    let focus_token = self
-                        .niri
-                        .event_loop
-                        .insert_source(timer, move |_, _, state| {
-                            state.niri.mru_apply_keyboard_commit();
-                            TimeoutAction::Drop
-                        })
-                        .unwrap();
-                    if let Some(PendingMruCommit { token, .. }) =
-                        self.niri.pending_mru_commit.replace(PendingMruCommit {
-                            id: mapped.id(),
-                            token: focus_token,
-                            stamp,
-                        })
-                    {
-                        self.niri.event_loop.remove(token);
-                    }
-                }
+                // Record when this window was last focused, used by focus-window-previous.
+                mapped.set_focus_timestamp(get_monotonic_time());
             }
 
             if let Some(grab) = self.niri.popup_grab.as_mut()
@@ -1358,7 +1289,6 @@ impl State {
         let mut layer_rules_changed = false;
         let mut shaders_changed = false;
         let mut cursor_inactivity_timeout_changed = false;
-        let mut recent_windows_changed = false;
         let mut old_config = self.niri.config.borrow_mut();
 
         // Reload the cursor.
@@ -1483,10 +1413,6 @@ impl State {
             output_config_changed = true;
         }
 
-        if config.recent_windows != old_config.recent_windows {
-            recent_windows_changed = true;
-        }
-
         *old_config = config;
 
         if let Some(outputs) = preserved_output_config {
@@ -1555,14 +1481,6 @@ impl State {
             // Force reset due to timeout change.
             self.niri.pointer_inactivity_timer_got_reset = false;
             self.niri.reset_pointer_inactivity_timer();
-        }
-
-        if binds_changed {
-            self.niri.window_mru_ui.update_binds();
-        }
-
-        if recent_windows_changed {
-            self.niri.window_mru_ui.update_config();
         }
 
         // Can't really update xdg-decoration settings since we have to hide the globals for CSD
@@ -1891,48 +1809,9 @@ impl State {
         self.niri.queue_redraw_all();
     }
 
-    pub fn store_unmap_snapshot(&mut self, window: &Window, output: Option<&Output>) {
-        // The unmapping tile may have an xray background, in which case we will render xray
-        // elements, so they need to be updated.
-        self.niri.update_xray_render_elements(output);
-
+    pub fn store_unmap_snapshot(&mut self, window: &Window) {
         self.backend.with_primary_renderer(|renderer| {
-            if let Some(output) = output {
-                let mut ctx = RenderCtx {
-                    target: RenderTarget::Output,
-                    renderer,
-                    xray: None,
-                };
-
-                self.niri.fill_xray_elements(ctx.r(), output);
-
-                // If any background layer has block_out_from, also fill the Screencast xray
-                // buffer so the unmap snapshot can render a buffer with blocked-out background.
-                //
-                // This will be used in Tile::render_snapshot().
-                let has_blocked_out = self.niri.has_blocked_out_background_layers(output);
-                if has_blocked_out {
-                    let screencast_ctx = RenderCtx {
-                        target: RenderTarget::Screencast,
-                        ..ctx.r()
-                    };
-                    self.niri.fill_xray_elements(screencast_ctx, output);
-                }
-
-                let state = self.niri.output_state.get_mut(output).unwrap();
-                self.niri.layout.store_unmap_snapshot(
-                    renderer,
-                    Some(&mut state.xray),
-                    has_blocked_out,
-                    window,
-                );
-
-                self.niri.clear_xray_elements(output);
-            } else {
-                self.niri
-                    .layout
-                    .store_unmap_snapshot(renderer, None, false, window);
-            }
+            self.niri.layout.store_unmap_snapshot(renderer, window);
         });
     }
 }
@@ -2043,8 +1922,6 @@ impl Niri {
             KeyboardShortcutsInhibitState::new::<State>(&display_handle);
         let virtual_keyboard_state =
             VirtualKeyboardManagerState::new::<State, _>(&display_handle, client_is_unrestricted);
-        let virtual_pointer_state =
-            VirtualPointerManagerState::new::<State, _>(&display_handle, client_is_unrestricted);
         let foreign_toplevel_state =
             ForeignToplevelManagerState::new::<State, _>(&display_handle, client_is_unrestricted);
         let ext_workspace_state =
@@ -2055,14 +1932,8 @@ impl Niri {
         let screencopy_state =
             ScreencopyManagerState::new::<State, _>(&display_handle, client_is_unrestricted);
         let viewporter_state = ViewporterState::new::<State>(&display_handle);
-        let background_effect_state = BackgroundEffectState::new::<State>(&display_handle);
         let xdg_foreign_state = XdgForeignState::new::<State>(&display_handle);
 
-        let is_tty = matches!(backend, Backend::Tty(_));
-        let gamma_control_manager_state =
-            GammaControlManagerState::new::<State, _>(&display_handle, move |client| {
-                is_tty && !client.get_data::<ClientState>().unwrap().restricted
-            });
         let activation_state = XdgActivationState::new::<State>(&display_handle);
         event_loop
             .insert_source(
@@ -2115,7 +1986,6 @@ impl Niri {
         let mods_with_tablet_stylus_binds = mods_with_tablet_stylus_binds(mod_key, &config_.binds);
 
         let screenshot_ui = ScreenshotUi::new(animation_clock.clone(), config.clone());
-        let window_mru_ui = WindowMruUi::new(config.clone());
         let config_error_notification =
             ConfigErrorNotification::new(animation_clock.clone(), config.clone());
 
@@ -2227,13 +2097,11 @@ impl Niri {
             output_management_state,
             screencopy_state,
             viewporter_state,
-            background_effect_state,
             xdg_foreign_state,
             text_input_state,
             input_method_state,
             keyboard_shortcuts_inhibit_state,
             virtual_keyboard_state,
-            virtual_pointer_state,
             shm_state,
             output_manager_state,
             dmabuf_state,
@@ -2257,7 +2125,6 @@ impl Niri {
             bind_repeat_timer: Option::default(),
             presentation_state,
             security_context_state,
-            gamma_control_manager_state,
             activation_state,
 
             seat,
@@ -2298,9 +2165,6 @@ impl Niri {
             config_error_notification,
             hotkey_overlay,
             exit_confirm_dialog,
-
-            window_mru_ui,
-            pending_mru_commit: None,
 
             pick_window: None,
             pick_color: None,
@@ -2521,7 +2385,6 @@ impl Niri {
             vblank_throttle: VBlankThrottle::new(self.event_loop.clone(), name.connector.clone()),
             frame_callback_sequence: 0,
             backdrop_buffer: SolidColorBuffer::new(size, backdrop_color),
-            xray: Xray::new(),
             lock_render_state,
             lock_surface: None,
             lock_color_buffer: SolidColorBuffer::new(size, CLEAR_COLOR_LOCKED),
@@ -2557,7 +2420,6 @@ impl Niri {
         self.layout.remove_output(output);
         self.global_space.unmap_output(output);
         self.reposition_outputs(None);
-        self.gamma_control_manager_state.output_removed(output);
 
         let state = self.output_state.remove(output).unwrap();
 
@@ -2615,10 +2477,6 @@ impl Niri {
             self.cursor_manager
                 .set_cursor_image(CursorImageStatus::default_named());
             self.queue_redraw_all();
-        }
-
-        if self.window_mru_ui.output() == Some(output) {
-            self.cancel_mru();
         }
     }
 
@@ -2887,11 +2745,7 @@ impl Niri {
     /// The cursor may be inside the window's activation region, but not within the window's input
     /// region.
     pub fn window_under(&self, pos: Point<f64, Logical>) -> Option<&Mapped> {
-        if self.exit_confirm_dialog.is_open()
-            || self.is_locked()
-            || self.screenshot_ui.is_open()
-            || self.window_mru_ui.is_open()
-        {
+        if self.exit_confirm_dialog.is_open() || self.is_locked() || self.screenshot_ui.is_open() {
             return None;
         }
 
@@ -2970,7 +2824,7 @@ impl Niri {
             return rv;
         }
 
-        if self.screenshot_ui.is_open() || self.window_mru_ui.is_open() {
+        if self.screenshot_ui.is_open() {
             return rv;
         }
 
@@ -3630,7 +3484,6 @@ impl Niri {
             KeyboardFocus::ScreenshotUi => true,
             KeyboardFocus::ExitConfirmDialog => true,
             KeyboardFocus::Overview => true,
-            KeyboardFocus::Mru => true,
         };
 
         self.layout.refresh(layout_is_active);
@@ -3694,7 +3547,6 @@ impl Niri {
         self.config_error_notification.advance_animations();
         self.exit_confirm_dialog.advance_animations();
         self.screenshot_ui.advance_animations();
-        self.window_mru_ui.advance_animations();
 
         for state in self.output_state.values_mut() {
             if let Some(transition) = &mut state.screen_transition
@@ -3706,7 +3558,6 @@ impl Niri {
     }
 
     pub fn update_render_elements(&mut self, output: Option<&Output>) {
-        self.update_xray_render_elements(output);
         self.layout.update_render_elements(output);
 
         for (out, state) in self.output_state.iter_mut() {
@@ -3720,49 +3571,6 @@ impl Niri {
 
                 let layer_map = layer_map_for_output(out);
                 for surface in layer_map.layers() {
-                    let Some(mapped) = self.mapped_layer_surfaces.get_mut(surface) else {
-                        continue;
-                    };
-                    let Some(geo) = layer_map.layer_geometry(surface) else {
-                        continue;
-                    };
-
-                    mapped.update_render_elements(geo.size.to_f64());
-                }
-            }
-        }
-    }
-
-    // Updates only those render elements that go in the xray buffer.
-    pub fn update_xray_render_elements(&mut self, output: Option<&Output>) {
-        for (out, state) in self.output_state.iter_mut() {
-            if output.is_none_or(|output| out == output) {
-                let scale = Scale::from(out.current_scale().fractional_scale());
-                let mode = out.current_mode().unwrap();
-                let transform = out.current_transform();
-                let size = transform.transform_size(mode.size);
-
-                state.xray.workspaces.clear();
-                let mon = self.layout.monitor_for_output(out).unwrap();
-                for (ws, geo) in mon.workspaces_with_render_geo() {
-                    let bg_color = ws.render_background().color();
-                    state.xray.workspaces.push((geo, bg_color));
-                }
-                state.xray.backdrop_color = state.backdrop_buffer.color();
-                let blur_options = BlurOptions::from(self.config.borrow().blur);
-                for buf in &state.xray.background {
-                    let mut buffer = buf.borrow_mut();
-                    buffer.update_size(size, scale);
-                    buffer.update_blur_options(blur_options);
-                }
-                for buf in &state.xray.backdrop {
-                    let mut buffer = buf.borrow_mut();
-                    buffer.update_size(size, scale);
-                    buffer.update_blur_options(blur_options);
-                }
-
-                let layer_map = layer_map_for_output(out);
-                for surface in layer_map.layers_on(Layer::Background) {
                     let Some(mapped) = self.mapped_layer_surfaces.get_mut(surface) else {
                         continue;
                     };
@@ -3813,16 +3621,7 @@ impl Niri {
             };
         }
 
-        self.fill_xray_elements(ctx.as_gles(), output);
-
-        // Reborrow to shorten lifetime to be able to put in xray.
-        let mut ctx = ctx.r();
-        let state = self.output_state.get(output).unwrap();
-        ctx.xray = Some(&state.xray);
-
         self.render_inner(ctx, output, include_pointer, push);
-
-        self.clear_xray_elements(output);
     }
 
     fn render_inner<R: NiriRenderer>(
@@ -3918,10 +3717,6 @@ impl Niri {
             push(element.into());
         }
 
-        // Then, the Alt-Tab switcher.
-        self.window_mru_ui
-            .render_output(self, output, ctx.r(), &mut |elem| push(elem.into()));
-
         // Don't draw the focus ring on the workspaces while interactively moving above those
         // workspaces, since the interactively-moved window already has a focus ring.
         let focus_ring = !self.layout.interactive_move_is_moving_above_output(output);
@@ -3936,55 +3731,31 @@ impl Niri {
         // We use macros instead of closures to avoid borrowing issues (renderer and push() go
         // into different functions).
         macro_rules! push_popups_from_layer {
-            ($layer:expr, $ns:expr, $xray_pos:expr, $backdrop:expr, $push:expr) => {{
-                self.render_layer_popups(
-                    ctx.r(),
-                    $ns,
-                    &layer_map,
-                    $layer,
-                    $xray_pos,
-                    $backdrop,
-                    $push,
-                );
+            ($layer:expr, $backdrop:expr, $push:expr) => {{
+                self.render_layer_popups(ctx.r(), &layer_map, $layer, $backdrop, $push);
             }};
             ($layer:expr, true) => {{
-                push_popups_from_layer!($layer, None, XrayPos::default(), true, &mut |elem| push(
-                    elem.into()
-                ));
+                push_popups_from_layer!($layer, true, &mut |elem| push(elem.into()));
             }};
-            ($layer:expr, $ns:expr, $xray_pos:expr, $push:expr) => {{
-                push_popups_from_layer!($layer, $ns, $xray_pos, false, $push);
+            ($layer:expr, $push:expr) => {{
+                push_popups_from_layer!($layer, false, $push);
             }};
             ($layer:expr) => {{
-                push_popups_from_layer!($layer, None, XrayPos::default(), false, &mut |elem| push(
-                    elem.into()
-                ));
+                push_popups_from_layer!($layer, false, &mut |elem| push(elem.into()));
             }};
         }
         macro_rules! push_normal_from_layer {
-            ($layer:expr, $ns:expr, $xray_pos:expr, $backdrop:expr, $push:expr) => {{
-                self.render_layer_normal(
-                    ctx.r(),
-                    $ns,
-                    &layer_map,
-                    $layer,
-                    $xray_pos,
-                    $backdrop,
-                    $push,
-                );
+            ($layer:expr, $backdrop:expr, $push:expr) => {{
+                self.render_layer_normal(ctx.r(), &layer_map, $layer, $backdrop, $push);
             }};
             ($layer:expr, true) => {{
-                push_normal_from_layer!($layer, None, XrayPos::default(), true, &mut |elem| {
-                    push(elem.into())
-                });
+                push_normal_from_layer!($layer, true, &mut |elem| push(elem.into()));
             }};
-            ($layer:expr, $ns:expr, $xray_pos:expr, $push:expr) => {{
-                push_normal_from_layer!($layer, $ns, $xray_pos, false, $push);
+            ($layer:expr, $push:expr) => {{
+                push_normal_from_layer!($layer, false, $push);
             }};
             ($layer:expr) => {{
-                push_normal_from_layer!($layer, None, XrayPos::default(), false, &mut |elem| {
-                    push(elem.into())
-                });
+                push_normal_from_layer!($layer, false, &mut |elem| push(elem.into()));
             }};
         }
 
@@ -4034,28 +3805,16 @@ impl Niri {
                 };
             }
 
-            for (ws, geo) in mon.workspaces_with_render_geo() {
-                let ns = Some(ws.id().get() as usize);
-                let xray_pos = XrayPos::new(geo.loc, zoom);
-                push_popups_from_layer!(Layer::Bottom, ns, xray_pos, process!(geo));
-                push_popups_from_layer!(Layer::Background, ns, xray_pos, process!(geo));
+            for (_ws, geo) in mon.workspaces_with_render_geo() {
+                push_popups_from_layer!(Layer::Bottom, process!(geo));
+                push_popups_from_layer!(Layer::Background, process!(geo));
             }
 
             mon.render_workspaces(ctx.r(), focus_ring, &mut |elem| push(elem.into()));
 
             for (ws, geo) in mon.workspaces_with_render_geo() {
-                // The render element namespace. This will be set to the workspace index for
-                // elements duplicated across workspaces (i.e. background and bottom layers) in
-                // order to have their non-xray framebuffer effects separated from each other.
-                //
-                // This doesn't have to correspond exactly to workspace id or idx, the only
-                // requirement is that there's only one framebuffer effect element with a given id +
-                // namespace on the frame at once. Id + namespace is used as the cache key in the
-                // damage tracker.
-                let ns = Some(ws.id().get() as usize);
-                let xray_pos = XrayPos::new(geo.loc, zoom);
-                push_normal_from_layer!(Layer::Bottom, ns, xray_pos, process!(geo));
-                push_normal_from_layer!(Layer::Background, ns, xray_pos, process!(geo));
+                push_normal_from_layer!(Layer::Bottom, process!(geo));
+                push_normal_from_layer!(Layer::Background, process!(geo));
 
                 process!(geo)(ws.render_background());
             }
@@ -4068,90 +3827,6 @@ impl Niri {
         push_normal_from_layer!(Layer::Background, true);
 
         push(backdrop);
-    }
-
-    pub fn fill_xray_elements(&self, mut ctx: RenderCtx<GlesRenderer>, output: &Output) {
-        // Make sure the xrayed elements themselves cannot use xray by mistake.
-        ctx.xray = None;
-
-        let state = self.output_state.get(output).unwrap();
-        let xray = &state.xray;
-        let layer_map = layer_map_for_output(output);
-
-        // FIXME: it would be cool to call this code on-demand. It's even relatively simple to do:
-        // move this function to after the render_inner() call, check if
-        // Rc::strong_count(&xray.background) > 1, and only then construct the elements. This way,
-        // only if something referenced the xray buffer will the elements get constructed.
-        //
-        // Unfortunately, currently this runs into an important limitation: offscreens are rendered
-        // immediately deep inside render_inner(), and when they are, they already need the xray
-        // elements filled.
-        //
-        // Perhaps in the future when offscreen rendering becomes on-demand, this optimization will
-        // be possible.
-
-        let mut buffer = xray.background[ctx.target as usize].borrow_mut();
-        {
-            let elements = buffer.elements();
-            elements.clear();
-            self.render_layer_normal(
-                ctx.r(),
-                None,
-                &layer_map,
-                Layer::Background,
-                XrayPos::default(),
-                false,
-                &mut |elem| elements.push(elem.into()),
-            );
-            // Avoid unused capacity remaining forever.
-            elements.shrink_to_fit();
-        }
-
-        let mut buffer = xray.backdrop[ctx.target as usize].borrow_mut();
-        {
-            let elements = buffer.elements();
-            elements.clear();
-            self.render_layer_normal(
-                ctx.r(),
-                None,
-                &layer_map,
-                Layer::Background,
-                XrayPos::default(),
-                true,
-                &mut |elem| elements.push(elem.into()),
-            );
-            // Avoid unused capacity remaining forever.
-            elements.shrink_to_fit();
-        }
-    }
-
-    pub fn clear_xray_elements(&self, output: &Output) {
-        let state = self.output_state.get(output).unwrap();
-        let xray = &state.xray;
-
-        // Clear the xray elements for all render targets after all rendering that could use them
-        // did so.
-        for buf in &xray.background {
-            buf.borrow_mut().elements().clear();
-        }
-        for buf in &xray.backdrop {
-            buf.borrow_mut().elements().clear();
-        }
-    }
-
-    /// Checks if any background layer surface has `block_out_from` set.
-    pub fn has_blocked_out_background_layers(&self, output: &Output) -> bool {
-        let layer_map = layer_map_for_output(output);
-        for for_backdrop in [false, true] {
-            for (mapped, _geo) in
-                self.layers_in_render_order(&layer_map, Layer::Background, for_backdrop)
-            {
-                if mapped.rules().block_out_from.is_some() {
-                    return true;
-                }
-            }
-        }
-        false
     }
 
     fn layers_in_render_order<'a>(
@@ -4173,39 +3848,31 @@ impl Niri {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn render_layer_normal<R: NiriRenderer>(
         &self,
         mut ctx: RenderCtx<R>,
-        ns: Option<usize>,
         layer_map: &LayerMap,
         layer: Layer,
-        xray_pos: XrayPos,
         for_backdrop: bool,
         push: &mut dyn FnMut(LayerSurfaceRenderElement<R>),
     ) {
         for (mapped, geo) in self.layers_in_render_order(layer_map, layer, for_backdrop) {
             let loc = geo.loc.to_f64();
-            let xray_pos = xray_pos.offset(loc);
-            mapped.render_normal(ctx.r(), ns, loc, xray_pos, push);
+            mapped.render_normal(ctx.r(), loc, push);
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn render_layer_popups<R: NiriRenderer>(
         &self,
         mut ctx: RenderCtx<R>,
-        ns: Option<usize>,
         layer_map: &LayerMap,
         layer: Layer,
-        xray_pos: XrayPos,
         for_backdrop: bool,
         push: &mut dyn FnMut(LayerSurfaceRenderElement<R>),
     ) {
         for (mapped, geo) in self.layers_in_render_order(layer_map, layer, for_backdrop) {
             let loc = geo.loc.to_f64();
-            let xray_pos = xray_pos.offset(loc);
-            mapped.render_popups(ctx.r(), ns, loc, xray_pos, push);
+            mapped.render_popups(ctx.r(), loc, push);
         }
     }
 
@@ -4232,7 +3899,6 @@ impl Niri {
                 self.config_error_notification.are_animations_ongoing();
             state.unfinished_animations_remain |= self.exit_confirm_dialog.are_animations_ongoing();
             state.unfinished_animations_remain |= self.screenshot_ui.are_animations_ongoing();
-            state.unfinished_animations_remain |= self.window_mru_ui.are_animations_ongoing();
             state.unfinished_animations_remain |= state.screen_transition.is_some();
 
             // Also keep redrawing if the current cursor is animated.
@@ -4457,41 +4123,15 @@ impl Niri {
             });
         }
 
-        let xray = &self.output_state[output].xray;
-        let xray_bg = xray.background[RenderTarget::Output as usize].borrow();
-        let xray_bd = xray.backdrop[RenderTarget::Output as usize].borrow();
-
         for layer in layer_map_for_output(output).layers() {
             let surface = layer.wl_surface();
-            let is_background = layer.layer() == Layer::Background;
 
             with_surfaces_surface_tree(surface, |surface, states| {
                 let primary_scanout_output = states
                     .data_map
                     .get_or_insert_threadsafe(Mutex::<PrimaryScanoutOutput>::default);
                 let mut primary_scanout_output = primary_scanout_output.lock().unwrap();
-                let mut id = Id::from_wayland_resource(surface);
-
-                // Background layers may be invisible normally but visible through an xray
-                // background effect. Try to find it and use the xray element's id in this case.
-                //
-                // FIXME: this won't work if there's another layer of offscreen (e.g. window with
-                // an xray background during its opening animation). But hopefully with the
-                // refactor to draw background effects outside offscreens it won't be a problem.
-                if is_background && !render_element_states.element_was_presented(id.clone()) {
-                    // A layer may be present either in background or backdrop, never in both.
-                    if xray_bg
-                        .render_element_states()
-                        .is_some_and(|s| s.element_was_presented(id.clone()))
-                    {
-                        id = xray_bg.id().clone();
-                    } else if xray_bd
-                        .render_element_states()
-                        .is_some_and(|s| s.element_was_presented(id.clone()))
-                    {
-                        id = xray_bd.id().clone();
-                    }
-                }
+                let id = Id::from_wayland_resource(surface);
 
                 primary_scanout_output.update_from_render_element_states(
                     id,
@@ -4503,7 +4143,6 @@ impl Niri {
                 );
             });
 
-            // Popups never go into xray buffers.
             for (popup, _) in PopupManager::popups_for_surface(surface) {
                 let surface = popup.wl_surface();
                 with_surfaces_surface_tree(surface, |surface, states| {
@@ -4882,7 +4521,6 @@ impl Niri {
                 let ctx = RenderCtx {
                     renderer,
                     target: RenderTarget::ScreenCapture,
-                    xray: None,
                 };
                 let offset = screencopy.region_loc().upscale(-1);
                 let mut elements = Vec::new();
@@ -4953,7 +4591,6 @@ impl Niri {
         let ctx = RenderCtx {
             renderer,
             target: RenderTarget::ScreenCapture,
-            xray: None,
         };
         let offset = screencopy.region_loc().upscale(-1);
         let mut elements = Vec::new();
@@ -5069,11 +4706,7 @@ impl Niri {
                 RenderTarget::ScreenCapture,
             ];
             let screenshot = targets.map(|target| {
-                let ctx = RenderCtx {
-                    renderer,
-                    target,
-                    xray: None,
-                };
+                let ctx = RenderCtx { renderer, target };
                 let elements = self.render_to_vec(ctx, &output, false);
                 let elements = elements.iter().rev();
 
@@ -5152,7 +4785,6 @@ impl Niri {
         let ctx = RenderCtx {
             renderer,
             target: RenderTarget::ScreenCapture,
-            xray: None,
         };
         let elements = self.render_to_vec(ctx, output, include_pointer);
         let elements = elements.iter().rev();
@@ -5203,14 +4835,12 @@ impl Niri {
         let ctx = RenderCtx {
             renderer,
             target: RenderTarget::ScreenCapture,
-            xray: None,
         };
         mapped.render(
             ctx,
             mapped.window.geometry().loc.to_f64(),
             scale,
             alpha,
-            XrayPos::default(),
             &mut |elem| elements.push(elem.into()),
         );
 
@@ -5435,7 +5065,6 @@ impl Niri {
                 self.screenshot_ui.close();
                 self.cursor_manager
                     .set_cursor_image(CursorImageStatus::default_named());
-                self.cancel_mru();
 
                 if self.output_state.is_empty() {
                     // There are no outputs, lock the session right away.
@@ -5576,10 +5205,6 @@ impl Niri {
             return;
         }
 
-        if self.window_mru_ui.is_open() {
-            return;
-        }
-
         // Recompute the current pointer focus because we don't update it during animations.
         let current_focus = self.contents_under(pointer.current_location());
 
@@ -5644,11 +5269,7 @@ impl Niri {
                     RenderTarget::ScreenCapture,
                 ];
                 let textures = targets.map(|target| {
-                    let ctx = RenderCtx {
-                        renderer,
-                        target,
-                        xray: None,
-                    };
+                    let ctx = RenderCtx { renderer, target };
                     let elements = self.render_to_vec(ctx, &output, false);
                     let elements = elements.iter().rev();
 
@@ -5802,46 +5423,6 @@ impl Niri {
 
         self.notified_activity_this_iteration = true;
     }
-
-    pub fn close_mru(&mut self, close_request: MruCloseRequest) -> Option<Window> {
-        if !self.window_mru_ui.is_open() {
-            return None;
-        }
-        self.queue_redraw_all();
-
-        let id = self.window_mru_ui.close(close_request)?;
-        self.find_window_by_id(id)
-    }
-
-    pub fn cancel_mru(&mut self) {
-        self.close_mru(MruCloseRequest::Cancel);
-    }
-
-    /// Apply a pending MRU commit immediately.
-    ///
-    /// Called for example on keyboard events that reach the active window, which immediately adds
-    /// it to the MRU.
-    pub fn mru_apply_keyboard_commit(&mut self) {
-        let Some(pending) = self.pending_mru_commit.take() else {
-            return;
-        };
-        self.event_loop.remove(pending.token);
-
-        if let Some(window) = self
-            .layout
-            .workspaces_mut()
-            .flat_map(|ws| ws.windows_mut())
-            .find(|w| w.id() == pending.id)
-        {
-            window.set_focus_timestamp(pending.stamp);
-        }
-    }
-
-    pub fn queue_redraw_mru_output(&mut self) {
-        if let Some(output) = self.window_mru_ui.output().cloned() {
-            self.queue_redraw(&output);
-        }
-    }
 }
 
 pub struct NewClient {
@@ -5906,7 +5487,6 @@ niri_render_elements! {
         Wayland = WaylandSurfaceRenderElement<R>,
         SolidColor = SolidColorRenderElement,
         ScreenshotUi = ScreenshotUiRenderElement,
-        WindowMruUi = WindowMruUiRenderElement<R>,
         ExitConfirmDialog = ExitConfirmDialogRenderElement,
         Texture = PrimaryGpuTextureRenderElement,
         // Used for the CPU-rendered panels.

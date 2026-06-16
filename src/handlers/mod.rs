@@ -1,4 +1,3 @@
-pub mod background_effect;
 mod compositor;
 mod layer_shell;
 mod xdg_shell;
@@ -12,7 +11,7 @@ use std::time::Duration;
 
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::drm::DrmNode;
-use smithay::backend::input::{InputEvent, TabletToolDescriptor};
+use smithay::backend::input::TabletToolDescriptor;
 use smithay::desktop::{PopupKind, PopupManager};
 use smithay::input::dnd::{self, DnDGrab, DndGrabHandler, DndTarget};
 use smithay::input::pointer::{CursorIcon, CursorImageStatus, Focus, PointerHandle};
@@ -80,18 +79,12 @@ use crate::protocols::ext_workspace::{self, ExtWorkspaceHandler, ExtWorkspaceMan
 use crate::protocols::foreign_toplevel::{
     self, ForeignToplevelHandler, ForeignToplevelManagerState,
 };
-use crate::protocols::gamma_control::{GammaControlHandler, GammaControlManagerState};
 use crate::protocols::output_management::{OutputManagementHandler, OutputManagementManagerState};
 use crate::protocols::screencopy::{Screencopy, ScreencopyHandler, ScreencopyManagerState};
-use crate::protocols::virtual_pointer::{
-    VirtualPointerAxisEvent, VirtualPointerButtonEvent, VirtualPointerHandler,
-    VirtualPointerInputBackend, VirtualPointerManagerState, VirtualPointerMotionAbsoluteEvent,
-    VirtualPointerMotionEvent,
-};
 use crate::utils::{output_size, send_scale_transform};
 use crate::{
-    delegate_ext_workspace, delegate_foreign_toplevel, delegate_gamma_control,
-    delegate_output_management, delegate_screencopy, delegate_virtual_pointer,
+    delegate_ext_workspace, delegate_foreign_toplevel, delegate_output_management,
+    delegate_screencopy,
 };
 
 pub const XDG_ACTIVATION_TOKEN_TIMEOUT: Duration = Duration::from_secs(10);
@@ -658,31 +651,6 @@ impl ScreencopyHandler for State {
 }
 delegate_screencopy!(State);
 
-impl VirtualPointerHandler for State {
-    fn virtual_pointer_manager_state(&mut self) -> &mut VirtualPointerManagerState {
-        &mut self.niri.virtual_pointer_state
-    }
-
-    fn on_virtual_pointer_motion(&mut self, event: VirtualPointerMotionEvent) {
-        self.process_input_event(InputEvent::<VirtualPointerInputBackend>::PointerMotion { event });
-    }
-
-    fn on_virtual_pointer_motion_absolute(&mut self, event: VirtualPointerMotionAbsoluteEvent) {
-        self.process_input_event(
-            InputEvent::<VirtualPointerInputBackend>::PointerMotionAbsolute { event },
-        );
-    }
-
-    fn on_virtual_pointer_button(&mut self, event: VirtualPointerButtonEvent) {
-        self.process_input_event(InputEvent::<VirtualPointerInputBackend>::PointerButton { event });
-    }
-
-    fn on_virtual_pointer_axis(&mut self, event: VirtualPointerAxisEvent) {
-        self.process_input_event(InputEvent::<VirtualPointerInputBackend>::PointerAxis { event });
-    }
-}
-delegate_virtual_pointer!(State);
-
 impl DrmLeaseHandler for State {
     fn drm_lease_state(&mut self, node: DrmNode) -> &mut DrmLeaseState {
         self.backend
@@ -731,37 +699,6 @@ impl DrmLeaseHandler for State {
 delegate_drm_lease!(State);
 
 delegate_viewporter!(State);
-
-impl GammaControlHandler for State {
-    fn gamma_control_manager_state(&mut self) -> &mut GammaControlManagerState {
-        &mut self.niri.gamma_control_manager_state
-    }
-
-    fn get_gamma_size(&mut self, output: &Output) -> Option<u32> {
-        match self.backend.tty().get_gamma_size(output) {
-            Ok(0) => None, // Setting gamma is not supported.
-            Ok(size) => Some(size),
-            Err(err) => {
-                warn!(
-                    "error getting gamma size for output {}: {err:?}",
-                    output.name()
-                );
-                None
-            }
-        }
-    }
-
-    fn set_gamma(&mut self, output: &Output, ramp: Option<Vec<u16>>) -> Option<()> {
-        match self.backend.tty().set_gamma(output, ramp) {
-            Ok(()) => Some(()),
-            Err(err) => {
-                warn!("error setting gamma for output {}: {err:?}", output.name());
-                None
-            }
-        }
-    }
-}
-delegate_gamma_control!(State);
 
 struct UrgentOnlyMarker;
 
