@@ -51,5 +51,4 @@ GPL-3.0-or-later, same as upstream niri. See [LICENSE](LICENSE).
 
 ## TODO (add work here)
 
-- Drop some features like tablet support;
-- Decide whether to delete some wayland protocols or to keep them;
+- Drop some wayland protocols and final code review

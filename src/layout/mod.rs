@@ -56,7 +56,6 @@ pub use self::monitor::MonitorRenderElement;
 use self::monitor::{Monitor, WorkspaceSwitch};
 use self::workspace::{OutputId, Workspace};
 use crate::animation::{Animation, Clock};
-use crate::input::swipe_tracker::SwipeTracker;
 use crate::layout::scrolling::ScrollDirection;
 use crate::niri_render_elements;
 use crate::render_helpers::offscreen::OffscreenData;
@@ -93,14 +92,6 @@ const INTERACTIVE_MOVE_START_THRESHOLD: f64 = 256. * 256.;
 
 /// Opacity of interactively moved tiles targeting the scrolling layout.
 const INTERACTIVE_MOVE_ALPHA: f64 = 0.75;
-
-/// Amount of touchpad movement to toggle the overview.
-const OVERVIEW_GESTURE_MOVEMENT: f64 = 300.;
-
-const OVERVIEW_GESTURE_RUBBER_BAND: RubberBand = RubberBand {
-    stiffness: 0.5,
-    limit: 0.05,
-};
 
 /// Size-relative units.
 pub struct SizeFrac;
@@ -512,17 +503,7 @@ pub enum HitType {
 #[derive(Debug)]
 enum OverviewProgress {
     Animation(Animation),
-    Gesture(OverviewGesture),
     Open,
-}
-
-#[derive(Debug)]
-struct OverviewGesture {
-    tracker: SwipeTracker,
-    /// Start point.
-    start: f64,
-    /// Current progress.
-    value: f64,
 }
 
 impl SizingMode {
@@ -640,7 +621,6 @@ impl OverviewProgress {
     fn value(&self) -> f64 {
         match self {
             OverviewProgress::Animation(anim) => anim.value(),
-            OverviewProgress::Gesture(gesture) => gesture.value,
             OverviewProgress::Open => 1.,
         }
     }
@@ -3305,7 +3285,7 @@ impl<W: LayoutElement> Layout<W> {
         }
     }
 
-    pub fn workspace_switch_gesture_begin(&mut self, output: &Output, is_touchpad: bool) {
+    pub fn workspace_switch_gesture_begin(&mut self, output: &Output) {
         let monitors = match &mut self.monitor_set {
             MonitorSet::Normal { monitors, .. } => monitors,
             MonitorSet::NoOutputs { .. } => unreachable!(),
@@ -3314,11 +3294,11 @@ impl<W: LayoutElement> Layout<W> {
         for monitor in monitors {
             // Cancel the gesture on other outputs.
             if &monitor.output != output {
-                monitor.workspace_switch_gesture_end(None);
+                monitor.workspace_switch_gesture_end();
                 continue;
             }
 
-            monitor.workspace_switch_gesture_begin(is_touchpad);
+            monitor.workspace_switch_gesture_begin();
         }
     }
 
@@ -3326,7 +3306,6 @@ impl<W: LayoutElement> Layout<W> {
         &mut self,
         delta_y: f64,
         timestamp: Duration,
-        is_touchpad: bool,
     ) -> Option<Option<Output>> {
         let monitors = match &mut self.monitor_set {
             MonitorSet::Normal { monitors, .. } => monitors,
@@ -3334,9 +3313,7 @@ impl<W: LayoutElement> Layout<W> {
         };
 
         for monitor in monitors {
-            if let Some(refresh) =
-                monitor.workspace_switch_gesture_update(delta_y, timestamp, is_touchpad)
-            {
+            if let Some(refresh) = monitor.workspace_switch_gesture_update(delta_y, timestamp) {
                 if refresh {
                     return Some(Some(monitor.output.clone()));
                 } else {
@@ -3348,14 +3325,14 @@ impl<W: LayoutElement> Layout<W> {
         None
     }
 
-    pub fn workspace_switch_gesture_end(&mut self, is_touchpad: Option<bool>) -> Option<Output> {
+    pub fn workspace_switch_gesture_end(&mut self) -> Option<Output> {
         let monitors = match &mut self.monitor_set {
             MonitorSet::Normal { monitors, .. } => monitors,
             MonitorSet::NoOutputs { .. } => return None,
         };
 
         for monitor in monitors {
-            if monitor.workspace_switch_gesture_end(is_touchpad) {
+            if monitor.workspace_switch_gesture_end() {
                 return Some(monitor.output.clone());
             }
         }
@@ -3363,12 +3340,7 @@ impl<W: LayoutElement> Layout<W> {
         None
     }
 
-    pub fn view_offset_gesture_begin(
-        &mut self,
-        output: &Output,
-        workspace_idx: Option<usize>,
-        is_touchpad: bool,
-    ) {
+    pub fn view_offset_gesture_begin(&mut self, output: &Output, workspace_idx: Option<usize>) {
         let monitors = match &mut self.monitor_set {
             MonitorSet::Normal { monitors, .. } => monitors,
             MonitorSet::NoOutputs { .. } => unreachable!(),
@@ -3380,11 +3352,11 @@ impl<W: LayoutElement> Layout<W> {
                 if &monitor.output != output
                     || idx != workspace_idx.unwrap_or(monitor.active_workspace_idx)
                 {
-                    ws.view_offset_gesture_end(None);
+                    ws.view_offset_gesture_end();
                     continue;
                 }
 
-                ws.view_offset_gesture_begin(is_touchpad);
+                ws.view_offset_gesture_begin();
             }
         }
     }
@@ -3393,7 +3365,6 @@ impl<W: LayoutElement> Layout<W> {
         &mut self,
         delta_x: f64,
         timestamp: Duration,
-        is_touchpad: bool,
     ) -> Option<Option<Output>> {
         let zoom = self.overview_zoom();
         let delta_x = delta_x / zoom;
@@ -3405,9 +3376,7 @@ impl<W: LayoutElement> Layout<W> {
 
         for monitor in monitors {
             for ws in &mut monitor.workspaces {
-                if let Some(refresh) =
-                    ws.view_offset_gesture_update(delta_x, timestamp, is_touchpad)
-                {
+                if let Some(refresh) = ws.view_offset_gesture_update(delta_x, timestamp) {
                     if refresh {
                         return Some(Some(monitor.output.clone()));
                     } else {
@@ -3420,7 +3389,7 @@ impl<W: LayoutElement> Layout<W> {
         None
     }
 
-    pub fn view_offset_gesture_end(&mut self, is_touchpad: Option<bool>) -> Option<Output> {
+    pub fn view_offset_gesture_end(&mut self) -> Option<Output> {
         let monitors = match &mut self.monitor_set {
             MonitorSet::Normal { monitors, .. } => monitors,
             MonitorSet::NoOutputs { .. } => return None,
@@ -3428,84 +3397,13 @@ impl<W: LayoutElement> Layout<W> {
 
         for monitor in monitors {
             for ws in &mut monitor.workspaces {
-                if ws.view_offset_gesture_end(is_touchpad) {
+                if ws.view_offset_gesture_end() {
                     return Some(monitor.output.clone());
                 }
             }
         }
 
         None
-    }
-
-    pub fn overview_gesture_begin(&mut self) {
-        self.overview_open = true;
-
-        let value = self.overview_progress.take().map_or(0., |p| p.value());
-        let gesture = OverviewGesture {
-            tracker: SwipeTracker::new(),
-            start: value,
-            value,
-        };
-        self.overview_progress = Some(OverviewProgress::Gesture(gesture));
-
-        self.set_monitors_overview_state();
-    }
-
-    pub fn overview_gesture_update(&mut self, delta_y: f64, timestamp: Duration) -> Option<bool> {
-        let Some(OverviewProgress::Gesture(gesture)) = &mut self.overview_progress else {
-            return None;
-        };
-
-        gesture.tracker.push(delta_y, timestamp);
-
-        let total_height = OVERVIEW_GESTURE_MOVEMENT;
-        let pos = gesture.tracker.pos() / total_height;
-        let new_value = gesture.start + pos;
-        let new_value = OVERVIEW_GESTURE_RUBBER_BAND.clamp(0., 1., new_value);
-
-        if gesture.value == new_value {
-            return Some(false);
-        }
-
-        gesture.value = new_value;
-        self.set_monitors_overview_state();
-
-        Some(true)
-    }
-
-    pub fn overview_gesture_end(&mut self) -> bool {
-        let Some(OverviewProgress::Gesture(gesture)) = &mut self.overview_progress else {
-            return false;
-        };
-
-        // Take into account any idle time between the last event and now.
-        let now = self.clock.now_unadjusted();
-        gesture.tracker.push(0., now);
-
-        let total_height = OVERVIEW_GESTURE_MOVEMENT;
-
-        let mut velocity = gesture.tracker.velocity() / total_height;
-        let current_pos = gesture.tracker.pos() / total_height;
-        let pos = gesture.tracker.projected_end_pos() / total_height;
-
-        let new_value = gesture.start + pos;
-        let new_value = new_value.clamp(0., 1.).round();
-
-        velocity *=
-            OVERVIEW_GESTURE_RUBBER_BAND.clamp_derivative(0., 1., gesture.start + current_pos);
-
-        self.overview_open = new_value == 1.;
-        self.overview_progress = Some(OverviewProgress::Animation(Animation::new(
-            self.clock.clone(),
-            gesture.value,
-            new_value,
-            velocity,
-            self.options.animations.overview_open_close.0,
-        )));
-
-        self.set_monitors_overview_state();
-
-        true
     }
 
     pub fn interactive_move_begin(
@@ -4591,7 +4489,7 @@ impl<W: LayoutElement> Layout<W> {
                         } else {
                             // Cancel the view offset gesture after workspace switches, moves, etc.
                             if !self.overview_open && ws_idx != mon.active_workspace_idx {
-                                ws.view_offset_gesture_end(None);
+                                ws.view_offset_gesture_end();
                             }
                         }
                     }
@@ -4600,7 +4498,7 @@ impl<W: LayoutElement> Layout<W> {
             MonitorSet::NoOutputs { workspaces, .. } => {
                 for ws in workspaces {
                     ws.refresh(false, false);
-                    ws.view_offset_gesture_end(None);
+                    ws.view_offset_gesture_end();
                 }
             }
         }

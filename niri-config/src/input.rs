@@ -11,18 +11,12 @@ use crate::utils::{Flag, MergeWith, Percent};
 #[derive(Debug, Default, PartialEq)]
 pub struct Input {
     pub keyboard: Keyboard,
-    pub touchpad: Touchpad,
     pub mouse: Mouse,
-    pub trackpoint: Trackpoint,
-    pub trackball: Trackball,
-    pub tablet: Tablet,
-    pub touch: Touch,
     pub disable_power_key_handling: bool,
     pub warp_mouse_to_focus: Option<WarpMouseToFocus>,
     pub focus_follows_mouse: Option<FocusFollowsMouse>,
     pub workspace_auto_back_and_forth: bool,
     pub mod_key: Option<ModKey>,
-    pub mod_key_nested: Option<ModKey>,
 }
 
 #[derive(knus::Decode, Debug, Default, PartialEq)]
@@ -30,17 +24,7 @@ pub struct InputPart {
     #[knus(child)]
     pub keyboard: Option<KeyboardPart>,
     #[knus(child)]
-    pub touchpad: Option<Touchpad>,
-    #[knus(child)]
     pub mouse: Option<Mouse>,
-    #[knus(child)]
-    pub trackpoint: Option<Trackpoint>,
-    #[knus(child)]
-    pub trackball: Option<Trackball>,
-    #[knus(child)]
-    pub tablet: Option<Tablet>,
-    #[knus(child)]
-    pub touch: Option<Touch>,
     #[knus(child)]
     pub disable_power_key_handling: Option<Flag>,
     #[knus(child)]
@@ -51,8 +35,6 @@ pub struct InputPart {
     pub workspace_auto_back_and_forth: Option<Flag>,
     #[knus(child, unwrap(argument, str))]
     pub mod_key: Option<ModKey>,
-    #[knus(child, unwrap(argument, str))]
-    pub mod_key_nested: Option<ModKey>,
 }
 
 impl MergeWith<InputPart> for Input {
@@ -64,22 +46,13 @@ impl MergeWith<InputPart> for Input {
             workspace_auto_back_and_forth,
         );
 
-        merge_clone!(
-            (self, part),
-            touchpad,
-            mouse,
-            trackpoint,
-            trackball,
-            tablet,
-            touch,
-        );
+        merge_clone!((self, part), mouse);
 
         merge_clone_opt!(
             (self, part),
             warp_mouse_to_focus,
             focus_follows_mouse,
             mod_key,
-            mod_key_nested,
         );
     }
 }
@@ -184,46 +157,6 @@ impl ScrollFactor {
 }
 
 #[derive(knus::Decode, Debug, Default, Clone, PartialEq)]
-pub struct Touchpad {
-    #[knus(child)]
-    pub off: bool,
-    #[knus(child)]
-    pub tap: bool,
-    #[knus(child)]
-    pub dwt: bool,
-    #[knus(child)]
-    pub dwtp: bool,
-    #[knus(child, unwrap(argument))]
-    pub drag: Option<bool>,
-    #[knus(child)]
-    pub drag_lock: bool,
-    #[knus(child)]
-    pub natural_scroll: bool,
-    #[knus(child, unwrap(argument, str))]
-    pub click_method: Option<ClickMethod>,
-    #[knus(child, unwrap(argument), default)]
-    pub accel_speed: FloatOrInt<-1, 1>,
-    #[knus(child, unwrap(argument, str))]
-    pub accel_profile: Option<AccelProfile>,
-    #[knus(child, unwrap(argument, str))]
-    pub scroll_method: Option<ScrollMethod>,
-    #[knus(child, unwrap(argument))]
-    pub scroll_button: Option<u32>,
-    #[knus(child)]
-    pub scroll_button_lock: bool,
-    #[knus(child, unwrap(argument, str))]
-    pub tap_button_map: Option<TapButtonMap>,
-    #[knus(child)]
-    pub left_handed: bool,
-    #[knus(child)]
-    pub disabled_on_external_mouse: bool,
-    #[knus(child)]
-    pub middle_emulation: bool,
-    #[knus(child)]
-    pub scroll_factor: Option<ScrollFactor>,
-}
-
-#[derive(knus::Decode, Debug, Default, Clone, PartialEq)]
 pub struct Mouse {
     #[knus(child)]
     pub off: bool,
@@ -245,65 +178,6 @@ pub struct Mouse {
     pub middle_emulation: bool,
     #[knus(child)]
     pub scroll_factor: Option<ScrollFactor>,
-}
-
-#[derive(knus::Decode, Debug, Default, Clone, PartialEq)]
-pub struct Trackpoint {
-    #[knus(child)]
-    pub off: bool,
-    #[knus(child)]
-    pub natural_scroll: bool,
-    #[knus(child, unwrap(argument), default)]
-    pub accel_speed: FloatOrInt<-1, 1>,
-    #[knus(child, unwrap(argument, str))]
-    pub accel_profile: Option<AccelProfile>,
-    #[knus(child, unwrap(argument, str))]
-    pub scroll_method: Option<ScrollMethod>,
-    #[knus(child, unwrap(argument))]
-    pub scroll_button: Option<u32>,
-    #[knus(child)]
-    pub scroll_button_lock: bool,
-    #[knus(child)]
-    pub left_handed: bool,
-    #[knus(child)]
-    pub middle_emulation: bool,
-}
-
-#[derive(knus::Decode, Debug, Default, Clone, PartialEq)]
-pub struct Trackball {
-    #[knus(child)]
-    pub off: bool,
-    #[knus(child)]
-    pub natural_scroll: bool,
-    #[knus(child, unwrap(argument), default)]
-    pub accel_speed: FloatOrInt<-1, 1>,
-    #[knus(child, unwrap(argument, str))]
-    pub accel_profile: Option<AccelProfile>,
-    #[knus(child, unwrap(argument, str))]
-    pub scroll_method: Option<ScrollMethod>,
-    #[knus(child, unwrap(argument))]
-    pub scroll_button: Option<u32>,
-    #[knus(child)]
-    pub scroll_button_lock: bool,
-    #[knus(child)]
-    pub left_handed: bool,
-    #[knus(child)]
-    pub middle_emulation: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ClickMethod {
-    Clickfinger,
-    ButtonAreas,
-}
-
-impl From<ClickMethod> for input::ClickMethod {
-    fn from(value: ClickMethod) -> Self {
-        match value {
-            ClickMethod::Clickfinger => Self::Clickfinger,
-            ClickMethod::ButtonAreas => Self::ButtonAreas,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -338,47 +212,6 @@ impl From<ScrollMethod> for input::ScrollMethod {
             ScrollMethod::OnButtonDown => Self::OnButtonDown,
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TapButtonMap {
-    LeftRightMiddle,
-    LeftMiddleRight,
-}
-
-impl From<TapButtonMap> for input::TapButtonMap {
-    fn from(value: TapButtonMap) -> Self {
-        match value {
-            TapButtonMap::LeftRightMiddle => Self::LeftRightMiddle,
-            TapButtonMap::LeftMiddleRight => Self::LeftMiddleRight,
-        }
-    }
-}
-
-#[derive(knus::Decode, Debug, Default, Clone, PartialEq)]
-pub struct Tablet {
-    #[knus(child)]
-    pub off: bool,
-    #[knus(child, unwrap(arguments))]
-    pub calibration_matrix: Option<Vec<f32>>,
-    #[knus(child, unwrap(argument))]
-    pub map_to_output: Option<String>,
-    #[knus(child)]
-    pub map_to_focused_output: bool,
-    #[knus(child)]
-    pub map_to_focused_window: bool,
-    #[knus(child)]
-    pub left_handed: bool,
-}
-
-#[derive(knus::Decode, Debug, Default, Clone, PartialEq)]
-pub struct Touch {
-    #[knus(child)]
-    pub off: bool,
-    #[knus(child, unwrap(arguments))]
-    pub calibration_matrix: Option<Vec<f32>>,
-    #[knus(child, unwrap(argument))]
-    pub map_to_output: Option<String>,
 }
 
 #[derive(knus::Decode, Debug, Clone, Copy, PartialEq)]
@@ -452,20 +285,6 @@ impl FromStr for ModKey {
     }
 }
 
-impl FromStr for ClickMethod {
-    type Err = miette::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "clickfinger" => Ok(Self::Clickfinger),
-            "button-areas" => Ok(Self::ButtonAreas),
-            _ => Err(miette!(
-                r#"invalid click method, can be "button-areas" or "clickfinger""#
-            )),
-        }
-    }
-}
-
 impl FromStr for AccelProfile {
     type Err = miette::Error;
 
@@ -491,20 +310,6 @@ impl FromStr for ScrollMethod {
             "on-button-down" => Ok(Self::OnButtonDown),
             _ => Err(miette!(
                 r#"invalid scroll method, can be "no-scroll", "two-finger", "edge", or "on-button-down""#
-            )),
-        }
-    }
-}
-
-impl FromStr for TapButtonMap {
-    type Err = miette::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "left-right-middle" => Ok(Self::LeftRightMiddle),
-            "left-middle-right" => Ok(Self::LeftMiddleRight),
-            _ => Err(miette!(
-                r#"invalid tap button map, can be "left-right-middle" or "left-middle-right""#
             )),
         }
     }

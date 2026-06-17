@@ -90,8 +90,8 @@ impl SpatialMovementGrab {
                         self.gesture = GestureState::ViewOffset;
                         if let Some((ws_idx, ws)) = layout.find_workspace_by_id(self.workspace_id) {
                             if ws.current_output() == Some(&self.output) {
-                                layout.view_offset_gesture_begin(&self.output, Some(ws_idx), false);
-                                layout.view_offset_gesture_update(-c.x, timestamp, false)
+                                layout.view_offset_gesture_begin(&self.output, Some(ws_idx));
+                                layout.view_offset_gesture_update(-c.x, timestamp)
                             } else {
                                 None
                             }
@@ -100,18 +100,16 @@ impl SpatialMovementGrab {
                         }
                     } else {
                         self.gesture = GestureState::WorkspaceSwitch;
-                        layout.workspace_switch_gesture_begin(&self.output, false);
-                        layout.workspace_switch_gesture_update(-c.y, timestamp, false)
+                        layout.workspace_switch_gesture_begin(&self.output);
+                        layout.workspace_switch_gesture_update(-c.y, timestamp)
                     }
                 } else {
                     Some(None)
                 }
             }
-            GestureState::ViewOffset => {
-                layout.view_offset_gesture_update(-delta.x, timestamp, false)
-            }
+            GestureState::ViewOffset => layout.view_offset_gesture_update(-delta.x, timestamp),
             GestureState::WorkspaceSwitch => {
-                layout.workspace_switch_gesture_update(-delta.y, timestamp, false)
+                layout.workspace_switch_gesture_update(-delta.y, timestamp)
             }
         };
 
@@ -129,8 +127,8 @@ impl SpatialMovementGrab {
         let layout = &mut state.niri.layout;
         let res = match self.gesture {
             GestureState::Recognizing => None,
-            GestureState::ViewOffset => layout.view_offset_gesture_end(Some(false)),
-            GestureState::WorkspaceSwitch => layout.workspace_switch_gesture_end(Some(false)),
+            GestureState::ViewOffset => layout.view_offset_gesture_end(),
+            GestureState::WorkspaceSwitch => layout.workspace_switch_gesture_end(),
         };
 
         if let Some(output) = res {

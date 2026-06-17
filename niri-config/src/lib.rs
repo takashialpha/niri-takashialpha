@@ -81,7 +81,6 @@ pub struct Config {
     pub window_rules: Vec<WindowRule>,
     pub layer_rules: Vec<LayerRule>,
     pub binds: Binds,
-    pub switch_events: SwitchBinds,
     pub workspaces: Vec<Workspace>,
 }
 
@@ -186,7 +185,6 @@ where
                 "animations" => m_merge!(animations),
                 "gestures" => m_merge!(gestures),
                 "overview" => m_merge!(overview),
-                "switch-events" => m_merge!(switch_events),
 
                 // Multipart sections.
                 "output" => {

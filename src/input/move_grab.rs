@@ -10,18 +10,14 @@ use smithay::input::pointer::{
     GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab, PointerInnerHandle,
     RelativeMotionEvent,
 };
-use smithay::input::touch::{
-    self, GrabStartData as TouchGrabStartData, TouchGrab, TouchInnerHandle,
-};
 use smithay::output::Output;
-use smithay::utils::{IsAlive, Logical, Point, SERIAL_COUNTER, Serial};
+use smithay::utils::{IsAlive, Logical, Point, SERIAL_COUNTER};
 
-use crate::input::PointerOrTouchStartData;
 use crate::niri::State;
 use crate::utils::get_monotonic_time;
 
 pub struct MoveGrab {
-    start_data: PointerOrTouchStartData<State>,
+    start_data: PointerGrabStartData<State>,
     start_output: Output,
     start_pos_within_output: Point<f64, Logical>,
     last_location: Point<f64, Logical>,
@@ -46,12 +42,12 @@ enum GestureState {
 impl MoveGrab {
     pub fn new(
         state: &mut State,
-        start_data: PointerOrTouchStartData<State>,
+        start_data: PointerGrabStartData<State>,
         window: Window,
         enable_view_offset: bool,
         move_icon: Option<CursorIcon>,
     ) -> Option<Self> {
-        let location = start_data.location();
+        let location = start_data.location;
         let (output, pos_within_output) = state.niri.output_under(location)?;
 
         Some(Self {
@@ -101,15 +97,13 @@ impl MoveGrab {
             }
             GestureState::Move => layout.interactive_move_end(&self.window),
             GestureState::ViewOffset => {
-                layout.view_offset_gesture_end(Some(false));
+                layout.view_offset_gesture_end();
             }
         }
 
-        if self.start_data.is_pointer() {
-            data.niri
-                .cursor_manager
-                .set_cursor_image(CursorImageStatus::default_named());
-        }
+        data.niri
+            .cursor_manager
+            .set_cursor_image(CursorImageStatus::default_named());
 
         // FIXME: only redraw the window output.
         data.niri.queue_redraw_all();
@@ -127,11 +121,9 @@ impl MoveGrab {
 
         self.gesture = GestureState::Move;
 
-        if self.start_data.is_pointer() {
-            data.niri
-                .cursor_manager
-                .set_cursor_image(CursorImageStatus::Named(self.move_icon));
-        }
+        data.niri
+            .cursor_manager
+            .set_cursor_image(CursorImageStatus::Named(self.move_icon));
 
         true
     }
@@ -156,15 +148,13 @@ impl MoveGrab {
             return false;
         };
 
-        layout.view_offset_gesture_begin(&self.start_output, Some(ws_idx), false);
+        layout.view_offset_gesture_begin(&self.start_output, Some(ws_idx));
 
         self.gesture = GestureState::ViewOffset;
 
-        if self.start_data.is_pointer() {
-            data.niri
-                .cursor_manager
-                .set_cursor_image(CursorImageStatus::Named(CursorIcon::AllScroll));
-        }
+        data.niri
+            .cursor_manager
+            .set_cursor_image(CursorImageStatus::Named(CursorIcon::AllScroll));
 
         true
     }
@@ -186,7 +176,7 @@ impl MoveGrab {
             }
 
             // Check if the gesture moved far enough to decide.
-            let c = self.new_location - self.start_data.location();
+            let c = self.new_location - self.start_data.location;
             if c.x * c.x + c.y * c.y >= 8. * 8. {
                 let is_floating = data
                     .niri
@@ -241,11 +231,10 @@ impl MoveGrab {
                 }
             }
             GestureState::ViewOffset => {
-                let res = data.niri.layout.view_offset_gesture_update(
-                    -relative_delta.x,
-                    timestamp,
-                    false,
-                );
+                let res = data
+                    .niri
+                    .layout
+                    .view_offset_gesture_update(-relative_delta.x, timestamp);
                 if let Some(output) = res {
                     if let Some(output) = output {
                         data.niri.queue_redraw(&output);
@@ -278,7 +267,7 @@ impl MoveGrab {
             // Apply the delta accumulated during recognizing.
             let ongoing = data.niri.layout.interactive_move_update(
                 &self.window,
-                self.last_location - self.start_data.location(),
+                self.last_location - self.start_data.location,
                 output,
                 pos_within_output,
             );
@@ -335,7 +324,7 @@ impl PointerGrab<State> for MoveGrab {
     ) {
         handle.button(data, event);
 
-        let start_data = self.start_data.unwrap_pointer();
+        let start_data = &self.start_data;
 
         if !handle.current_pressed().contains(&start_data.button) {
             // The button that initiated the grab was released.
@@ -455,102 +444,7 @@ impl PointerGrab<State> for MoveGrab {
     }
 
     fn start_data(&self) -> &PointerGrabStartData<State> {
-        self.start_data.unwrap_pointer()
-    }
-
-    fn unset(&mut self, data: &mut State) {
-        self.on_ungrab(data);
-    }
-}
-
-impl TouchGrab<State> for MoveGrab {
-    fn down(
-        &mut self,
-        data: &mut State,
-        handle: &mut TouchInnerHandle<'_, State>,
-        _focus: Option<(<State as SeatHandler>::TouchFocus, Point<f64, Logical>)>,
-        event: &touch::DownEvent,
-        seq: Serial,
-    ) {
-        handle.down(data, None, event, seq);
-
-        if event.slot == self.start_data.unwrap_touch().slot {
-            return;
-        }
-
-        if !self.on_toggle_floating(data) {
-            handle.unset_grab(self, data);
-        }
-    }
-
-    fn up(
-        &mut self,
-        data: &mut State,
-        handle: &mut TouchInnerHandle<'_, State>,
-        event: &touch::UpEvent,
-        seq: Serial,
-    ) {
-        handle.up(data, event, seq);
-
-        if event.slot == self.start_data.unwrap_touch().slot {
-            handle.unset_grab(self, data);
-        }
-    }
-
-    fn motion(
-        &mut self,
-        data: &mut State,
-        handle: &mut TouchInnerHandle<'_, State>,
-        _focus: Option<(<State as SeatHandler>::TouchFocus, Point<f64, Logical>)>,
-        event: &touch::MotionEvent,
-        seq: Serial,
-    ) {
-        handle.motion(data, None, event, seq);
-
-        if event.slot != self.start_data.unwrap_touch().slot {
-            return;
-        }
-
-        self.new_location = event.location;
-        self.event_timestamp = Some(Duration::from_millis(u64::from(event.time)));
-    }
-
-    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
-        handle.frame(data, seq);
-
-        if !self.on_frame(data) {
-            // The gesture is no longer ongoing.
-            handle.unset_grab(self, data);
-        }
-    }
-
-    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
-        handle.cancel(data, seq);
-        handle.unset_grab(self, data);
-    }
-
-    fn shape(
-        &mut self,
-        data: &mut State,
-        handle: &mut TouchInnerHandle<'_, State>,
-        event: &touch::ShapeEvent,
-        seq: Serial,
-    ) {
-        handle.shape(data, event, seq);
-    }
-
-    fn orientation(
-        &mut self,
-        data: &mut State,
-        handle: &mut TouchInnerHandle<'_, State>,
-        event: &touch::OrientationEvent,
-        seq: Serial,
-    ) {
-        handle.orientation(data, event, seq);
-    }
-
-    fn start_data(&self) -> &TouchGrabStartData<State> {
-        self.start_data.unwrap_touch()
+        &self.start_data
     }
 
     fn unset(&mut self, data: &mut State) {

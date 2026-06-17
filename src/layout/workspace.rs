@@ -1849,22 +1849,21 @@ impl<W: LayoutElement> Workspace<W> {
         self.scrolling.insert_hint_area(position)
     }
 
-    pub fn view_offset_gesture_begin(&mut self, is_touchpad: bool) {
-        self.scrolling.view_offset_gesture_begin(is_touchpad);
+    pub fn view_offset_gesture_begin(&mut self) {
+        self.scrolling.view_offset_gesture_begin();
     }
 
     pub fn view_offset_gesture_update(
         &mut self,
         delta_x: f64,
         timestamp: Duration,
-        is_touchpad: bool,
     ) -> Option<bool> {
         self.scrolling
-            .view_offset_gesture_update(delta_x, timestamp, is_touchpad)
+            .view_offset_gesture_update(delta_x, timestamp)
     }
 
-    pub fn view_offset_gesture_end(&mut self, is_touchpad: Option<bool>) -> bool {
-        self.scrolling.view_offset_gesture_end(is_touchpad)
+    pub fn view_offset_gesture_end(&mut self) -> bool {
+        self.scrolling.view_offset_gesture_end()
     }
 
     pub fn dnd_scroll_gesture_begin(&mut self) {

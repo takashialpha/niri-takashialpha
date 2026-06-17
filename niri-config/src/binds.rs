@@ -13,7 +13,7 @@ use smithay::input::keyboard::Keysym;
 use smithay::input::keyboard::keysyms::KEY_NoSymbol;
 use smithay::input::keyboard::xkb::{KEYSYM_CASE_INSENSITIVE, KEYSYM_NO_FLAGS, keysym_from_name};
 
-use crate::utils::{MergeWith, expect_only_children};
+use crate::utils::expect_only_children;
 
 #[derive(Debug, Default, PartialEq)]
 pub struct Binds(pub Vec<Bind>);
@@ -47,13 +47,6 @@ pub enum Trigger {
     WheelScrollUp,
     WheelScrollLeft,
     WheelScrollRight,
-    TouchpadScrollDown,
-    TouchpadScrollUp,
-    TouchpadScrollLeft,
-    TouchpadScrollRight,
-    TabletStylusButton1,
-    TabletStylusButton2,
-    TabletStylusButton3,
 }
 
 bitflags! {
@@ -67,36 +60,6 @@ bitflags! {
         const ISO_LEVEL5_SHIFT = 1 << 5;
         const COMPOSITOR = 1 << 6;
     }
-}
-
-#[derive(knus::Decode, Debug, Default, Clone, PartialEq)]
-pub struct SwitchBinds {
-    #[knus(child)]
-    pub lid_open: Option<SwitchAction>,
-    #[knus(child)]
-    pub lid_close: Option<SwitchAction>,
-    #[knus(child)]
-    pub tablet_mode_on: Option<SwitchAction>,
-    #[knus(child)]
-    pub tablet_mode_off: Option<SwitchAction>,
-}
-
-impl MergeWith<SwitchBinds> for SwitchBinds {
-    fn merge_with(&mut self, part: &SwitchBinds) {
-        merge_clone_opt!(
-            (self, part),
-            lid_open,
-            lid_close,
-            tablet_mode_on,
-            tablet_mode_off,
-        );
-    }
-}
-
-#[derive(knus::Decode, Debug, Clone, PartialEq)]
-pub struct SwitchAction {
-    #[knus(child, unwrap(arguments))]
-    pub spawn: Vec<String>,
 }
 
 // Remember to add new actions to the CLI enum too.
@@ -952,20 +915,6 @@ impl FromStr for Key {
             Trigger::WheelScrollLeft
         } else if key.eq_ignore_ascii_case("WheelScrollRight") {
             Trigger::WheelScrollRight
-        } else if key.eq_ignore_ascii_case("TouchpadScrollDown") {
-            Trigger::TouchpadScrollDown
-        } else if key.eq_ignore_ascii_case("TouchpadScrollUp") {
-            Trigger::TouchpadScrollUp
-        } else if key.eq_ignore_ascii_case("TouchpadScrollLeft") {
-            Trigger::TouchpadScrollLeft
-        } else if key.eq_ignore_ascii_case("TouchpadScrollRight") {
-            Trigger::TouchpadScrollRight
-        } else if key.eq_ignore_ascii_case("TabletStylusButton1") {
-            Trigger::TabletStylusButton1
-        } else if key.eq_ignore_ascii_case("TabletStylusButton2") {
-            Trigger::TabletStylusButton2
-        } else if key.eq_ignore_ascii_case("TabletStylusButton3") {
-            Trigger::TabletStylusButton3
         } else {
             let mut keysym = keysym_from_name(key, KEYSYM_CASE_INSENSITIVE);
             // The keyboard event handling code can receive either

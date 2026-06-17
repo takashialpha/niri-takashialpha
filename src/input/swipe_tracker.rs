@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::time::Duration;
 
 const HISTORY_LIMIT: Duration = Duration::from_millis(150);
-const DECELERATION_TOUCHPAD: f64 = 0.997;
+const DECELERATION: f64 = 0.997;
 
 #[derive(Debug)]
 pub struct SwipeTracker {
@@ -68,7 +68,7 @@ impl SwipeTracker {
     /// Computes the gesture end position after decelerating to a halt.
     pub fn projected_end_pos(&self) -> f64 {
         let vel = self.velocity();
-        self.pos - vel / (1000. * DECELERATION_TOUCHPAD.ln())
+        self.pos - vel / (1000. * DECELERATION.ln())
     }
 
     fn trim_history(&mut self) {

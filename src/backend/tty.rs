@@ -67,7 +67,7 @@ use crate::frame_clock::FrameClock;
 use crate::niri::{Niri, RedrawState, State};
 use crate::render_helpers::renderer::AsGlesRenderer;
 use crate::render_helpers::{RenderCtx, RenderTarget, resources, shaders};
-use crate::utils::{PanelOrientation, get_monotonic_time, is_laptop_panel, logical_output};
+use crate::utils::{PanelOrientation, get_monotonic_time, logical_output};
 
 const SUPPORTED_COLOR_FORMATS: [Fourcc; 8] = [
     Fourcc::Xrgb2101010,
@@ -982,10 +982,6 @@ impl Tty {
         if cleanup {
             let device = self.devices.get(&node).unwrap();
 
-            // Follow the logic in on_output_config_changed().
-            let disable_laptop_panels = self.should_disable_laptop_panels(niri.is_lid_closed);
-            let should_disable = |conn: &str| disable_laptop_panels && is_laptop_panel(conn);
-
             let config = self.config.borrow();
 
             let should_be_off = |crtc, conn: &connector::Info| {
@@ -997,7 +993,7 @@ impl Tty {
                     .cloned()
                     .unwrap_or_default();
 
-                config.off || should_disable(&output_name.connector)
+                config.off
             };
 
             if let Err(err) = device.cleanup_mismatching_resources(&should_be_off) {
@@ -1985,23 +1981,6 @@ impl Tty {
         }
     }
 
-    fn should_disable_laptop_panels(&self, is_lid_closed: bool) -> bool {
-        if !is_lid_closed {
-            return false;
-        }
-
-        // Check if any external monitor is connected.
-        for device in self.devices.values() {
-            for (connector, _crtc) in device.drm_scanner.crtcs() {
-                if !is_laptop_panel(&format_connector_name(connector)) {
-                    return true;
-                }
-            }
-        }
-
-        false
-    }
-
     pub fn on_output_config_changed(&mut self, niri: &mut Niri) {
         // If we're inactive, we can't do anything, so just set a flag for later.
         if !self.session.is_active() {
@@ -2009,10 +1988,6 @@ impl Tty {
             return;
         }
         self.update_output_config_on_resume = false;
-
-        // Figure out if we should disable laptop panels.
-        let disable_laptop_panels = self.should_disable_laptop_panels(niri.is_lid_closed);
-        let should_disable = |connector: &str| disable_laptop_panels && is_laptop_panel(connector);
 
         let mut to_disconnect = vec![];
         let mut to_connect = vec![];
@@ -2026,7 +2001,7 @@ impl Tty {
                     .find(&surface.name)
                     .cloned()
                     .unwrap_or_default();
-                if config.off || should_disable(&surface.name.connector) {
+                if config.off {
                     to_disconnect.push((node, crtc));
                     continue;
                 }
@@ -2175,7 +2150,7 @@ impl Tty {
                     .cloned()
                     .unwrap_or_default();
 
-                if !(config.off || should_disable(&output_name.connector)) {
+                if !config.off {
                     to_connect.push((node, connector.clone(), crtc, output_name));
                 }
             }

@@ -67,8 +67,8 @@ use smithay::{
     delegate_keyboard_shortcuts_inhibit, delegate_output, delegate_pointer_constraints,
     delegate_pointer_gestures, delegate_presentation, delegate_primary_selection,
     delegate_relative_pointer, delegate_seat, delegate_security_context, delegate_session_lock,
-    delegate_single_pixel_buffer, delegate_tablet_manager, delegate_text_input_manager,
-    delegate_viewporter, delegate_virtual_keyboard_manager, delegate_xdg_activation,
+    delegate_single_pixel_buffer, delegate_text_input_manager, delegate_viewporter,
+    delegate_virtual_keyboard_manager, delegate_xdg_activation,
 };
 
 pub use crate::handlers::xdg_shell::KdeDecorationsModeState;
@@ -135,6 +135,8 @@ delegate_pointer_gestures!(State);
 delegate_relative_pointer!(State);
 delegate_text_input_manager!(State);
 
+// Required by the cursor-shape protocol (a cursor-shape device can be created from a tablet tool),
+// even though niri no longer exposes the tablet manager global itself.
 impl TabletSeatHandler for State {
     fn tablet_tool_image(&mut self, _tool: &TabletToolDescriptor, image: CursorImageStatus) {
         // FIXME: tablet tools should have their own cursors.
@@ -143,7 +145,6 @@ impl TabletSeatHandler for State {
         self.niri.queue_redraw_all();
     }
 }
-delegate_tablet_manager!(State);
 
 impl PointerConstraintsHandler for State {
     fn new_constraint(&mut self, _surface: &WlSurface, _pointer: &PointerHandle<Self>) {
@@ -325,12 +326,8 @@ impl WaylandDndGrabHandler for State {
                     DnDGrab::new_pointer(&self.niri.display_handle, start_data, source, seat);
                 pointer.set_grab(self, grab, serial, Focus::Keep);
             }
-            dnd::GrabType::Touch => {
-                let touch = seat.get_touch().unwrap();
-                let start_data = touch.grab_start_data().unwrap();
-                let grab = DnDGrab::new_touch(&self.niri.display_handle, start_data, source, seat);
-                touch.set_grab(self, grab, serial);
-            }
+            // Touch input is not supported, so a touch-initiated DnD can never start.
+            dnd::GrabType::Touch => unreachable!("touch input is not supported"),
         }
 
         // FIXME: more granular

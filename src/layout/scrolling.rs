@@ -26,9 +26,6 @@ use crate::utils::ResizeEdge;
 use crate::utils::transaction::{Transaction, TransactionBlocker};
 use crate::window::ResolvedWindowRules;
 
-/// Amount of touchpad movement to scroll the view for the width of one working area.
-const VIEW_GESTURE_WORKING_AREA_MOVEMENT: f64 = 1200.;
-
 /// A scrollable-tiling space for windows.
 #[derive(Debug)]
 pub struct ScrollingSpace<W: LayoutElement> {
@@ -129,8 +126,6 @@ pub(super) struct ViewGesture {
     delta_from_tracker: f64,
     // The view offset we'll use if needed for activate_prev_column_on_removal.
     stationary_view_offset: f64,
-    /// Whether the gesture is controlled by the touchpad.
-    is_touchpad: bool,
 
     // If this gesture is for drag-and-drop scrolling, this is the last event's unadjusted
     // timestamp.
@@ -2999,7 +2994,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         None
     }
 
-    pub fn view_offset_gesture_begin(&mut self, is_touchpad: bool) {
+    pub fn view_offset_gesture_begin(&mut self) {
         if self.columns.is_empty() {
             return;
         }
@@ -3014,7 +3009,6 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             tracker: SwipeTracker::new(),
             delta_from_tracker: self.view_offset.current(),
             stationary_view_offset: self.view_offset.stationary(),
-            is_touchpad,
             dnd_last_event_time: None,
             dnd_nonzero_start_time: None,
         };
@@ -3037,7 +3031,6 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             tracker: SwipeTracker::new(),
             delta_from_tracker: self.view_offset.current(),
             stationary_view_offset: self.view_offset.stationary(),
-            is_touchpad: false,
             dnd_last_event_time: Some(self.clock.now_unadjusted()),
             dnd_nonzero_start_time: None,
         };
@@ -3050,24 +3043,18 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         &mut self,
         delta_x: f64,
         timestamp: Duration,
-        is_touchpad: bool,
     ) -> Option<bool> {
         let ViewOffset::Gesture(gesture) = &mut self.view_offset else {
             return None;
         };
 
-        if gesture.is_touchpad != is_touchpad || gesture.dnd_last_event_time.is_some() {
+        if gesture.dnd_last_event_time.is_some() {
             return None;
         }
 
         gesture.tracker.push(delta_x, timestamp);
 
-        let norm_factor = if gesture.is_touchpad {
-            self.working_area.size.w / VIEW_GESTURE_WORKING_AREA_MOVEMENT
-        } else {
-            1.
-        };
-        let pos = gesture.tracker.pos() * norm_factor;
+        let pos = gesture.tracker.pos();
         let view_offset = pos + gesture.delta_from_tracker;
         gesture.current_view_offset = view_offset;
 
@@ -3148,14 +3135,10 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         true
     }
 
-    pub fn view_offset_gesture_end(&mut self, is_touchpad: Option<bool>) -> bool {
+    pub fn view_offset_gesture_end(&mut self) -> bool {
         let ViewOffset::Gesture(gesture) = &mut self.view_offset else {
             return false;
         };
-
-        if is_touchpad.is_some_and(|x| gesture.is_touchpad != x) {
-            return false;
-        }
 
         // We do not handle cancelling, just like GNOME Shell doesn't. For this gesture, proper
         // cancelling would require keeping track of the original active column, and then updating
@@ -3166,13 +3149,8 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         let now = self.clock.now_unadjusted();
         gesture.tracker.push(0., now);
 
-        let norm_factor = if gesture.is_touchpad {
-            self.working_area.size.w / VIEW_GESTURE_WORKING_AREA_MOVEMENT
-        } else {
-            1.
-        };
-        let velocity = gesture.tracker.velocity() * norm_factor;
-        let pos = gesture.tracker.pos() * norm_factor;
+        let velocity = gesture.tracker.velocity();
+        let pos = gesture.tracker.pos();
         let current_view_offset = pos + gesture.delta_from_tracker;
 
         if self.columns.is_empty() {
@@ -3181,7 +3159,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         }
 
         // Figure out where the gesture would stop after deceleration.
-        let end_pos = gesture.tracker.projected_end_pos() * norm_factor;
+        let end_pos = gesture.tracker.projected_end_pos();
         let target_view_offset = end_pos + gesture.delta_from_tracker;
 
         // Compute the snapping points. These are where the view aligns with column boundaries on
@@ -3501,7 +3479,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             return;
         }
 
-        self.view_offset_gesture_end(None);
+        self.view_offset_gesture_end();
     }
 
     pub fn interactive_resize_begin(&mut self, window: W::Id, edges: ResizeEdge) -> bool {

@@ -31,9 +31,6 @@ use crate::utils::{
     ResizeEdge, output_size, round_logical_in_physical, round_logical_in_physical_max1,
 };
 
-/// Amount of touchpad movement to scroll the height of one workspace.
-const WORKSPACE_GESTURE_MOVEMENT: f64 = 300.;
-
 const WORKSPACE_GESTURE_RUBBER_BAND: RubberBand = RubberBand {
     stiffness: 0.5,
     limit: 0.05,
@@ -111,8 +108,6 @@ pub struct WorkspaceSwitchGesture {
     /// For example, if there's a workspace switch during a DnD scroll.
     animation: Option<Animation>,
     tracker: SwipeTracker,
-    /// Whether the gesture is controlled by the touchpad.
-    is_touchpad: bool,
     /// Whether the gesture is clamped to +-1 workspace around the center.
     is_clamped: bool,
 
@@ -281,7 +276,6 @@ impl From<&super::OverviewProgress> for OverviewProgress {
     fn from(value: &super::OverviewProgress) -> Self {
         match value {
             super::OverviewProgress::Animation(anim) => Self::Animation(anim.clone()),
-            super::OverviewProgress::Gesture(gesture) => Self::Value(gesture.value),
             super::OverviewProgress::Open => Self::Value(1.),
         }
     }
@@ -1756,7 +1750,7 @@ impl<W: LayoutElement> Monitor<W> {
         }
     }
 
-    pub fn workspace_switch_gesture_begin(&mut self, is_touchpad: bool) {
+    pub fn workspace_switch_gesture_begin(&mut self) {
         let center_idx = self.active_workspace_idx;
         let current_idx = self.workspace_render_idx();
 
@@ -1766,7 +1760,6 @@ impl<W: LayoutElement> Monitor<W> {
             current_idx,
             animation: None,
             tracker: SwipeTracker::new(),
-            is_touchpad,
             is_clamped: !self.overview_open,
             dnd_last_event_time: None,
             dnd_nonzero_start_time: None,
@@ -1798,7 +1791,6 @@ impl<W: LayoutElement> Monitor<W> {
             current_idx,
             animation: None,
             tracker: SwipeTracker::new(),
-            is_touchpad: false,
             is_clamped: false,
             dnd_last_event_time: Some(self.clock.now_unadjusted()),
             dnd_nonzero_start_time: None,
@@ -1810,35 +1802,23 @@ impl<W: LayoutElement> Monitor<W> {
         &mut self,
         delta_y: f64,
         timestamp: Duration,
-        is_touchpad: bool,
     ) -> Option<bool> {
         let Some(WorkspaceSwitch::Gesture(gesture)) = &self.workspace_switch else {
             return None;
         };
 
-        if gesture.is_touchpad != is_touchpad || gesture.dnd_last_event_time.is_some() {
+        if gesture.dnd_last_event_time.is_some() {
             return None;
         }
 
         let zoom = self.overview_zoom();
-        let total_height = if gesture.is_touchpad {
-            WORKSPACE_GESTURE_MOVEMENT
-        } else {
-            self.workspace_size_with_gap(1.).h
-        };
+        let total_height = self.workspace_size_with_gap(1.).h;
 
         let Some(WorkspaceSwitch::Gesture(gesture)) = &mut self.workspace_switch else {
             return None;
         };
 
-        // Reduce the effect of zoom on the touchpad somewhat.
-        let delta_scale = if gesture.is_touchpad {
-            (zoom - 1.) / 2.5 + 1.
-        } else {
-            zoom
-        };
-
-        let delta_y = delta_y / delta_scale;
+        let delta_y = delta_y / zoom;
         let mut rubber_band = WORKSPACE_GESTURE_RUBBER_BAND;
         rubber_band.limit /= zoom;
 
@@ -1943,20 +1923,14 @@ impl<W: LayoutElement> Monitor<W> {
         true
     }
 
-    pub fn workspace_switch_gesture_end(&mut self, is_touchpad: Option<bool>) -> bool {
+    pub fn workspace_switch_gesture_end(&mut self) -> bool {
         let Some(WorkspaceSwitch::Gesture(gesture)) = &self.workspace_switch else {
             return false;
         };
 
-        if is_touchpad.is_some_and(|x| gesture.is_touchpad != x) {
-            return false;
-        }
-
         let zoom = self.overview_zoom();
         let total_height = if gesture.dnd_last_event_time.is_some() {
             WORKSPACE_DND_EDGE_SCROLL_MOVEMENT
-        } else if gesture.is_touchpad {
-            WORKSPACE_GESTURE_MOVEMENT
         } else {
             self.workspace_size_with_gap(1.).h
         };
@@ -2012,7 +1986,7 @@ impl<W: LayoutElement> Monitor<W> {
             return;
         };
 
-        self.workspace_switch_gesture_end(None);
+        self.workspace_switch_gesture_end();
     }
 
     pub fn scale(&self) -> smithay::output::Scale {
