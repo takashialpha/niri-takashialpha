@@ -18,8 +18,8 @@ If you want **niri itself** — what it is, how to install it, how to configure 
 the keybindings, the IPC, screencasting, everything — go to upstream. This README
 intentionally does **not** duplicate niri's documentation:
 
-- **niri repository:** <https://github.com/YaLTeR/niri>
-- **niri documentation (wiki):** <https://github.com/YaLTeR/niri/wiki>
+- **niri repository:** <https://github.com/niri-wm/niri>
+- **niri documentation (wiki):** <https://github.com/niri-wm/niri/wiki>
 
 ## How this fork differs from upstream niri
 
