@@ -318,10 +318,6 @@ impl Animation {
         self.start_time
     }
 
-    pub fn end_time(&self) -> Duration {
-        self.start_time + self.duration
-    }
-
     pub fn duration(&self) -> Duration {
         self.duration
     }

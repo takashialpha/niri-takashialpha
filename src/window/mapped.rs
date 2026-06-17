@@ -1,7 +1,7 @@
 use std::cell::{Cell, Ref, RefCell};
 use std::time::Duration;
 
-use niri_config::{Color, CornerRadius, GradientInterpolation, WindowRule};
+use niri_config::WindowRule;
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::gles::GlesRenderer;
@@ -36,7 +36,7 @@ use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderEleme
 use crate::render_helpers::surface::{
     push_elements_from_surface_tree, render_snapshot_from_surface_tree,
 };
-use crate::render_helpers::{BakedBuffer, RenderCtx, RenderTarget};
+use crate::render_helpers::{BakedBuffer, RenderCtx};
 use crate::utils::id::IdCounter;
 use crate::utils::transaction::Transaction;
 use crate::utils::{
@@ -390,15 +390,6 @@ impl Mapped {
         self.need_to_recompute_rules = true;
     }
 
-    pub fn set_is_window_cast_target(&mut self, value: bool) {
-        if self.is_window_cast_target == value {
-            return;
-        }
-
-        self.is_window_cast_target = value;
-        self.need_to_recompute_rules = true;
-    }
-
     /// Renders a snapshot of the window without popups.
     fn render_snapshot(&self, renderer: &mut GlesRenderer) -> LayoutElementRenderSnapshot {
         let size = self.size().to_f64();
@@ -484,66 +475,6 @@ impl Mapped {
 
     pub fn last_interactive_resize_start(&self) -> &Cell<Option<(Duration, ResizeEdge)>> {
         &self.last_interactive_resize_start
-    }
-
-    pub fn render_for_screen_cast<R: NiriRenderer>(
-        &self,
-        renderer: &mut R,
-        scale: Scale<f64>,
-        push: &mut dyn FnMut(WindowCastRenderElements<R>),
-    ) {
-        let bbox = self.window.bbox_with_popups().to_physical_precise_up(scale);
-
-        let has_border_shader = BorderRenderElement::has_shader(renderer);
-        let radius = self.geometry_corner_radius();
-        let window_size = self
-            .size()
-            .to_f64()
-            .to_physical_precise_round(scale)
-            .to_logical(scale);
-        let radius = radius.fit_to(window_size.w as f32, window_size.h as f32);
-        let location = self.window.geometry().loc.to_f64() - bbox.loc.to_logical(scale);
-
-        let use_border = |elem| {
-            if let LayoutElementRenderElement::SolidColor(elem) = &elem {
-                // In this branch we're rendering a blocked-out window with a solid color. We need
-                // to render it with a rounded corner shader even if clip_to_geometry is false,
-                // because in this case we're assuming that the unclipped window CSD already has
-                // corners rounded to the user-provided radius, so our blocked-out rendering should
-                // match that radius.
-                if radius != CornerRadius::default() && has_border_shader {
-                    let geo = elem.geo();
-                    return BorderRenderElement::new(
-                        geo.size,
-                        Rectangle::from_size(geo.size),
-                        GradientInterpolation::default(),
-                        Color::from_color32f(elem.color()),
-                        Color::from_color32f(elem.color()),
-                        0.,
-                        Rectangle::from_size(geo.size),
-                        0.,
-                        radius,
-                        scale.x as f32,
-                        1.,
-                    )
-                    .with_location(geo.loc)
-                    .into();
-                }
-            }
-
-            WindowCastRenderElements::from(elem)
-        };
-
-        self.render(
-            RenderCtx {
-                renderer,
-                target: RenderTarget::Screencast,
-            },
-            location,
-            scale,
-            1.,
-            &mut |elem| push(use_border(elem)),
-        );
     }
 
     pub fn get_focus_timestamp(&self) -> Option<Duration> {

@@ -112,7 +112,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         display,
         false,
         true,
-        cli.session,
     )
     .unwrap();
 

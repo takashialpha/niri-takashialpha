@@ -31,7 +31,6 @@ pub mod macros;
 pub mod animations;
 pub mod appearance;
 pub mod binds;
-pub mod debug;
 pub mod error;
 pub mod gestures;
 pub mod input;
@@ -46,7 +45,6 @@ pub mod workspace;
 pub use crate::animations::{Animation, Animations};
 pub use crate::appearance::*;
 pub use crate::binds::*;
-pub use crate::debug::Debug;
 pub use crate::error::{ConfigIncludeError, ConfigParseResult};
 pub use crate::gestures::Gestures;
 pub use crate::input::{Input, ModKey, ScrollMethod, TrackLayout, WarpMouseToFocusMode, Xkb};
@@ -84,7 +82,6 @@ pub struct Config {
     pub layer_rules: Vec<LayerRule>,
     pub binds: Binds,
     pub switch_events: SwitchBinds,
-    pub debug: Debug,
     pub workspaces: Vec<Workspace>,
 }
 
@@ -190,7 +187,6 @@ where
                 "gestures" => m_merge!(gestures),
                 "overview" => m_merge!(overview),
                 "switch-events" => m_merge!(switch_events),
-                "debug" => m_merge!(debug),
 
                 // Multipart sections.
                 "output" => {

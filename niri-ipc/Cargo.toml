@@ -7,7 +7,6 @@ edition.workspace = true
 description.workspace = true
 keywords = ["wayland"]
 categories = ["api-bindings", "os"]
-readme = "README.md"
 
 [dependencies]
 clap = { workspace = true }

@@ -32,7 +32,7 @@ use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface}
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::backend::renderer::multigpu::gbm::GbmGlesBackend;
 use smithay::backend::renderer::multigpu::{GpuManager, MultiFrame, MultiRenderer};
-use smithay::backend::renderer::{DebugFlags, ImportDma, ImportEgl, RendererSuper};
+use smithay::backend::renderer::{ImportDma, ImportEgl, RendererSuper};
 use smithay::backend::session::libseat::LibSeatSession;
 use smithay::backend::session::{Event as SessionEvent, Session};
 use smithay::backend::udev::{self, UdevBackend, UdevEvent};
@@ -65,7 +65,6 @@ use super::{IpcOutputMap, RenderResult};
 use crate::backend::OutputId;
 use crate::frame_clock::FrameClock;
 use crate::niri::{Niri, RedrawState, State};
-use crate::render_helpers::debug::draw_damage;
 use crate::render_helpers::renderer::AsGlesRenderer;
 use crate::render_helpers::{RenderCtx, RenderTarget, resources, shaders};
 use crate::utils::{PanelOrientation, get_monotonic_time, is_laptop_panel, logical_output};
@@ -92,8 +91,6 @@ pub struct Tty {
     primary_node: DrmNode,
     // DRM render node corresponding to the primary GPU.
     primary_render_node: DrmNode,
-    // Ignored DRM nodes.
-    ignored_nodes: HashSet<DrmNode>,
     // Devices indexed by DRM node (not necessarily the render node).
     devices: HashMap<DrmNode, OutputDevice>,
     // The dma-buf global corresponds to the output device (the primary GPU). It is only `Some()`
@@ -101,8 +98,6 @@ pub struct Tty {
     dmabuf_global: Option<DmabufGlobal>,
     // The output config had changed, but the session is paused, so we need to update it on resume.
     update_output_config_on_resume: bool,
-    // Whether the debug tinting is enabled.
-    debug_tint: bool,
     ipc_outputs: Arc<Mutex<IpcOutputMap>>,
 }
 
@@ -197,22 +192,7 @@ impl OutputDevice {
         self.active_leases.retain(|l| l.id() != lease_id);
     }
 
-    pub fn known_crtc_name(
-        &self,
-        crtc: &crtc::Handle,
-        conn: &connector::Info,
-        disable_monitor_names: bool,
-    ) -> OutputName {
-        if disable_monitor_names {
-            let conn_name = format_connector_name(conn);
-            return OutputName {
-                connector: conn_name,
-                make: None,
-                model: None,
-                serial: None,
-            };
-        }
-
+    pub fn known_crtc_name(&self, crtc: &crtc::Handle, conn: &connector::Info) -> OutputName {
         let Some(info) = self.known_crtcs.get(crtc) else {
             let conn_name = format_connector_name(conn);
             error!("crtc for connector {conn_name} missing from known");
@@ -378,8 +358,6 @@ struct Surface {
     connector: connector::Handle,
     dmabuf_feedback: Option<SurfaceDmabufFeedback>,
     gamma_props: Option<GammaProps>,
-    /// Gamma change to apply upon session resume.
-    pending_gamma_change: Option<Option<Vec<u16>>>,
 }
 
 pub struct SurfaceDmabufFeedback {
@@ -453,26 +431,22 @@ impl Tty {
         let api = GbmGlesBackend::with_context_priority(ContextPriority::High);
         let gpu_manager = GpuManager::new(api).context("error creating the GPU manager")?;
 
-        let (primary_node, primary_render_node) = primary_node_from_config(&config.borrow())
-            .ok_or(())
-            .or_else(|()| {
-                let primary_gpu_path = udev::primary_gpu(&seat_name)
-                    .context("error getting the primary GPU")?
-                    .context("couldn't find a GPU")?;
-                let primary_node = DrmNode::from_path(primary_gpu_path)
-                    .context("error opening the primary GPU DRM node")?;
-                let primary_render_node = primary_node
-                    .node_with_type(NodeType::Render)
-                    .and_then(Result::ok)
-                    .unwrap_or_else(|| {
-                        warn!(
-                            "error getting the render node for the primary GPU; proceeding anyway"
-                        );
-                        primary_node
-                    });
+        let (primary_node, primary_render_node) = {
+            let primary_gpu_path = udev::primary_gpu(&seat_name)
+                .context("error getting the primary GPU")?
+                .context("couldn't find a GPU")?;
+            let primary_node = DrmNode::from_path(primary_gpu_path)
+                .context("error opening the primary GPU DRM node")?;
+            let primary_render_node = primary_node
+                .node_with_type(NodeType::Render)
+                .and_then(Result::ok)
+                .unwrap_or_else(|| {
+                    warn!("error getting the render node for the primary GPU; proceeding anyway");
+                    primary_node
+                });
 
-                Ok::<_, anyhow::Error>((primary_node, primary_render_node))
-            })?;
+            (primary_node, primary_render_node)
+        };
 
         let mut node_path = String::new();
         if let Some(path) = primary_render_node.dev_path() {
@@ -490,11 +464,9 @@ impl Tty {
             gpu_manager,
             primary_node,
             primary_render_node,
-            ignored_nodes: HashSet::new(),
             devices: HashMap::new(),
             dmabuf_global: None,
             update_output_config_on_resume: false,
-            debug_tint: false,
             ipc_outputs: Arc::new(Mutex::new(HashMap::new())),
         })
     }
@@ -507,9 +479,6 @@ impl Tty {
         if !self.session.is_active() {
             return;
         }
-
-        // Initialize the ignored nodes.
-        self.ignored_nodes = self.compute_ignored_nodes();
 
         let udev = self.udev_dispatcher.clone();
         let udev = udev.as_source_ref();
@@ -547,10 +516,6 @@ impl Tty {
                     debug!("skipping UdevEvent::Added as session is inactive");
                     return;
                 }
-
-                // Recompute ignored nodes to resolve symlinks (like /dev/dri/by-path/...) to their
-                // new underlying device IDs.
-                self.ignored_nodes = self.compute_ignored_nodes();
 
                 if let Err(err) = self.device_added(device_id, &path, niri) {
                     warn!("error adding device: {err:?}");
@@ -597,10 +562,6 @@ impl Tty {
                     warn!("error resuming libinput");
                 }
 
-                // While the session was suspended, GPUs could have been added, so
-                // /dev/dri/by-path/... symlinks need to be re-resolved.
-                self.ignored_nodes = self.compute_ignored_nodes();
-
                 let mut device_list = self
                     .udev_dispatcher
                     .as_source_ref()
@@ -611,20 +572,14 @@ impl Tty {
                 let removed_devices = self
                     .devices
                     .keys()
-                    .filter(|node| {
-                        !device_list.contains_key(&node.dev_id())
-                            || self.ignored_nodes.contains(node)
-                    })
+                    .filter(|node| !device_list.contains_key(&node.dev_id()))
                     .copied()
                     .collect::<Vec<_>>();
 
                 let remained_devices = self
                     .devices
                     .keys()
-                    .filter(|node| {
-                        device_list.contains_key(&node.dev_id())
-                            && !self.ignored_nodes.contains(node)
-                    })
+                    .filter(|node| device_list.contains_key(&node.dev_id()))
                     .copied()
                     .collect::<Vec<_>>();
 
@@ -641,15 +596,7 @@ impl Tty {
                     // It hasn't been removed, update its state as usual.
                     let device = self.devices.get_mut(&node).unwrap();
 
-                    // Someone on an old device hit what seems to be a driver bug without this:
-                    // https://github.com/niri-wm/niri/issues/3048
-                    let force_disable = self
-                        .config
-                        .borrow()
-                        .debug
-                        .force_disable_connectors_on_resume;
-
-                    if let Err(err) = device.drm.activate(force_disable) {
+                    if let Err(err) = device.drm.activate(false) {
                         warn!("error activating DRM device: {err:?}");
                     }
                     if let Some(lease_state) = &mut device.drm_lease_state {
@@ -661,7 +608,7 @@ impl Tty {
 
                     // Apply pending gamma changes and restore our existing gamma.
                     let device = self.devices.get_mut(&node).unwrap();
-                    for (crtc, surface) in device.surfaces.iter_mut() {
+                    for surface in device.surfaces.values_mut() {
                         if let Ok(mut props) =
                             ConnectorProperties::try_new(&device.drm, surface.connector)
                         {
@@ -676,17 +623,7 @@ impl Tty {
                             warn!("failed to get connector properties");
                         }
 
-                        if let Some(ramp) = surface.pending_gamma_change.take() {
-                            let ramp = ramp.as_deref();
-                            let res = if let Some(gamma_props) = &mut surface.gamma_props {
-                                gamma_props.set_gamma(&device.drm, ramp)
-                            } else {
-                                set_gamma_for_crtc(&device.drm, *crtc, ramp)
-                            };
-                            if let Err(err) = res {
-                                warn!("error applying pending gamma change: {err:?}");
-                            }
-                        } else if let Some(gamma_props) = &surface.gamma_props
+                        if let Some(gamma_props) = &surface.gamma_props
                             && let Err(err) = gamma_props.restore_gamma(&device.drm)
                         {
                             warn!("error restoring gamma: {err:?}");
@@ -740,11 +677,6 @@ impl Tty {
         // https://gitlab.freedesktop.org/wlroots/wlroots/-/commit/768fbaad54027f8dd027e7e015e8eeb93cb38c52
         if node.ty() != NodeType::Primary {
             debug!("not a primary node, skipping");
-            return Ok(());
-        }
-
-        if self.ignored_nodes.contains(&node) {
-            debug!("node is ignored, skipping");
             return Ok(());
         }
 
@@ -921,11 +853,6 @@ impl Tty {
             return;
         }
 
-        if self.ignored_nodes.contains(&node) {
-            debug!("node is ignored, skipping");
-            return;
-        }
-
         let Some(device) = self.devices.get_mut(&node) else {
             if let Some(path) = node.dev_path() {
                 warn!("unknown device; trying to add");
@@ -1060,10 +987,9 @@ impl Tty {
             let should_disable = |conn: &str| disable_laptop_panels && is_laptop_panel(conn);
 
             let config = self.config.borrow();
-            let disable_monitor_names = config.debug.disable_monitor_names;
 
             let should_be_off = |crtc, conn: &connector::Info| {
-                let output_name = device.known_crtc_name(&crtc, conn, disable_monitor_names);
+                let output_name = device.known_crtc_name(&crtc, conn);
 
                 let config = config
                     .outputs
@@ -1217,8 +1143,7 @@ impl Tty {
 
         let device = self.devices.get_mut(&node).context("missing device")?;
 
-        let disable_monitor_names = self.config.borrow().debug.disable_monitor_names;
-        let output_name = device.known_crtc_name(&crtc, &connector, disable_monitor_names);
+        let output_name = device.known_crtc_name(&crtc, &connector);
 
         let non_desktop = find_drm_property(&device.drm, connector.handle(), "non-desktop")
             .and_then(|(_, info, value)| info.value_type().convert_value(value).as_boolean())
@@ -1455,10 +1380,6 @@ impl Tty {
             }
         };
 
-        if self.debug_tint {
-            compositor.set_debug_flags(DebugFlags::TINT);
-        }
-
         let mut dmabuf_feedback = None;
         if let Ok(primary_renderer) = self.gpu_manager.single_renderer(&self.primary_render_node) {
             let primary_formats = primary_renderer.dmabuf_formats();
@@ -1495,7 +1416,6 @@ impl Tty {
             compositor,
             dmabuf_feedback,
             gamma_props,
-            pending_gamma_change: None,
         };
 
         let res = device.surfaces.insert(crtc, surface);
@@ -1594,11 +1514,6 @@ impl Tty {
                 // This value will be ignored in the frame clock code.
                 Duration::ZERO
             }
-        };
-        let presentation_time = if niri.config.borrow().debug.emulate_zero_presentation_time {
-            Duration::ZERO
-        } else {
-            presentation_time
         };
 
         let Some(output) = niri
@@ -1789,56 +1704,18 @@ impl Tty {
             renderer: &mut renderer,
             target: RenderTarget::Output,
         };
-        let mut elements = niri.render_to_vec(ctx, output, true);
-
-        // Visualize the damage, if enabled.
-        if niri.debug_draw_damage {
-            let output_state = niri.output_state.get_mut(output).unwrap();
-            draw_damage(&mut output_state.debug_damage_tracker, &mut elements);
-        }
+        let elements = niri.render_to_vec(ctx, output, true);
 
         // Overlay planes are disabled by default as they cause weird performance issues on my
         // system.
-        let flags = {
-            let debug = &self.config.borrow().debug;
-
-            let primary_scanout_flag = if debug.restrict_primary_scanout_to_matching_format {
-                FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT
-            } else {
-                FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY
-            };
-            let mut flags = primary_scanout_flag | FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT;
-
-            if debug.enable_overlay_planes {
-                flags.insert(FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT);
-            }
-            if debug.disable_direct_scanout {
-                flags.remove(primary_scanout_flag);
-                flags.remove(FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT);
-            }
-            if debug.disable_cursor_plane {
-                flags.remove(FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT);
-            }
-            if debug.skip_cursor_only_updates_during_vrr {
-                let output_state = niri.output_state.get(output).unwrap();
-                if output_state.frame_clock.vrr() {
-                    flags.insert(FrameFlags::SKIP_CURSOR_ONLY_UPDATES);
-                }
-            }
-
-            flags
-        };
+        let flags =
+            FrameFlags::ALLOW_PRIMARY_PLANE_SCANOUT_ANY | FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT;
 
         // Hand them over to the DRM.
         let drm_compositor = &mut surface.compositor;
         match drm_compositor.render_frame::<_, _>(&mut renderer, &elements, [0.; 4], flags) {
             Ok(res) => {
-                let needs_sync = res.needs_sync()
-                    || self
-                        .config
-                        .borrow()
-                        .debug
-                        .wait_for_frame_completion_before_queueing;
+                let needs_sync = res.needs_sync();
                 if needs_sync
                     && let PrimaryPlaneElement::Swapchain(element) = res.primary_element
                     && let Err(err) = element.sync.wait()
@@ -1908,20 +1785,6 @@ impl Tty {
 
     pub fn suspend(&self) {}
 
-    pub fn toggle_debug_tint(&mut self) {
-        self.debug_tint = !self.debug_tint;
-
-        for device in self.devices.values_mut() {
-            for surface in device.surfaces.values_mut() {
-                let compositor = &mut surface.compositor;
-
-                let mut flags = compositor.debug_flags();
-                flags.set(DebugFlags::TINT, self.debug_tint);
-                compositor.set_debug_flags(flags);
-            }
-        }
-    }
-
     pub fn import_dmabuf(&mut self, dmabuf: &Dmabuf) -> bool {
         let mut renderer = match self.gpu_manager.single_renderer(&self.primary_render_node) {
             Ok(renderer) => renderer,
@@ -1955,13 +1818,12 @@ impl Tty {
 
     fn refresh_ipc_outputs(&self, niri: &mut Niri) {
         let mut ipc_outputs = HashMap::new();
-        let disable_monitor_names = self.config.borrow().debug.disable_monitor_names;
 
         for (node, device) in &self.devices {
             for (connector, crtc) in device.drm_scanner.crtcs() {
                 let connector_name = format_connector_name(connector);
                 let physical_size = connector.size();
-                let output_name = device.known_crtc_name(&crtc, connector, disable_monitor_names);
+                let output_name = device.known_crtc_name(&crtc, connector);
 
                 let surface = device.surfaces.get(&crtc);
                 let current_crtc_mode = surface.map(|surface| surface.compositor.pending_mode());
@@ -2123,73 +1985,16 @@ impl Tty {
         }
     }
 
-    fn compute_ignored_nodes(&self) -> HashSet<DrmNode> {
-        let mut ignored_nodes = ignored_nodes_from_config(&self.config.borrow());
-        if ignored_nodes.remove(&self.primary_node)
-            || ignored_nodes.remove(&self.primary_render_node)
-        {
-            warn!("ignoring the primary node or render node is not allowed");
-        }
-        ignored_nodes
-    }
-
-    pub fn update_ignored_nodes_config(&mut self, niri: &mut Niri) {
-        // If we're inactive, we can't do anything, but we'll recompute in ActivateSession.
-        if !self.session.is_active() {
-            return;
-        }
-
-        let ignored_nodes = self.compute_ignored_nodes();
-        if ignored_nodes == self.ignored_nodes {
-            return;
-        }
-        self.ignored_nodes = ignored_nodes;
-
-        let mut device_list = self
-            .udev_dispatcher
-            .as_source_ref()
-            .device_list()
-            .map(|(device_id, path)| (device_id, path.to_owned()))
-            .collect::<HashMap<_, _>>();
-
-        let removed_devices = self
-            .devices
-            .keys()
-            .filter(|node| {
-                self.ignored_nodes.contains(node) || !device_list.contains_key(&node.dev_id())
-            })
-            .copied()
-            .collect::<Vec<_>>();
-
-        for node in removed_devices {
-            device_list.remove(&node.dev_id());
-            self.device_removed(node.dev_id(), niri);
-        }
-
-        for node in self.devices.keys() {
-            device_list.remove(&node.dev_id());
-        }
-
-        for (device_id, path) in device_list {
-            if let Err(err) = self.device_added(device_id, &path, niri) {
-                warn!("error adding device {path:?}: {err:?}");
-            }
-        }
-    }
-
     fn should_disable_laptop_panels(&self, is_lid_closed: bool) -> bool {
         if !is_lid_closed {
             return false;
         }
 
-        let config = self.config.borrow();
-        if !config.debug.keep_laptop_panel_on_when_lid_is_closed {
-            // Check if any external monitor is connected.
-            for device in self.devices.values() {
-                for (connector, _crtc) in device.drm_scanner.crtcs() {
-                    if !is_laptop_panel(&format_connector_name(connector)) {
-                        return true;
-                    }
+        // Check if any external monitor is connected.
+        for device in self.devices.values() {
+            for (connector, _crtc) in device.drm_scanner.crtcs() {
+                if !is_laptop_panel(&format_connector_name(connector)) {
+                    return true;
                 }
             }
         }
@@ -2346,7 +2151,6 @@ impl Tty {
             }
 
             let config = self.config.borrow();
-            let disable_monitor_names = config.debug.disable_monitor_names;
 
             for (connector, crtc) in device.drm_scanner.crtcs() {
                 // Check if connected.
@@ -2363,7 +2167,7 @@ impl Tty {
                     continue;
                 }
 
-                let output_name = device.known_crtc_name(&crtc, connector, disable_monitor_names);
+                let output_name = device.known_crtc_name(&crtc, connector);
 
                 let config = config
                     .outputs
@@ -2399,7 +2203,6 @@ impl Tty {
     }
 
     pub fn disconnected_connector_name_by_name_match(&self, target: &str) -> Option<OutputName> {
-        let disable_monitor_names = self.config.borrow().debug.disable_monitor_names;
         for device in self.devices.values() {
             for (connector, crtc) in device.drm_scanner.crtcs() {
                 // Check if connected.
@@ -2416,7 +2219,7 @@ impl Tty {
                     continue;
                 }
 
-                let output_name = device.known_crtc_name(&crtc, connector, disable_monitor_names);
+                let output_name = device.known_crtc_name(&crtc, connector);
                 if output_name.matches(target) {
                     return Some(output_name);
                 }
@@ -2557,61 +2360,6 @@ impl GammaProps {
 
         Ok(())
     }
-}
-
-fn primary_node_from_render_node(path: &Path) -> Option<(DrmNode, DrmNode)> {
-    match DrmNode::from_path(path) {
-        Ok(node) => {
-            if node.ty() == NodeType::Render {
-                match node.node_with_type(NodeType::Primary) {
-                    Some(Ok(primary_node)) => {
-                        return Some((primary_node, node));
-                    }
-                    Some(Err(err)) => {
-                        warn!("error opening primary node for render node {path:?}: {err:?}");
-                    }
-                    None => {
-                        warn!("error opening primary node for render node {path:?}");
-                    }
-                }
-            } else {
-                warn!("DRM node {path:?} is not a render node");
-
-                // Gracefully handle misconfiguration on regular desktop systems.
-                if let Some(Ok(render_node)) = node.node_with_type(NodeType::Render) {
-                    return Some((node, render_node));
-                }
-
-                warn!("could not get render node for DRM node {path:?}; proceeding anyway");
-                return Some((node, node));
-            }
-        }
-        Err(err) => {
-            warn!("error opening {path:?} as DRM node: {err:?}");
-        }
-    }
-
-    None
-}
-
-fn primary_node_from_config(config: &Config) -> Option<(DrmNode, DrmNode)> {
-    let path = config.debug.render_drm_device.as_ref()?;
-    debug!("attempting to use render node from config: {path:?}");
-
-    primary_node_from_render_node(path)
-}
-
-fn ignored_nodes_from_config(config: &Config) -> HashSet<DrmNode> {
-    let mut disabled_nodes = HashSet::new();
-
-    for path in &config.debug.ignored_drm_devices {
-        if let Some((primary_node, render_node)) = primary_node_from_render_node(path) {
-            disabled_nodes.insert(primary_node);
-            disabled_nodes.insert(render_node);
-        }
-    }
-
-    disabled_nodes
 }
 
 fn surface_dmabuf_feedback(

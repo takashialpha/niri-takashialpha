@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::cmp::max;
 use std::collections::HashMap;
-use std::fmt::Write as _;
 use std::iter::zip;
 use std::rc::Rc;
 
@@ -122,32 +121,6 @@ impl HotkeyOverlay {
         );
 
         Some(PrimaryGpuTextureRenderElement(elem))
-    }
-
-    pub fn a11y_text(&self) -> String {
-        let config = self.config.borrow();
-        let actions = collect_actions(&config);
-
-        let mut buf = String::new();
-        writeln!(&mut buf, "{TITLE}").unwrap();
-
-        for action in actions {
-            let Some((key, action)) = format_bind(&config.binds.0, action) else {
-                continue;
-            };
-
-            let key = key.map(|key| key_name(true, self.mod_key, &key));
-            let key = key.as_deref().unwrap_or("not bound");
-
-            let action = match pango::parse_markup(&action, '\0') {
-                Ok((_attrs, text, _accel)) => text,
-                Err(_) => action.into(),
-            };
-
-            writeln!(&mut buf, "{key} {action}").unwrap();
-        }
-
-        buf
     }
 }
 

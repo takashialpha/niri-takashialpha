@@ -13,7 +13,6 @@ use std::{mem, thread};
 use _server_decoration::server::org_kde_kwin_server_decoration_manager::Mode as KdeDecorationsMode;
 use anyhow::{Context, bail, ensure};
 use calloop::futures::Scheduler;
-use niri_config::debug::PreviewRender;
 use niri_config::output::MaxBpc;
 use niri_config::{
     Config, FloatOrInt, Key, Modifiers, OutputName, TrackLayout, WarpMouseToFocusMode,
@@ -136,7 +135,6 @@ use crate::protocols::ext_workspace::{self, ExtWorkspaceManagerState};
 use crate::protocols::foreign_toplevel::{self, ForeignToplevelManagerState};
 use crate::protocols::output_management::OutputManagementManagerState;
 use crate::protocols::screencopy::{Screencopy, ScreencopyBuffer, ScreencopyManagerState};
-use crate::render_helpers::debug::push_opaque_regions;
 use crate::render_helpers::primary_gpu_texture::PrimaryGpuTextureRenderElement;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
@@ -186,9 +184,6 @@ pub struct Niri {
     pub scheduler: Scheduler<()>,
     pub stop_signal: LoopSignal,
     pub display_handle: DisplayHandle,
-
-    /// Whether niri was run with `--session`
-    pub is_session_instance: bool,
 
     /// Name of the Wayland socket.
     ///
@@ -348,9 +343,6 @@ pub struct Niri {
 
     pub lock_state: LockState,
 
-    // State that we last sent to the logind LockedHint.
-    pub locked_hint: Option<bool>,
-
     pub screenshot_ui: ScreenshotUi,
     pub config_error_notification: ConfigErrorNotification,
     pub hotkey_overlay: HotkeyOverlay,
@@ -358,9 +350,6 @@ pub struct Niri {
 
     pub pick_window: Option<async_channel::Sender<Option<MappedId>>>,
     pub pick_color: Option<async_channel::Sender<Option<niri_ipc::PickedColor>>>,
-
-    pub debug_draw_opaque_regions: bool,
-    pub debug_draw_damage: bool,
 
     pub ipc_server: Option<IpcServer>,
     pub ipc_outputs_changed: bool,
@@ -401,8 +390,6 @@ pub struct OutputState {
     pub on_demand_vrr_enabled: bool,
     // After the last redraw, some ongoing animations still remain.
     pub unfinished_animations_remain: bool,
-    /// Last sequence received in a vblank event.
-    pub last_drm_sequence: Option<u32>,
     pub vblank_throttle: VBlankThrottle,
     /// Sequence for frame callback throttling.
     ///
@@ -431,8 +418,6 @@ pub struct OutputState {
     pub lock_surface: Option<LockSurface>,
     pub lock_color_buffer: SolidColorBuffer,
     screen_transition: Option<ScreenTransition>,
-    /// Damage tracker used for the debug damage visualization.
-    pub debug_damage_tracker: OutputDamageTracker,
 }
 
 #[derive(Debug, Default)]
@@ -596,7 +581,6 @@ impl State {
         display: Display<State>,
         headless: bool,
         create_wayland_socket: bool,
-        is_session_instance: bool,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let config = Rc::new(RefCell::new(config));
 
@@ -616,7 +600,6 @@ impl State {
             display,
             &backend,
             create_wayland_socket,
-            is_session_instance,
         );
         backend.init(&mut niri);
 
@@ -1325,9 +1308,6 @@ impl State {
             libinput_config_changed = true;
         }
 
-        let ignored_nodes_changed =
-            config.debug.ignored_drm_devices != old_config.debug.ignored_drm_devices;
-
         if config.outputs != self.niri.config_file_output_config {
             output_config_changed = true;
             self.niri
@@ -1395,16 +1375,6 @@ impl State {
             cursor_inactivity_timeout_changed = true;
         }
 
-        if config.debug.keep_laptop_panel_on_when_lid_is_closed
-            != old_config.debug.keep_laptop_panel_on_when_lid_is_closed
-        {
-            output_config_changed = true;
-        }
-
-        if config.debug.ignored_drm_devices != old_config.debug.ignored_drm_devices {
-            output_config_changed = true;
-        }
-
         // FIXME: move backdrop rendering into layout::Monitor, then this will become unnecessary.
         if config.overview.backdrop_color != old_config.overview.backdrop_color {
             output_config_changed = true;
@@ -1455,10 +1425,6 @@ impl State {
             for mut device in self.niri.devices.iter().cloned() {
                 apply_libinput_settings(&config.input, &mut device);
             }
-        }
-
-        if ignored_nodes_changed {
-            self.backend.update_ignored_nodes_config(&mut self.niri);
         }
 
         if output_config_changed {
@@ -1824,7 +1790,6 @@ impl Niri {
         display: Display<State>,
         backend: &Backend,
         create_wayland_socket: bool,
-        is_session_instance: bool,
     ) -> Self {
         let (executor, scheduler) = calloop::futures::executor().unwrap();
         event_loop.insert_source(executor, |_, _, _| ()).unwrap();
@@ -2063,7 +2028,6 @@ impl Niri {
             stop_signal,
             socket_name,
             display_handle,
-            is_session_instance,
             start_time: Instant::now(),
             is_at_startup: true,
             clock: animation_clock,
@@ -2159,7 +2123,6 @@ impl Niri {
             mods_with_finger_scroll_binds,
 
             lock_state: LockState::Unlocked,
-            locked_hint: None,
 
             screenshot_ui,
             config_error_notification,
@@ -2168,9 +2131,6 @@ impl Niri {
 
             pick_window: None,
             pick_color: None,
-
-            debug_draw_opaque_regions: false,
-            debug_draw_damage: false,
 
             ipc_server,
             ipc_outputs_changed: false,
@@ -2381,7 +2341,6 @@ impl Niri {
             on_demand_vrr_enabled: false,
             unfinished_animations_remain: false,
             frame_clock: FrameClock::new(refresh_interval, vrr),
-            last_drm_sequence: None,
             vblank_throttle: VBlankThrottle::new(self.event_loop.clone(), name.connector.clone()),
             frame_callback_sequence: 0,
             backdrop_buffer: SolidColorBuffer::new(size, backdrop_color),
@@ -2389,7 +2348,6 @@ impl Niri {
             lock_surface: None,
             lock_color_buffer: SolidColorBuffer::new(size, CLEAR_COLOR_LOCKED),
             screen_transition: None,
-            debug_damage_tracker: OutputDamageTracker::from_output(&output),
         };
         let rv = self.output_state.insert(output.clone(), state);
         assert!(rv.is_none(), "output was already tracked");
@@ -3101,13 +3059,6 @@ impl Niri {
         Some((target_output.cloned(), target_workspace_index))
     }
 
-    pub fn find_window_by_id(&self, id: MappedId) -> Option<Window> {
-        self.layout
-            .windows()
-            .find(|(_, m)| m.id() == id)
-            .map(|(_, m)| m.window.clone())
-    }
-
     pub fn output_for_tablet(&self) -> Option<&Output> {
         let config = self.config.borrow();
         if config.input.tablet.map_to_focused_output {
@@ -3607,20 +3558,11 @@ impl Niri {
 
     pub fn render<R: NiriRenderer>(
         &self,
-        mut ctx: RenderCtx<R>,
+        ctx: RenderCtx<R>,
         output: &Output,
         include_pointer: bool,
         push: &mut dyn FnMut(OutputRenderElements<R>),
     ) {
-        if ctx.target == RenderTarget::Output
-            && let Some(preview) = self.config.borrow().debug.preview_render
-        {
-            ctx.target = match preview {
-                PreviewRender::Screencast => RenderTarget::Screencast,
-                PreviewRender::ScreenCapture => RenderTarget::ScreenCapture,
-            };
-        }
-
         self.render_inner(ctx, output, include_pointer, push);
     }
 
@@ -3633,15 +3575,6 @@ impl Niri {
     ) {
         let state = self.output_state.get(output).unwrap();
         let output_scale = Scale::from(output.current_scale().fractional_scale());
-
-        let push = if self.debug_draw_opaque_regions {
-            &mut move |elem| {
-                push_opaque_regions(&elem, output_scale, push);
-                push(elem);
-            }
-        } else {
-            push
-        };
 
         // The pointer goes on the top.
         if include_pointer && self.pointer_visibility.is_visible() {
@@ -4676,18 +4609,6 @@ impl Niri {
         };
 
         Ok(sync)
-    }
-
-    pub fn debug_toggle_damage(&mut self) {
-        self.debug_draw_damage = !self.debug_draw_damage;
-
-        if self.debug_draw_damage {
-            for (output, state) in &mut self.output_state {
-                state.debug_damage_tracker = OutputDamageTracker::from_output(output);
-            }
-        }
-
-        self.queue_redraw_all();
     }
 
     pub fn capture_screenshots<'a>(

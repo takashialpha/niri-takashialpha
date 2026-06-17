@@ -625,17 +625,6 @@ impl State {
             Action::PowerOnMonitors => {
                 self.niri.activate_monitors(&mut self.backend);
             }
-            Action::ToggleDebugTint => {
-                self.backend.toggle_debug_tint();
-                self.niri.queue_redraw_all();
-            }
-            Action::DebugToggleOpaqueRegions => {
-                self.niri.debug_draw_opaque_regions = !self.niri.debug_draw_opaque_regions;
-                self.niri.queue_redraw_all();
-            }
-            Action::DebugToggleDamage => {
-                self.niri.debug_toggle_damage();
-            }
             Action::Spawn(command) => {
                 let (token, _) = self.niri.activation_state.create_external_token(None);
                 spawn(command, Some(token.clone()));

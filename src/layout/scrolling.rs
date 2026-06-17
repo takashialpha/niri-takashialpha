@@ -1520,12 +1520,6 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             self.options.animations.window_close.anim,
         );
 
-        let blocker = if self.options.disable_transactions {
-            TransactionBlocker::completed()
-        } else {
-            blocker
-        };
-
         let scale = Scale::from(self.scale);
         let res = ClosingWindow::new(
             renderer, snapshot, scale, tile_size, tile_pos, blocker, anim,
@@ -3625,7 +3619,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         self.interactive_resize = None;
     }
 
-    pub fn refresh(&mut self, is_active: bool, is_focused: bool) {
+    pub fn refresh(&mut self, is_active: bool, _is_focused: bool) {
         for (col_idx, col) in self.columns.iter_mut().enumerate() {
             let mut col_resize_data = None;
             if let Some(resize) = &self.interactive_resize
@@ -3637,14 +3631,11 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             let is_tabbed = col.display_mode == ColumnDisplay::Tabbed;
             let extra_size = col.extra_size();
 
-            // If transactions are disabled, also disable combined throttling, for more intuitive
-            // behavior. In tabbed display mode, only one window is visible, so individual
-            // throttling makes more sense.
-            let individual_throttling = self.options.disable_transactions || is_tabbed;
+            // In tabbed display mode, only one window is visible, so individual throttling makes
+            // more sense.
+            let individual_throttling = is_tabbed;
 
-            let intent = if self.options.disable_resize_throttling {
-                ConfigureIntent::CanSend
-            } else if individual_throttling {
+            let intent = if individual_throttling {
                 // In this case, we don't use combined throttling, but rather compute throttling
                 // individually below.
                 ConfigureIntent::CanSend
@@ -3671,13 +3662,9 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                 win.set_floating(false);
 
                 let mut active = is_active && self.active_column_idx == col_idx;
-                if self.options.deactivate_unfocused_windows {
-                    active &= active_in_column && is_focused;
-                } else {
-                    // In tabbed mode, all tabs have activated state to reduce unnecessary
-                    // animations when switching tabs.
-                    active &= active_in_column || is_tabbed;
-                }
+                // In tabbed mode, all tabs have activated state to reduce unnecessary
+                // animations when switching tabs.
+                active &= active_in_column || is_tabbed;
                 win.set_activated(active);
 
                 win.set_interactive_resize(col_resize_data);

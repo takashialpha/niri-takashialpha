@@ -266,10 +266,6 @@ impl FocusRing {
         self.config.off
     }
 
-    pub fn set_thicken_corners(&mut self, value: bool) {
-        self.thicken_corners = value;
-    }
-
     pub fn config(&self) -> &niri_config::FocusRing {
         &self.config
     }

@@ -382,14 +382,6 @@ impl<W: LayoutElement> Monitor<W> {
         })
     }
 
-    pub fn find_named_workspace_index(&self, workspace_name: &str) -> Option<usize> {
-        self.workspaces.iter().position(|ws| {
-            ws.name
-                .as_ref()
-                .is_some_and(|name| name.eq_ignore_ascii_case(workspace_name))
-        })
-    }
-
     pub fn active_workspace(&mut self) -> &mut Workspace<W> {
         &mut self.workspaces[self.active_workspace_idx]
     }

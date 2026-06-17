@@ -108,9 +108,6 @@ pub enum Action {
     Suspend,
     PowerOffMonitors,
     PowerOnMonitors,
-    ToggleDebugTint,
-    DebugToggleOpaqueRegions,
-    DebugToggleDamage,
     Spawn(#[knus(arguments)] Vec<String>),
     SpawnSh(#[knus(argument)] String),
     DoScreenTransition(#[knus(property(name = "delay-ms"))] Option<u16>),
@@ -633,9 +630,6 @@ impl From<niri_ipc::Action> for Action {
                 reference: None,
             } => Self::MoveWorkspaceToMonitor(output),
             niri_ipc::Action::MoveWorkspaceToMonitorNext {} => Self::MoveWorkspaceToMonitorNext,
-            niri_ipc::Action::ToggleDebugTint {} => Self::ToggleDebugTint,
-            niri_ipc::Action::DebugToggleOpaqueRegions {} => Self::DebugToggleOpaqueRegions,
-            niri_ipc::Action::DebugToggleDamage {} => Self::DebugToggleDamage,
             niri_ipc::Action::ToggleWindowFloating { id: None } => Self::ToggleWindowFloating,
             niri_ipc::Action::ToggleWindowFloating { id: Some(id) } => {
                 Self::ToggleWindowFloatingById(id)

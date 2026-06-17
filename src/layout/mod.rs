@@ -364,10 +364,6 @@ pub struct Options {
     pub animations: niri_config::Animations,
     pub gestures: niri_config::Gestures,
     pub overview: niri_config::Overview,
-    // Debug flags.
-    pub disable_resize_throttling: bool,
-    pub disable_transactions: bool,
-    pub deactivate_unfocused_windows: bool,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -624,9 +620,6 @@ impl Options {
             animations: config.animations.clone(),
             gestures: config.gestures,
             overview: config.overview,
-            disable_resize_throttling: config.debug.disable_resize_throttling,
-            disable_transactions: config.debug.disable_transactions,
-            deactivate_unfocused_windows: config.debug.deactivate_unfocused_windows,
         }
     }
 
@@ -660,21 +653,6 @@ impl OverviewProgress {
 impl<W: LayoutElement> Layout<W> {
     pub fn new(clock: Clock, config: &Config) -> Self {
         Self::with_options_and_workspaces(clock, config, Options::from_config(config))
-    }
-
-    pub fn with_options(clock: Clock, options: Options) -> Self {
-        Self {
-            monitor_set: MonitorSet::NoOutputs { workspaces: vec![] },
-            is_active: true,
-            last_active_workspace_id: HashMap::new(),
-            interactive_move: None,
-            dnd: None,
-            clock,
-            update_render_elements_time: Duration::ZERO,
-            overview_open: false,
-            overview_progress: None,
-            options: Rc::new(options),
-        }
     }
 
     fn with_options_and_workspaces(clock: Clock, config: &Config, options: Options) -> Self {

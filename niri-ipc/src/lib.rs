@@ -741,12 +741,6 @@ pub enum Action {
         #[arg(long)]
         reference: Option<WorkspaceReferenceArg>,
     },
-    /// Toggle a debug tint on windows.
-    ToggleDebugTint {},
-    /// Toggle visualization of render element opaque regions.
-    DebugToggleOpaqueRegions {},
-    /// Toggle visualization of output damage.
-    DebugToggleDamage {},
     /// Move the focused window between the floating and the tiling layout.
     ToggleWindowFloating {
         /// Id of the window to move.

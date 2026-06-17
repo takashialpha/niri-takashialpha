@@ -720,18 +720,6 @@ impl XdgActivationHandler for State {
             return false;
         };
 
-        // Widely-used clients such as Discord and Telegram make new tokens (with invalid serials)
-        // upon clicking on their tray icon or on their notification. This debug flag makes that
-        // work.
-        //
-        // Clicking on a notification sends clients a perfectly valid activation token from the
-        // notification daemon, but alas they ignore it. Maybe in the future the clients are fixed,
-        // and we can remove this debug flag.
-        let config = self.niri.config.borrow();
-        if config.debug.honor_xdg_activation_with_invalid_serial {
-            return true;
-        }
-
         // Check the serial against both a keyboard and a pointer, since layer-shell surfaces
         // with no keyboard interactivity won't have any keyboard focus.
         let kb_last_enter = seat.get_keyboard().unwrap().last_enter();

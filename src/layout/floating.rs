@@ -597,12 +597,6 @@ impl<W: LayoutElement> FloatingSpace<W> {
             self.options.animations.window_close.anim,
         );
 
-        let blocker = if self.options.disable_transactions {
-            TransactionBlocker::completed()
-        } else {
-            blocker
-        };
-
         let scale = Scale::from(self.scale);
         let res = ClosingWindow::new(
             renderer, snapshot, scale, tile_size, tile_pos, blocker, anim,
@@ -1147,7 +1141,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
         self.interactive_resize = None;
     }
 
-    pub fn refresh(&mut self, is_active: bool, is_focused: bool) {
+    pub fn refresh(&mut self, is_active: bool, _is_focused: bool) {
         let active = self.active_window_id.clone();
         for tile in &mut self.tiles {
             let win = tile.window_mut();
@@ -1155,10 +1149,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
             win.set_active_in_column(true);
             win.set_floating(true);
 
-            let mut is_active = is_active && Some(win.id()) == active.as_ref();
-            if self.options.deactivate_unfocused_windows {
-                is_active &= is_focused;
-            }
+            let is_active = is_active && Some(win.id()) == active.as_ref();
             win.set_activated(is_active);
 
             let resize_data = self
@@ -1172,13 +1163,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
             let bounds = compute_toplevel_bounds(border_config, self.working_area.size);
             win.set_bounds(bounds);
 
-            // If transactions are disabled, also disable combined throttling, for more
-            // intuitive behavior.
-            let intent = if self.options.disable_resize_throttling {
-                ConfigureIntent::CanSend
-            } else {
-                win.configure_intent()
-            };
+            let intent = win.configure_intent();
 
             if matches!(
                 intent,

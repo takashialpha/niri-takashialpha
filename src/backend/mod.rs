@@ -105,13 +105,6 @@ impl Backend {
         }
     }
 
-    pub fn toggle_debug_tint(&mut self) {
-        match self {
-            Backend::Tty(tty) => tty.toggle_debug_tint(),
-            Backend::Headless(_) => (),
-        }
-    }
-
     pub fn import_dmabuf(&mut self, dmabuf: &Dmabuf) -> bool {
         match self {
             Backend::Tty(tty) => tty.import_dmabuf(dmabuf),
@@ -143,13 +136,6 @@ impl Backend {
     pub fn set_output_on_demand_vrr(&mut self, niri: &mut Niri, output: &Output, enable_vrr: bool) {
         match self {
             Backend::Tty(tty) => tty.set_output_on_demand_vrr(niri, output, enable_vrr),
-            Backend::Headless(_) => (),
-        }
-    }
-
-    pub fn update_ignored_nodes_config(&mut self, niri: &mut Niri) {
-        match self {
-            Backend::Tty(tty) => tty.update_ignored_nodes_config(niri),
             Backend::Headless(_) => (),
         }
     }
