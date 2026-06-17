@@ -111,9 +111,6 @@ pub struct ResolvedWindowRules {
     /// Whether to block out this window from certain render targets.
     pub block_out_from: Option<BlockOutFrom>,
 
-    /// Whether to enable VRR on this window's primary output if it is on-demand.
-    pub variable_refresh_rate: Option<bool>,
-
     /// Multiplier for all scroll events sent to this window.
     pub scroll_factor: Option<f64>,
 
@@ -287,9 +284,6 @@ impl ResolvedWindowRules {
                 }
                 if let Some(x) = rule.block_out_from {
                     resolved.block_out_from = Some(x);
-                }
-                if let Some(x) = rule.variable_refresh_rate {
-                    resolved.variable_refresh_rate = Some(x);
                 }
                 if let Some(x) = rule.scroll_factor {
                     resolved.scroll_factor = Some(x.0);

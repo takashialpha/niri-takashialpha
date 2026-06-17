@@ -51,7 +51,7 @@ pub use crate::input::{Input, ModKey, ScrollMethod, TrackLayout, WarpMouseToFocu
 pub use crate::layer_rule::LayerRule;
 pub use crate::layout::*;
 pub use crate::misc::*;
-pub use crate::output::{Output, OutputName, Outputs, Position, Vrr};
+pub use crate::output::{Output, OutputName, Outputs, Position};
 pub use crate::utils::FloatOrInt;
 use crate::utils::{Flag, MergeWith as _};
 pub use crate::window_rule::{

@@ -24,7 +24,7 @@ use smithay::backend::allocator::gbm::{GbmAllocator, GbmBufferFlags, GbmDevice};
 use smithay::backend::drm::compositor::{DrmCompositor, FrameFlags, PrimaryPlaneElement};
 use smithay::backend::drm::exporter::gbm::GbmFramebufferExporter;
 use smithay::backend::drm::{
-    DrmDevice, DrmDeviceFd, DrmEvent, DrmEventMetadata, DrmEventTime, DrmNode, NodeType, VrrSupport,
+    DrmDevice, DrmDeviceFd, DrmEvent, DrmEventMetadata, DrmEventTime, DrmNode, NodeType,
 };
 use smithay::backend::egl::context::ContextPriority;
 use smithay::backend::egl::{EGLDevice, EGLDisplay};
@@ -53,9 +53,6 @@ use smithay::reexports::wayland_protocols;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{DeviceFd, Transform};
 use smithay::wayland::dmabuf::{DmabufFeedback, DmabufFeedbackBuilder, DmabufGlobal};
-use smithay::wayland::drm_lease::{
-    DrmLease, DrmLeaseBuilder, DrmLeaseRequest, DrmLeaseState, LeaseRejected,
-};
 use smithay::wayland::presentation::Refresh;
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
 use wayland_protocols::wp::linux_dmabuf::zv1::server::zwp_linux_dmabuf_feedback_v1::TrancheFlags;
@@ -140,9 +137,9 @@ pub struct OutputDevice {
     // For display-only devices this will be the allocator from the primary device.
     allocator: GbmAllocator<DrmDeviceFd>,
 
-    pub drm_lease_state: Option<DrmLeaseState>,
+    // Non-desktop connectors (e.g. VR headsets) are tracked so they can be excluded from normal
+    // output use. DRM leasing (handing them to clients) is not supported.
     non_desktop_connectors: HashSet<(connector::Handle, crtc::Handle)>,
-    active_leases: Vec<DrmLease>,
 }
 
 // A connected, but not necessarily enabled, crtc.
@@ -153,45 +150,6 @@ pub struct CrtcInfo {
 }
 
 impl OutputDevice {
-    pub fn lease_request(
-        &self,
-        request: DrmLeaseRequest,
-    ) -> Result<DrmLeaseBuilder, LeaseRejected> {
-        let mut builder = DrmLeaseBuilder::new(&self.drm);
-        for connector in request.connectors {
-            let (_, crtc) = self
-                .non_desktop_connectors
-                .iter()
-                .find(|(conn, _)| connector == *conn)
-                .ok_or_else(|| {
-                    warn!("Attempted to lease connector that is not non-desktop");
-                    LeaseRejected::default()
-                })?;
-            builder.add_connector(connector);
-            builder.add_crtc(*crtc);
-            let planes = self.drm.planes(crtc).map_err(LeaseRejected::with_cause)?;
-            let (primary_plane, primary_plane_claim) = planes
-                .primary
-                .iter()
-                .find_map(|plane| {
-                    self.drm
-                        .claim_plane(plane.handle, *crtc)
-                        .map(|claim| (plane, claim))
-                })
-                .ok_or_else(LeaseRejected::default)?;
-            builder.add_plane(primary_plane.handle, primary_plane_claim);
-        }
-        Ok(builder)
-    }
-
-    pub fn new_lease(&mut self, lease: DrmLease) {
-        self.active_leases.push(lease);
-    }
-
-    pub fn remove_lease(&mut self, lease_id: u32) {
-        self.active_leases.retain(|l| l.id() != lease_id);
-    }
-
     pub fn known_crtc_name(&self, crtc: &crtc::Handle, conn: &connector::Info) -> OutputName {
         let Some(info) = self.known_crtcs.get(crtc) else {
             let conn_name = format_connector_name(conn);
@@ -549,10 +507,6 @@ impl Tty {
 
                 for device in self.devices.values_mut() {
                     device.drm.pause();
-
-                    if let Some(lease_state) = &mut device.drm_lease_state {
-                        lease_state.suspend();
-                    }
                 }
             }
             SessionEvent::ActivateSession => {
@@ -598,9 +552,6 @@ impl Tty {
 
                     if let Err(err) = device.drm.activate(false) {
                         warn!("error activating DRM device: {err:?}");
-                    }
-                    if let Some(lease_state) = &mut device.drm_lease_state {
-                        lease_state.resume::<State>();
                     }
 
                     // Refresh the connectors.
@@ -816,10 +767,6 @@ impl Tty {
             })
             .unwrap();
 
-        let drm_lease_state = DrmLeaseState::new::<State>(&niri.display_handle, &node)
-            .map_err(|err| warn!("error initializing DRM leasing for {node}: {err:?}"))
-            .ok();
-
         let device = OutputDevice {
             token,
             render_node,
@@ -829,8 +776,6 @@ impl Tty {
             drm_scanner: DrmScanner::new(),
             surfaces: HashMap::new(),
             known_crtcs: HashMap::new(),
-            drm_lease_state,
-            active_leases: Vec::new(),
             non_desktop_connectors: HashSet::new(),
         };
         assert!(self.devices.insert(node, device).is_none());
@@ -1048,12 +993,8 @@ impl Tty {
             self.connector_disconnected(niri, node, crtc);
         }
 
-        let mut device = self.devices.remove(&node).unwrap();
+        let device = self.devices.remove(&node).unwrap();
         let device_fd = device.drm.device_fd().device_fd();
-
-        if let Some(lease_state) = &mut device.drm_lease_state {
-            lease_state.disable_global::<State>();
-        }
 
         if let Some(render_node) = device.render_node {
             // Sometimes (Asahi DisplayLink), multiple primary nodes will correspond to the same
@@ -1146,11 +1087,7 @@ impl Tty {
             .unwrap_or(false);
 
         if non_desktop {
-            debug!("output is non desktop");
-            let description = output_name.format_description();
-            if let Some(lease_state) = &mut device.drm_lease_state {
-                lease_state.add_connector::<State>(connector.handle(), connector_name, description);
-            }
+            debug!("output is non desktop; excluding from normal use");
             device
                 .non_desktop_connectors
                 .insert((connector.handle(), crtc));
@@ -1232,30 +1169,10 @@ impl Tty {
             .drm
             .create_surface(crtc, mode, &[connector.handle()])?;
 
-        // Try to enable VRR if requested.
-        match surface.vrr_supported(connector.handle()) {
-            Ok(VrrSupport::Supported | VrrSupport::RequiresModeset) => {
-                // Even if on-demand, we still disable it until later checks.
-                let vrr = config.is_vrr_always_on();
-                let word = if vrr { "enabling" } else { "disabling" };
-
-                if let Err(err) = surface.use_vrr(vrr) {
-                    warn!("error {} VRR: {err:?}", word);
-                }
-            }
-            Ok(VrrSupport::NotSupported) => {
-                if !config.is_vrr_always_off() {
-                    warn!("cannot enable VRR because connector does not support it");
-                }
-
-                // Try to disable it anyway to work around a bug where resetting DRM state causes
-                // vrr_capable to be reset to 0, potentially leaving VRR_ENABLED at 1.
-                let _ = surface.use_vrr(false);
-            }
-            Err(err) => {
-                warn!("error querying for VRR support: {err:?}");
-            }
-        }
+        // VRR is not supported; keep it disabled. We disable it explicitly to work around a bug
+        // where resetting DRM state causes vrr_capable to be reset to 0, potentially leaving
+        // VRR_ENABLED at 1.
+        let _ = surface.use_vrr(false);
 
         // Update the output mode.
         let (physical_width, physical_height) = connector.size().unwrap_or((0, 0));
@@ -1404,8 +1321,6 @@ impl Tty {
             warn!("error clearing drm surface: {err:?}");
         }
 
-        let vrr_enabled = compositor.vrr_enabled();
-
         let surface = Surface {
             name: output_name,
             connector: connector.handle(),
@@ -1417,7 +1332,7 @@ impl Tty {
         let res = device.surfaces.insert(crtc, surface);
         assert!(res.is_none(), "crtc must not have already existed");
 
-        niri.add_output(output.clone(), Some(refresh_interval(mode)), vrr_enabled);
+        niri.add_output(output.clone(), Some(refresh_interval(mode)));
 
         if niri.monitors_active {
             // Redraw the new monitor.
@@ -1447,14 +1362,10 @@ impl Tty {
                 .iter()
                 .find(|(_, crtc_)| *crtc_ == crtc)
             {
-                debug!("withdrawing non-desktop connector from DRM leasing");
+                debug!("withdrawing non-desktop connector");
 
                 let conn = *conn;
                 device.non_desktop_connectors.remove(&(conn, crtc));
-
-                if let Some(lease_state) = &mut device.drm_lease_state {
-                    lease_state.withdraw_connector(conn);
-                }
             } else {
                 debug!("crtc wasn't enabled");
             }
@@ -1577,13 +1488,7 @@ impl Tty {
         match surface.compositor.frame_submitted() {
             Ok(Some((mut feedback, _))) => {
                 let refresh = match refresh_interval {
-                    Some(refresh) => {
-                        if output_state.frame_clock.vrr() {
-                            Refresh::Variable(refresh)
-                        } else {
-                            Refresh::Fixed(refresh)
-                        }
-                    }
+                    Some(refresh) => Refresh::Fixed(refresh),
                     None => Refresh::Unknown,
                 };
 
@@ -1870,18 +1775,6 @@ impl Tty {
                     }
                 }
 
-                let vrr_supported = surface
-                    .map(|surface| {
-                        matches!(
-                            surface.compositor.vrr_supported(connector.handle()),
-                            Ok(VrrSupport::Supported | VrrSupport::RequiresModeset)
-                        )
-                    })
-                    .unwrap_or_else(|| {
-                        is_vrr_capable(&device.drm, connector.handle()) == Some(true)
-                    });
-                let vrr_enabled = surface.is_some_and(|surface| surface.compositor.vrr_enabled());
-
                 let logical = niri
                     .global_space
                     .outputs()
@@ -1915,8 +1808,6 @@ impl Tty {
                     modes,
                     current_mode,
                     is_custom_mode,
-                    vrr_supported,
-                    vrr_enabled,
                     logical,
                     max_bpc,
                 };
@@ -1948,34 +1839,6 @@ impl Tty {
             for surface in device.surfaces.values_mut() {
                 if let Err(err) = surface.compositor.clear() {
                     warn!("error clearing drm surface: {err:?}");
-                }
-            }
-        }
-    }
-
-    pub fn set_output_on_demand_vrr(&mut self, niri: &mut Niri, output: &Output, enable_vrr: bool) {
-        let output_state = niri.output_state.get_mut(output).unwrap();
-        output_state.on_demand_vrr_enabled = enable_vrr;
-        if output_state.frame_clock.vrr() == enable_vrr {
-            return;
-        }
-        for (&node, device) in self.devices.iter_mut() {
-            for (&crtc, surface) in device.surfaces.iter_mut() {
-                let tty_state: &TtyOutputState = output.user_data().get().unwrap();
-                if tty_state.node == node && tty_state.crtc == crtc {
-                    let word = if enable_vrr { "enabling" } else { "disabling" };
-                    if let Err(err) = surface.compositor.use_vrr(enable_vrr) {
-                        warn!(
-                            "output {:?}: error {} VRR: {err:?}",
-                            surface.name.connector, word
-                        );
-                    }
-                    output_state
-                        .frame_clock
-                        .set_vrr(surface.compositor.vrr_enabled());
-
-                    self.refresh_ipc_outputs(niri);
-                    return;
                 }
             }
         }
@@ -2047,11 +1910,7 @@ impl Tty {
 
                 let change_mode = surface.compositor.pending_mode() != mode;
 
-                let vrr_enabled = surface.compositor.vrr_enabled();
-                let change_always_vrr = vrr_enabled != config.is_vrr_always_on();
-                let is_on_demand_vrr = config.is_vrr_on_demand();
-
-                if !change_mode && !change_always_vrr && !is_on_demand_vrr {
+                if !change_mode {
                     continue;
                 }
 
@@ -2072,23 +1931,7 @@ impl Tty {
                     continue;
                 };
 
-                if (is_on_demand_vrr && vrr_enabled != output_state.on_demand_vrr_enabled)
-                    || (!is_on_demand_vrr && change_always_vrr)
                 {
-                    let vrr = !vrr_enabled;
-                    let word = if vrr { "enabling" } else { "disabling" };
-                    if let Err(err) = surface.compositor.use_vrr(vrr) {
-                        warn!(
-                            "output {:?}: error {} VRR: {err:?}",
-                            surface.name.connector, word
-                        );
-                    }
-                    output_state
-                        .frame_clock
-                        .set_vrr(surface.compositor.vrr_enabled());
-                }
-
-                if change_mode {
                     if fallback {
                         let target = config.mode.unwrap();
                         warn!(
@@ -2117,10 +1960,7 @@ impl Tty {
                     let wl_mode = Mode::from(mode);
                     output.change_current_state(Some(wl_mode), None, None, None);
                     output.set_preferred(wl_mode);
-                    output_state.frame_clock = FrameClock::new(
-                        Some(refresh_interval(mode)),
-                        surface.compositor.vrr_enabled(),
-                    );
+                    output_state.frame_clock = FrameClock::new(Some(refresh_interval(mode)));
                     niri.output_resized(&output);
                 }
             }
@@ -2171,10 +2011,6 @@ impl Tty {
         }
 
         self.refresh_ipc_outputs(niri);
-    }
-
-    pub fn get_device_from_node(&mut self, node: DrmNode) -> Option<&mut OutputDevice> {
-        self.devices.get_mut(&node)
     }
 
     pub fn disconnected_connector_name_by_name_match(&self, target: &str) -> Option<OutputName> {
@@ -2915,11 +2751,6 @@ fn set_connector_properties(
     if let Err(err) = props.commit() {
         warn!("failed to atomically commit properties: {err}");
     }
-}
-
-fn is_vrr_capable(device: &DrmDevice, connector: connector::Handle) -> Option<bool> {
-    let (_, info, value) = find_drm_property(device, connector, "vrr_capable")?;
-    info.value_type().convert_value(value).as_boolean()
 }
 
 pub fn set_gamma_for_crtc(

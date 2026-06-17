@@ -1366,11 +1366,11 @@ impl<W: LayoutElement> Tile<W> {
 
         let contents_with_blocked_out_bg = None;
 
-        // A bit of a hack to render blocked out as for screencast, but I think it's fine here.
+        // A bit of a hack to render blocked out as for screen capture, but I think it's fine here.
         let mut blocked_out_contents = Vec::new();
         self.render(
             RenderCtx {
-                target: RenderTarget::Screencast,
+                target: RenderTarget::ScreenCapture,
                 renderer,
             },
             Point::from((0., 0.)),

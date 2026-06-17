@@ -66,8 +66,6 @@ pub struct Output {
     #[knus(child)]
     pub modeline: Option<Modeline>,
     #[knus(child)]
-    pub variable_refresh_rate: Option<Vrr>,
-    #[knus(child)]
     pub focus_at_startup: bool,
     // Deprecated; use layout.background_color.
     #[knus(child)]
@@ -78,20 +76,6 @@ pub struct Output {
     pub hot_corners: Option<HotCorners>,
     #[knus(child)]
     pub layout: Option<LayoutPart>,
-}
-
-impl Output {
-    pub fn is_vrr_always_on(&self) -> bool {
-        self.variable_refresh_rate == Some(Vrr { on_demand: false })
-    }
-
-    pub fn is_vrr_on_demand(&self) -> bool {
-        self.variable_refresh_rate == Some(Vrr { on_demand: true })
-    }
-
-    pub fn is_vrr_always_off(&self) -> bool {
-        self.variable_refresh_rate.is_none()
-    }
 }
 
 impl Default for Output {
@@ -106,7 +90,6 @@ impl Default for Output {
             max_bpc: None,
             mode: None,
             modeline: None,
-            variable_refresh_rate: None,
             background_color: None,
             backdrop_color: None,
             hot_corners: None,
@@ -133,12 +116,6 @@ pub struct Position {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct MaxBpc(pub niri_ipc::MaxBpc);
-
-#[derive(knus::Decode, Debug, Clone, PartialEq, Default)]
-pub struct Vrr {
-    #[knus(property, default = false)]
-    pub on_demand: bool,
-}
 
 impl FromIterator<Output> for Outputs {
     fn from_iter<T: IntoIterator<Item = Output>>(iter: T) -> Self {

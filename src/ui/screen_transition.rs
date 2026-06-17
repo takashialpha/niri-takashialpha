@@ -15,7 +15,7 @@ pub const DURATION: Duration = Duration::from_millis(500);
 #[derive(Debug)]
 pub struct ScreenTransition {
     /// Texture to crossfade from for each render target.
-    from_texture: [TextureBuffer<GlesTexture>; 3],
+    from_texture: [TextureBuffer<GlesTexture>; 2],
     /// Monotonic time when to start the crossfade.
     start_at: Duration,
     /// Clock to drive animations.
@@ -24,7 +24,7 @@ pub struct ScreenTransition {
 
 impl ScreenTransition {
     pub fn new(
-        from_texture: [TextureBuffer<GlesTexture>; 3],
+        from_texture: [TextureBuffer<GlesTexture>; 2],
         delay: Duration,
         clock: Clock,
     ) -> Self {
@@ -61,8 +61,7 @@ impl ScreenTransition {
 
         let idx = match target {
             RenderTarget::Output => 0,
-            RenderTarget::Screencast => 1,
-            RenderTarget::ScreenCapture => 2,
+            RenderTarget::ScreenCapture => 1,
         };
 
         PrimaryGpuTextureRenderElement(TextureRenderElement::from_texture_buffer(

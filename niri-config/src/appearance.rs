@@ -618,7 +618,6 @@ pub struct InsertHintPart {
 
 #[derive(knus::DecodeScalar, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlockOutFrom {
-    Screencast,
     ScreenCapture,
 }
 

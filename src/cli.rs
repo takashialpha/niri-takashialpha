@@ -101,6 +101,4 @@ pub enum Msg {
     RequestError,
     /// Print the overview state.
     OverviewState,
-    /// List screencasts.
-    Casts,
 }

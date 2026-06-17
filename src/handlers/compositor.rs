@@ -19,7 +19,6 @@ use smithay::wayland::shm::{ShmHandler, ShmState};
 use smithay::{delegate_compositor, delegate_shm};
 
 use super::xdg_shell::add_mapped_toplevel_pre_commit_hook;
-use crate::handlers::XDG_ACTIVATION_TOKEN_TIMEOUT;
 use crate::layout::{ActivateWindow, AddWindowTarget, LayoutElement as _};
 use crate::niri::{ClientState, LockState, State};
 use crate::utils::transaction::Transaction;
@@ -80,11 +79,7 @@ impl CompositorHandler for State {
             if let Entry::Occupied(entry) = self.niri.unmapped_windows.entry(surface.clone()) {
                 if is_mapped(surface) {
                     // The toplevel got mapped.
-                    let Unmapped {
-                        window,
-                        state,
-                        activation_token_data,
-                    } = entry.remove();
+                    let Unmapped { window, state } = entry.remove();
 
                     window.on_commit();
 
@@ -157,18 +152,7 @@ impl CompositorHandler for State {
                             ActivateWindow::No
                         }
                     });
-                    let activate = activate.unwrap_or_else(|| {
-                        // Check the token timestamp again in case the window took a while between
-                        // requesting activation and mapping.
-                        let token = activation_token_data.filter(|token| {
-                            token.timestamp.elapsed() < XDG_ACTIVATION_TOKEN_TIMEOUT
-                        });
-                        if token.is_some() {
-                            ActivateWindow::Yes
-                        } else {
-                            ActivateWindow::Smart
-                        }
-                    });
+                    let activate = activate.unwrap_or(ActivateWindow::Smart);
 
                     let parent = toplevel
                         .parent()

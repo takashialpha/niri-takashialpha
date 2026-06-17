@@ -106,14 +106,12 @@ impl Headless {
                 }],
                 current_mode: Some(0),
                 is_custom_mode: true,
-                vrr_supported: false,
-                vrr_enabled: false,
                 logical: Some(logical_output(&output)),
                 max_bpc: None,
             },
         );
 
-        niri.add_output(output, None, false);
+        niri.add_output(output, None);
     }
 
     pub fn seat_name(&self) -> String {

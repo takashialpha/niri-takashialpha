@@ -7,87 +7,44 @@ use std::io::Write;
 use std::os::fd::OwnedFd;
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
 
 use smithay::backend::allocator::dmabuf::Dmabuf;
-use smithay::backend::drm::DrmNode;
 use smithay::backend::input::TabletToolDescriptor;
-use smithay::desktop::{PopupKind, PopupManager};
 use smithay::input::dnd::{self, DnDGrab, DndGrabHandler, DndTarget};
 use smithay::input::pointer::{CursorIcon, CursorImageStatus, Focus, PointerHandle};
 use smithay::input::{Seat, SeatHandler, SeatState, keyboard};
 use smithay::output::Output;
 use smithay::reexports::rustix::fs::{OFlags, fcntl_setfl};
-use smithay::reexports::wayland_protocols_wlr::screencopy::v1::server::zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1;
 use smithay::reexports::wayland_server::Resource;
 use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{Logical, Point, Rectangle, Serial};
+use smithay::utils::{Logical, Point, Serial};
 use smithay::wayland::compositor::{get_parent, with_states};
 use smithay::wayland::dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier};
-use smithay::wayland::drm_lease::{
-    DrmLease, DrmLeaseBuilder, DrmLeaseHandler, DrmLeaseRequest, DrmLeaseState, LeaseRejected,
-};
 use smithay::wayland::fractional_scale::FractionalScaleHandler;
-use smithay::wayland::idle_inhibit::IdleInhibitHandler;
-use smithay::wayland::idle_notify::{IdleNotifierHandler, IdleNotifierState};
-use smithay::wayland::input_method::{InputMethodHandler, PopupSurface};
-use smithay::wayland::keyboard_shortcuts_inhibit::{
-    KeyboardShortcutsInhibitHandler, KeyboardShortcutsInhibitState, KeyboardShortcutsInhibitor,
-};
 use smithay::wayland::output::OutputHandler;
 use smithay::wayland::pointer_constraints::{PointerConstraintsHandler, with_pointer_constraint};
-use smithay::wayland::security_context::{
-    SecurityContext, SecurityContextHandler, SecurityContextListenerSource,
-};
 use smithay::wayland::selection::data_device::{
     DataDeviceHandler, DataDeviceState, WaylandDndGrabHandler, set_data_device_focus,
 };
-use smithay::wayland::selection::ext_data_control::{
-    DataControlHandler as ExtDataControlHandler, DataControlState as ExtDataControlState,
-};
 use smithay::wayland::selection::primary_selection::{
     PrimarySelectionHandler, PrimarySelectionState, set_primary_focus,
-};
-use smithay::wayland::selection::wlr_data_control::{
-    DataControlHandler as WlrDataControlHandler, DataControlState as WlrDataControlState,
 };
 use smithay::wayland::selection::{SelectionHandler, SelectionTarget};
 use smithay::wayland::session_lock::{
     LockSurface, SessionLockHandler, SessionLockManagerState, SessionLocker,
 };
 use smithay::wayland::tablet_manager::TabletSeatHandler;
-use smithay::wayland::xdg_activation::{
-    XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData,
-};
 use smithay::{
-    delegate_cursor_shape, delegate_data_control, delegate_data_device, delegate_dmabuf,
-    delegate_drm_lease, delegate_ext_data_control, delegate_fractional_scale,
-    delegate_idle_inhibit, delegate_idle_notify, delegate_input_method_manager,
-    delegate_keyboard_shortcuts_inhibit, delegate_output, delegate_pointer_constraints,
-    delegate_pointer_gestures, delegate_presentation, delegate_primary_selection,
-    delegate_relative_pointer, delegate_seat, delegate_security_context, delegate_session_lock,
-    delegate_single_pixel_buffer, delegate_text_input_manager, delegate_viewporter,
-    delegate_virtual_keyboard_manager, delegate_xdg_activation,
+    delegate_cursor_shape, delegate_data_device, delegate_dmabuf, delegate_fractional_scale,
+    delegate_output, delegate_pointer_constraints, delegate_presentation,
+    delegate_primary_selection, delegate_relative_pointer, delegate_seat, delegate_session_lock,
+    delegate_single_pixel_buffer, delegate_viewporter,
 };
 
 pub use crate::handlers::xdg_shell::KdeDecorationsModeState;
-use crate::layout::ActivateWindow;
-use crate::layout::workspace::WorkspaceId;
-use crate::niri::{DndIcon, NewClient, State};
-use crate::protocols::ext_workspace::{self, ExtWorkspaceHandler, ExtWorkspaceManagerState};
-use crate::protocols::foreign_toplevel::{
-    self, ForeignToplevelHandler, ForeignToplevelManagerState,
-};
-use crate::protocols::output_management::{OutputManagementHandler, OutputManagementManagerState};
-use crate::protocols::screencopy::{Screencopy, ScreencopyHandler, ScreencopyManagerState};
+use crate::niri::{DndIcon, State};
 use crate::utils::{output_size, send_scale_transform};
-use crate::{
-    delegate_ext_workspace, delegate_foreign_toplevel, delegate_output_management,
-    delegate_screencopy,
-};
-
-pub const XDG_ACTIVATION_TOKEN_TIMEOUT: Duration = Duration::from_secs(10);
 
 impl SeatHandler for State {
     type KeyboardFocus = WlSurface;
@@ -131,9 +88,7 @@ impl SeatHandler for State {
 }
 delegate_seat!(State);
 delegate_cursor_shape!(State);
-delegate_pointer_gestures!(State);
 delegate_relative_pointer!(State);
-delegate_text_input_manager!(State);
 
 // Required by the cursor-shape protocol (a cursor-shape device can be created from a tablet tool),
 // even though niri no longer exposes the tablet manager global itself.
@@ -210,69 +165,6 @@ impl PointerConstraintsHandler for State {
     }
 }
 delegate_pointer_constraints!(State);
-
-impl InputMethodHandler for State {
-    fn new_popup(&mut self, surface: PopupSurface) {
-        let popup = PopupKind::InputMethod(surface);
-        if let Some(output) = self.output_for_popup(&popup) {
-            let scale = output.current_scale();
-            let transform = output.current_transform();
-            let wl_surface = popup.wl_surface();
-            with_states(wl_surface, |data| {
-                send_scale_transform(wl_surface, data, scale, transform);
-            });
-        }
-
-        self.unconstrain_popup(&popup);
-
-        if let Err(err) = self.niri.popups.track_popup(popup) {
-            warn!("error tracking ime popup {err:?}");
-        }
-    }
-
-    fn popup_repositioned(&mut self, surface: PopupSurface) {
-        let popup = PopupKind::InputMethod(surface);
-        self.unconstrain_popup(&popup);
-    }
-
-    fn dismiss_popup(&mut self, surface: PopupSurface) {
-        if let Some(parent) = surface.get_parent().map(|parent| parent.surface.clone()) {
-            let _ = PopupManager::dismiss_popup(&parent, &PopupKind::from(surface));
-        }
-    }
-
-    fn parent_geometry(&self, parent: &WlSurface) -> Rectangle<i32, Logical> {
-        self.niri
-            .layout
-            .find_window_and_output(parent)
-            .map(|(mapped, _)| mapped.window.geometry())
-            .unwrap_or_default()
-    }
-}
-
-impl KeyboardShortcutsInhibitHandler for State {
-    fn keyboard_shortcuts_inhibit_state(&mut self) -> &mut KeyboardShortcutsInhibitState {
-        &mut self.niri.keyboard_shortcuts_inhibit_state
-    }
-
-    fn new_inhibitor(&mut self, inhibitor: KeyboardShortcutsInhibitor) {
-        // FIXME: show a confirmation dialog with a "remember for this application" kind of toggle.
-        inhibitor.activate();
-        self.niri
-            .keyboard_shortcuts_inhibiting_surfaces
-            .insert(inhibitor.wl_surface().clone(), inhibitor);
-    }
-
-    fn inhibitor_destroyed(&mut self, inhibitor: KeyboardShortcutsInhibitor) {
-        self.niri
-            .keyboard_shortcuts_inhibiting_surfaces
-            .remove(&inhibitor.wl_surface().clone());
-    }
-}
-
-delegate_input_method_manager!(State);
-delegate_keyboard_shortcuts_inhibit!(State);
-delegate_virtual_keyboard_manager!(State);
 
 impl SelectionHandler for State {
     type SelectionUserData = Arc<[u8]>;
@@ -396,28 +288,7 @@ impl PrimarySelectionHandler for State {
 }
 delegate_primary_selection!(State);
 
-impl WlrDataControlHandler for State {
-    fn data_control_state(&mut self) -> &mut WlrDataControlState {
-        &mut self.niri.wlr_data_control_state
-    }
-}
-
-delegate_data_control!(State);
-
-impl ExtDataControlHandler for State {
-    fn data_control_state(&mut self) -> &mut ExtDataControlState {
-        &mut self.niri.ext_data_control_state
-    }
-}
-
-delegate_ext_data_control!(State);
-
-impl OutputHandler for State {
-    fn output_bound(&mut self, output: Output, wl_output: WlOutput) {
-        foreign_toplevel::on_output_bound(self, &output, &wl_output);
-        ext_workspace::on_output_bound(self, &output, &wl_output);
-    }
-}
+impl OutputHandler for State {}
 delegate_output!(State);
 
 delegate_presentation!(State);
@@ -483,295 +354,9 @@ pub fn configure_lock_surface(surface: &LockSurface, output: &Output) {
     surface.send_configure();
 }
 
-impl SecurityContextHandler for State {
-    fn context_created(&mut self, source: SecurityContextListenerSource, context: SecurityContext) {
-        self.niri
-            .event_loop
-            .insert_source(source, move |client, _, state| {
-                trace!("inserting a new restricted client, context={context:?}");
-                state.niri.insert_client(NewClient {
-                    client,
-                    restricted: true,
-                    credentials_unknown: false,
-                });
-            })
-            .unwrap();
-    }
-}
-delegate_security_context!(State);
-
-impl IdleNotifierHandler for State {
-    fn idle_notifier_state(&mut self) -> &mut IdleNotifierState<Self> {
-        &mut self.niri.idle_notifier_state
-    }
-}
-delegate_idle_notify!(State);
-
-impl IdleInhibitHandler for State {
-    fn inhibit(&mut self, surface: WlSurface) {
-        self.niri.idle_inhibiting_surfaces.insert(surface);
-    }
-
-    fn uninhibit(&mut self, surface: WlSurface) {
-        self.niri.idle_inhibiting_surfaces.remove(&surface);
-    }
-}
-delegate_idle_inhibit!(State);
-
-impl ForeignToplevelHandler for State {
-    fn foreign_toplevel_manager_state(&mut self) -> &mut ForeignToplevelManagerState {
-        &mut self.niri.foreign_toplevel_state
-    }
-
-    fn activate(&mut self, wl_surface: WlSurface) {
-        if let Some((mapped, _)) = self.niri.layout.find_window_and_output(&wl_surface) {
-            let window = mapped.window.clone();
-            self.niri.layout.activate_window(&window);
-            self.niri.layer_shell_on_demand_focus = None;
-            self.niri.queue_redraw_all();
-        }
-    }
-
-    fn close(&mut self, wl_surface: WlSurface) {
-        if let Some((mapped, _)) = self.niri.layout.find_window_and_output(&wl_surface) {
-            mapped.toplevel().send_close();
-        }
-    }
-
-    fn set_fullscreen(&mut self, wl_surface: WlSurface, wl_output: Option<WlOutput>) {
-        if let Some((mapped, current_output)) = self.niri.layout.find_window_and_output(&wl_surface)
-        {
-            let window = mapped.window.clone();
-
-            if let Some(requested_output) =
-                wl_output.and_then(|o| self.niri.output_from_resource(&o))
-                && Some(&requested_output) != current_output
-            {
-                self.niri.layout.move_to_output(
-                    Some(&window),
-                    &requested_output,
-                    None,
-                    ActivateWindow::Smart,
-                );
-            }
-
-            self.niri.layout.set_fullscreen(&window, true);
-        }
-    }
-
-    fn unset_fullscreen(&mut self, wl_surface: WlSurface) {
-        if let Some((mapped, _)) = self.niri.layout.find_window_and_output(&wl_surface) {
-            let window = mapped.window.clone();
-            self.niri.layout.set_fullscreen(&window, false);
-        }
-    }
-
-    fn set_maximized(&mut self, wl_surface: WlSurface) {
-        if let Some((mapped, _)) = self.niri.layout.find_window_and_output(&wl_surface) {
-            let window = mapped.window.clone();
-            self.niri.layout.set_maximized(&window, true);
-        }
-    }
-
-    fn unset_maximized(&mut self, wl_surface: WlSurface) {
-        if let Some((mapped, _)) = self.niri.layout.find_window_and_output(&wl_surface) {
-            let window = mapped.window.clone();
-            self.niri.layout.set_maximized(&window, false);
-        }
-    }
-}
-delegate_foreign_toplevel!(State);
-
-impl ExtWorkspaceHandler for State {
-    fn ext_workspace_manager_state(&mut self) -> &mut ExtWorkspaceManagerState {
-        &mut self.niri.ext_workspace_state
-    }
-
-    fn activate_workspace(&mut self, id: WorkspaceId) {
-        let reference = niri_config::WorkspaceReference::Id(id.get());
-        if let Some((mut output, index)) = self.niri.find_output_and_workspace_index(reference) {
-            if let Some(active) = self.niri.layout.active_output()
-                && output.as_ref() == Some(active)
-            {
-                output = None;
-            }
-
-            if let Some(output) = output {
-                self.niri.layout.focus_output(&output);
-            }
-            self.niri.layout.switch_workspace(index);
-            // No mouse warp: assuming the layer-shell bar workspaces use-case.
-
-            // FIXME: granular
-            self.niri.queue_redraw_all();
-        }
-    }
-
-    fn assign_workspace(&mut self, ws_id: WorkspaceId, output: Output) {
-        let reference = niri_config::WorkspaceReference::Id(ws_id.get());
-        if let Some((old_output, old_idx)) = self.niri.find_output_and_workspace_index(reference) {
-            self.niri
-                .layout
-                .move_workspace_to_output_by_id(old_idx, old_output, &output);
-        }
-    }
-}
-delegate_ext_workspace!(State);
-
-impl ScreencopyHandler for State {
-    fn frame(&mut self, manager: &ZwlrScreencopyManagerV1, screencopy: Screencopy) {
-        // This can happen if the output was removed before this was called.
-        if !self.niri.output_exists(screencopy.output()) {
-            trace!("screencopy output no longer exists");
-            return;
-        }
-
-        // If with_damage then push it onto the queue for redraw of the output,
-        // otherwise render it immediately.
-        if screencopy.with_damage() {
-            self.niri.screencopy_state.push(manager, screencopy);
-        } else {
-            self.backend.with_primary_renderer(|renderer| {
-                if let Err(err) = self
-                    .niri
-                    .render_for_screencopy_without_damage(renderer, manager, screencopy)
-                {
-                    warn!("error rendering for screencopy: {err:?}");
-                }
-            });
-        }
-    }
-
-    fn screencopy_state(&mut self) -> &mut ScreencopyManagerState {
-        &mut self.niri.screencopy_state
-    }
-}
-delegate_screencopy!(State);
-
-impl DrmLeaseHandler for State {
-    fn drm_lease_state(&mut self, node: DrmNode) -> &mut DrmLeaseState {
-        self.backend
-            .tty()
-            .get_device_from_node(node)
-            .unwrap()
-            .drm_lease_state
-            .as_mut()
-            .unwrap()
-    }
-
-    fn lease_request(
-        &mut self,
-        node: DrmNode,
-        request: DrmLeaseRequest,
-    ) -> Result<DrmLeaseBuilder, LeaseRejected> {
-        debug!(
-            "Received lease request for {} connectors",
-            request.connectors.len()
-        );
-        self.backend
-            .tty()
-            .get_device_from_node(node)
-            .unwrap()
-            .lease_request(request)
-    }
-
-    fn new_active_lease(&mut self, node: DrmNode, lease: DrmLease) {
-        debug!("Lease success");
-        self.backend
-            .tty()
-            .get_device_from_node(node)
-            .unwrap()
-            .new_lease(lease);
-    }
-
-    fn lease_destroyed(&mut self, node: DrmNode, lease_id: u32) {
-        debug!("Destroyed lease");
-        self.backend
-            .tty()
-            .get_device_from_node(node)
-            .unwrap()
-            .remove_lease(lease_id);
-    }
-}
-delegate_drm_lease!(State);
-
 delegate_viewporter!(State);
-
-struct UrgentOnlyMarker;
-
-impl XdgActivationHandler for State {
-    fn activation_state(&mut self) -> &mut XdgActivationState {
-        &mut self.niri.activation_state
-    }
-
-    fn token_created(&mut self, _token: XdgActivationToken, data: XdgActivationTokenData) -> bool {
-        // Tokens without a serial are urgency-only. This is not specified, but it seems to be the
-        // common client behavior.
-        //
-        // See also: https://gitlab.freedesktop.org/wayland/wayland-protocols/-/issues/150
-        let Some((serial, seat)) = data.serial else {
-            data.user_data.insert_if_missing(|| UrgentOnlyMarker);
-            return true;
-        };
-        let Some(seat) = Seat::<State>::from_resource(&seat) else {
-            return false;
-        };
-
-        // Check the serial against both a keyboard and a pointer, since layer-shell surfaces
-        // with no keyboard interactivity won't have any keyboard focus.
-        let kb_last_enter = seat.get_keyboard().unwrap().last_enter();
-        if kb_last_enter.is_some_and(|last_enter| serial.is_no_older_than(&last_enter)) {
-            return true;
-        }
-
-        let pointer_last_enter = seat.get_pointer().unwrap().last_enter();
-        if pointer_last_enter.is_some_and(|last_enter| serial.is_no_older_than(&last_enter)) {
-            return true;
-        }
-
-        false
-    }
-
-    fn request_activation(
-        &mut self,
-        token: XdgActivationToken,
-        token_data: XdgActivationTokenData,
-        surface: WlSurface,
-    ) {
-        if token_data.timestamp.elapsed() < XDG_ACTIVATION_TOKEN_TIMEOUT {
-            if let Some((mapped, _)) = self.niri.layout.find_window_and_output_mut(&surface) {
-                let window = mapped.window.clone();
-                if token_data.user_data.get::<UrgentOnlyMarker>().is_some() {
-                    mapped.set_urgent(true);
-                    self.niri.queue_redraw_all();
-                } else {
-                    self.niri.layout.activate_window(&window);
-                    self.niri.layer_shell_on_demand_focus = None;
-                    self.niri.queue_redraw_all();
-                }
-            } else if let Some(unmapped) = self.niri.unmapped_windows.get_mut(&surface) {
-                unmapped.activation_token_data = Some(token_data);
-            }
-        }
-
-        self.niri.activation_state.remove_token(&token);
-    }
-}
-delegate_xdg_activation!(State);
 
 impl FractionalScaleHandler for State {}
 delegate_fractional_scale!(State);
-
-impl OutputManagementHandler for State {
-    fn output_management_state(&mut self) -> &mut OutputManagementManagerState {
-        &mut self.niri.output_management_state
-    }
-
-    fn apply_output_config(&mut self, config: niri_config::Outputs) {
-        self.niri.config.borrow_mut().outputs = config;
-        self.reload_output_config();
-    }
-}
-delegate_output_management!(State);
 
 delegate_single_pixel_buffer!(State);

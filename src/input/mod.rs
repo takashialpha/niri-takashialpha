@@ -22,7 +22,6 @@ use smithay::output::Output;
 use smithay::reexports::wayland_server::protocol::wl_data_source::WlDataSource;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, Rectangle, SERIAL_COUNTER};
-use smithay::wayland::keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitor;
 use smithay::wayland::pointer_constraints::{PointerConstraint, with_pointer_constraint};
 
 use self::move_grab::MoveGrab;
@@ -169,18 +168,6 @@ impl State {
         )
     }
 
-    fn is_inhibiting_shortcuts(&self) -> bool {
-        self.niri
-            .keyboard_focus
-            .surface()
-            .and_then(|surface| {
-                self.niri
-                    .keyboard_shortcuts_inhibiting_surfaces
-                    .get(surface)
-            })
-            .is_some_and(KeyboardShortcutsInhibitor::is_active)
-    }
-
     fn on_keyboard<I: InputBackend>(
         &mut self,
         event: I::KeyboardKeyEvent,
@@ -206,8 +193,6 @@ impl State {
         if pressed {
             self.hide_cursor_if_needed();
         }
-
-        let is_inhibiting_shortcuts = self.is_inhibiting_shortcuts();
 
         // Accessibility modifier grabs should override XKB state changes (e.g. Caps Lock), so we
         // need to process them before keyboard.input() below.
@@ -273,7 +258,6 @@ impl State {
                         *mods,
                         &this.niri.screenshot_ui,
                         this.niri.config.borrow().input.disable_power_key_handling,
-                        is_inhibiting_shortcuts,
                     )
                 };
 
@@ -417,12 +401,10 @@ impl State {
                 self.niri.activate_monitors(&mut self.backend);
             }
             Action::Spawn(command) => {
-                let (token, _) = self.niri.activation_state.create_external_token(None);
-                spawn(command, Some(token.clone()));
+                spawn(command);
             }
             Action::SpawnSh(command) => {
-                let (token, _) = self.niri.activation_state.create_external_token(None);
-                spawn_sh(command, Some(token.clone()));
+                spawn_sh(command);
             }
             Action::DoScreenTransition(delay_ms) => {
                 self.backend.with_primary_renderer(|renderer| {
@@ -505,19 +487,6 @@ impl State {
                             warn!("error taking screenshot: {err:?}");
                         }
                     });
-                }
-            }
-            Action::ToggleKeyboardShortcutsInhibit => {
-                if let Some(inhibitor) = self.niri.keyboard_focus.surface().and_then(|surface| {
-                    self.niri
-                        .keyboard_shortcuts_inhibiting_surfaces
-                        .get(surface)
-                }) {
-                    if inhibitor.is_active() {
-                        inhibitor.inactivate();
-                    } else {
-                        inhibitor.activate();
-                    }
                 }
             }
             Action::CloseWindow => {
@@ -2648,7 +2617,6 @@ impl State {
                                 repeat: true,
                                 cooldown: None,
                                 allow_when_locked: false,
-                                allow_inhibiting: false,
                                 hotkey_overlay_title: None,
                             });
                             let bind_right = Some(Bind {
@@ -2660,7 +2628,6 @@ impl State {
                                 repeat: true,
                                 cooldown: None,
                                 allow_when_locked: false,
-                                allow_inhibiting: false,
                                 hotkey_overlay_title: None,
                             });
                             (bind_left, bind_right)
@@ -2716,7 +2683,6 @@ impl State {
                             repeat: true,
                             cooldown: Some(Duration::from_millis(50)),
                             allow_when_locked: false,
-                            allow_inhibiting: false,
                             hotkey_overlay_title: None,
                         });
                         let bind_down = Some(Bind {
@@ -2728,7 +2694,6 @@ impl State {
                             repeat: true,
                             cooldown: Some(Duration::from_millis(50)),
                             allow_when_locked: false,
-                            allow_inhibiting: false,
                             hotkey_overlay_title: None,
                         });
                         (bind_up, bind_down)
@@ -2742,7 +2707,6 @@ impl State {
                             repeat: true,
                             cooldown: Some(Duration::from_millis(50)),
                             allow_when_locked: false,
-                            allow_inhibiting: false,
                             hotkey_overlay_title: None,
                         });
                         let bind_down = Some(Bind {
@@ -2754,7 +2718,6 @@ impl State {
                             repeat: true,
                             cooldown: Some(Duration::from_millis(50)),
                             allow_when_locked: false,
-                            allow_inhibiting: false,
                             hotkey_overlay_title: None,
                         });
                         (bind_up, bind_down)
@@ -2910,7 +2873,6 @@ fn should_intercept_key<'a>(
     mods: ModifiersState,
     screenshot_ui: &ScreenshotUi,
     disable_power_key_handling: bool,
-    is_inhibiting_shortcuts: bool,
 ) -> FilterResult<Option<Bind>> {
     // Actions are only triggered on presses, release of the key
     // shouldn't try to intercept anything unless we have marked
@@ -2953,7 +2915,6 @@ fn should_intercept_key<'a>(
                 // The screenshot UI owns the focus anyway, so this doesn't really matter.
                 // But logically, nothing can inhibit its actions. Only opening it can be
                 // inhibited.
-                allow_inhibiting: false,
                 hotkey_overlay_title: None,
             });
         }
@@ -2961,19 +2922,11 @@ fn should_intercept_key<'a>(
 
     match (final_bind, pressed) {
         (Some(bind), true) => {
-            if is_inhibiting_shortcuts && bind.allow_inhibiting {
-                FilterResult::Forward
-            } else {
-                suppressed_keys.insert(key_code);
-                FilterResult::Intercept(Some(bind))
-            }
+            suppressed_keys.insert(key_code);
+            FilterResult::Intercept(Some(bind))
         }
         (_, false) => {
-            // By this point, we know that the key was suppressed on press. Even if we're inhibiting
-            // shortcuts, we should still suppress the release.
-            // But we don't need to check for shortcuts inhibition here, because
-            // if it was inhibited on press (forwarded to the client), it wouldn't be suppressed,
-            // so the release would already have been forwarded at the start of this function.
+            // By this point, we know that the key was suppressed on press, so suppress the release.
             suppressed_keys.remove(&key_code);
             FilterResult::Intercept(None)
         }
@@ -3018,7 +2971,6 @@ fn find_bind<'a>(
             // The user must always be able to change VTs to recover from such a situation.
             // It also makes no sense to inhibit the default power key handling.
             // Hardcoded binds must never be inhibited.
-            allow_inhibiting: false,
             hotkey_overlay_title: None,
         });
     }
@@ -3153,7 +3105,6 @@ fn allowed_when_locked(action: &Action) -> bool {
             | Action::PowerOffMonitors
             | Action::PowerOnMonitors
             | Action::SwitchLayout(_)
-            | Action::ToggleKeyboardShortcutsInhibit
     )
 }
 
@@ -3227,7 +3178,6 @@ fn hardcoded_overview_bind(raw: Keysym, mods: ModifiersState) -> Option<Bind> {
         repeat,
         cooldown: None,
         allow_when_locked: false,
-        allow_inhibiting: false,
         hotkey_overlay_title: None,
     })
 }

@@ -104,8 +104,6 @@ pub enum Request {
     ReturnError,
     /// Request information about the overview.
     OverviewState,
-    /// Request information about screencasts.
-    Casts,
 }
 
 /// Reply from niri to client.
@@ -149,8 +147,6 @@ pub enum Response {
     OutputConfigChanged(OutputConfigChanged),
     /// Information about the overview.
     OverviewState(Overview),
-    /// Information about screencasts.
-    Casts(Vec<Cast>),
 }
 
 /// Overview information.
@@ -265,8 +261,6 @@ pub enum Action {
         #[arg(long, action = clap::ArgAction::Set)]
         path: Option<String>,
     },
-    /// Enable or disable the keyboard shortcuts inhibitor (if any) for the focused surface.
-    ToggleKeyboardShortcutsInhibit {},
     /// Close a window.
     #[clap(about = "Close the focused window")]
     CloseWindow {
@@ -973,12 +967,6 @@ pub enum OutputAction {
         #[command(subcommand)]
         position: PositionToSet,
     },
-    /// Set the variable refresh rate mode.
-    Vrr {
-        /// Variable refresh rate mode to set.
-        #[command(flatten)]
-        vrr: VrrToSet,
-    },
     /// Set the maximum bits per channel (bit depth).
     MaxBpc {
         /// Maximum bits per channel to set.
@@ -1056,22 +1044,6 @@ pub struct ConfiguredPosition {
     pub y: i32,
 }
 
-/// Output VRR to set.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, clap::Args)]
-pub struct VrrToSet {
-    /// Whether to enable variable refresh rate.
-    #[arg(
-            value_name = "ON|OFF",
-            action = clap::ArgAction::Set,
-            value_parser = clap::builder::BoolishValueParser::new(),
-            hide_possible_values = true,
-        )]
-    pub vrr: bool,
-    /// Only enable when the output shows a window matching the variable-refresh-rate window rule.
-    #[arg(long)]
-    pub on_demand: bool,
-}
-
 /// Connected output.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Output {
@@ -1093,10 +1065,6 @@ pub struct Output {
     pub current_mode: Option<usize>,
     /// Whether the current_mode is a custom mode.
     pub is_custom_mode: bool,
-    /// Whether the output supports variable refresh rate.
-    pub vrr_supported: bool,
-    /// Whether variable refresh rate is enabled on the output.
-    pub vrr_enabled: bool,
     /// Logical output information.
     ///
     /// `None` if the output is not mapped to any logical output (for example, if it is disabled).
@@ -1379,62 +1347,6 @@ pub struct LayerSurface {
     pub keyboard_interactivity: LayerSurfaceKeyboardInteractivity,
 }
 
-/// A screencast.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct Cast {
-    /// Stream ID of the screencast that uniquely identifies it.
-    pub stream_id: u64,
-    /// Session ID of the screencast.
-    ///
-    /// A session can have multiple screencast streams. Then multiple `Cast`s will have the same
-    /// `session_id`. Though, usually there's only one stream per session.
-    ///
-    /// Do not confuse `session_id` with [`stream_id`](Self::stream_id).
-    pub session_id: u64,
-    /// Kind of this screencast.
-    pub kind: CastKind,
-    /// Target being captured.
-    pub target: CastTarget,
-    /// Whether the cast is currently streaming frames.
-    ///
-    /// This can be `false` for example when switching away to a different scene in OBS, which
-    /// pauses the stream.
-    pub is_active: bool,
-    /// Process ID of the screencast consumer, if known.
-    ///
-    /// Currently, only wlr-screencopy screencasts can have a pid.
-    pub pid: Option<i32>,
-}
-
-/// Kind of screencast.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CastKind {
-    /// wlr-screencopy protocol screencast.
-    ///
-    /// Tools like wf-recorder, and the xdg-desktop-portal-wlr portal.
-    ///
-    /// Only wlr-screencopy with damage tracking is reported here. Screencopy without damage is
-    /// treated as a regular screenshot and not reported as a screencast.
-    WlrScreencopy,
-}
-
-/// Target of a screencast.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub enum CastTarget {
-    /// The target is not yet set, or was cleared.
-    Nothing {},
-    /// Casting an output.
-    Output {
-        /// Name of the screencasted output.
-        name: String,
-    },
-    /// Casting a window.
-    Window {
-        /// ID of the screencasted window.
-        id: u64,
-    },
-}
-
 /// A compositor event.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Event {
@@ -1555,24 +1467,6 @@ pub enum Event {
         /// If `None`, the screenshot was either only copied to the clipboard, or the path couldn't
         /// be converted to a `String` (e.g. contained invalid UTF-8 bytes).
         path: Option<String>,
-    },
-    /// The screencasts have changed.
-    CastsChanged {
-        /// The new screencast information.
-        ///
-        /// This configuration completely replaces the previous configuration. I.e. if any casts
-        /// are missing from here, then they were stopped.
-        casts: Vec<Cast>,
-    },
-    /// A screencast started, or an existing cast changed.
-    CastStartedOrChanged {
-        /// The cast that started or changed.
-        cast: Cast,
-    },
-    /// A screencast stopped.
-    CastStopped {
-        /// Stream ID of the stopped screencast.
-        stream_id: u64,
     },
 }
 

@@ -1,12 +1,8 @@
-use std::ptr;
-
-use anyhow::{Context as _, ensure};
+use anyhow::Context as _;
 use niri_config::BlockOutFrom;
-use smithay::backend::allocator::dmabuf::Dmabuf;
-use smithay::backend::allocator::{Buffer, Fourcc};
-use smithay::backend::renderer::damage::OutputDamageTracker;
+use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::utils::{Relocate, RelocateRenderElement};
-use smithay::backend::renderer::element::{Element, Kind, RenderElement, RenderElementStates};
+use smithay::backend::renderer::element::{Element, Kind, RenderElement};
 use smithay::backend::renderer::gles::{
     GlesError, GlesMapping, GlesRenderer, GlesTarget, GlesTexture,
 };
@@ -14,11 +10,8 @@ use smithay::backend::renderer::sync::SyncPoint;
 use smithay::backend::renderer::{
     Bind, Color32F, ExportMem, Frame, Offscreen, Renderer, Texture as _,
 };
-use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
-use smithay::reexports::wayland_server::protocol::wl_shm;
 use smithay::utils::user_data::UserDataMap;
 use smithay::utils::{Logical, Physical, Point, Rectangle, Scale, Size, Transform};
-use smithay::wayland::shm;
 use solid_color::{SolidColorBuffer, SolidColorRenderElement};
 
 use self::primary_gpu_texture::PrimaryGpuTextureRenderElement;
@@ -77,9 +70,7 @@ impl<'a, R: AsGlesRenderer> RenderCtx<'a, R> {
 pub enum RenderTarget {
     /// Rendering to display on screen.
     Output = 0,
-    /// Rendering for a screencast.
-    Screencast,
-    /// Rendering for any other screen capture.
+    /// Rendering for a screen capture (e.g. the built-in screenshot).
     ScreenCapture,
 }
 
@@ -105,12 +96,11 @@ pub trait ToRenderElement {
 }
 
 impl RenderTarget {
-    pub const COUNT: usize = 3;
+    pub const COUNT: usize = 2;
 
     pub fn should_block_out(self, block_out_from: Option<BlockOutFrom>) -> bool {
         match block_out_from {
             None => false,
-            Some(BlockOutFrom::Screencast) => self == RenderTarget::Screencast,
             Some(BlockOutFrom::ScreenCapture) => self != RenderTarget::Output,
         }
     }
@@ -251,86 +241,6 @@ pub fn render_to_vec(
         .map_texture(&mapping)
         .context("error mapping texture")?;
     Ok(copy.to_vec())
-}
-
-pub fn render_to_dmabuf(
-    renderer: &mut GlesRenderer,
-    damage_tracker: &mut OutputDamageTracker,
-    mut dmabuf: Dmabuf,
-    elements: &[impl RenderElement<GlesRenderer>],
-    states: RenderElementStates,
-) -> anyhow::Result<SyncPoint> {
-    let (size, _scale, _transform) = damage_tracker.mode().try_into().unwrap();
-    ensure!(
-        dmabuf.width() == size.w as u32 && dmabuf.height() == size.h as u32,
-        "invalid buffer size"
-    );
-
-    let mut target = renderer.bind(&mut dmabuf).context("error binding dmabuf")?;
-    let res = damage_tracker
-        .render_output_with_states(
-            renderer,
-            &mut target,
-            0,
-            elements,
-            Color32F::TRANSPARENT,
-            states,
-        )
-        .context("error rendering to dmabuf")?;
-    Ok(res.sync)
-}
-
-pub fn render_to_shm(
-    renderer: &mut GlesRenderer,
-    damage_tracker: &mut OutputDamageTracker,
-    buffer: &WlBuffer,
-    elements: &[impl RenderElement<GlesRenderer>],
-    states: RenderElementStates,
-) -> anyhow::Result<()> {
-    shm::with_buffer_contents_mut(buffer, |shm_buffer, shm_len, buffer_data| {
-        let (size, _scale, _transform) = damage_tracker.mode().try_into().unwrap();
-        let fourcc = Fourcc::Xrgb8888;
-
-        ensure!(
-            // The buffer prefers pixels in little endian ...
-            buffer_data.format == wl_shm::Format::Xrgb8888
-                && buffer_data.width == size.w
-                && buffer_data.height == size.h
-                && buffer_data.stride == size.w * 4
-                && shm_len == buffer_data.stride as usize * buffer_data.height as usize,
-            "invalid buffer format or size"
-        );
-
-        let mut texture =
-            create_texture(renderer, size, fourcc).context("error creating texture")?;
-        let mut target = renderer
-            .bind(&mut texture)
-            .context("error binding texture")?;
-
-        let _res = damage_tracker
-            .render_output_with_states(
-                renderer,
-                &mut target,
-                0,
-                elements,
-                Color32F::TRANSPARENT,
-                states,
-            )
-            .context("error rendering")?;
-
-        let mapping =
-            copy_framebuffer(renderer, &target, fourcc).context("error copying framebuffer")?;
-        let bytes = renderer
-            .map_texture(&mapping)
-            .context("error mapping texture")?;
-
-        unsafe {
-            ptr::copy_nonoverlapping(bytes.as_ptr(), shm_buffer.cast(), shm_len);
-        }
-
-        Ok(())
-    })
-    .context("expected shm buffer, but didn't get one")?
 }
 
 fn render_elements(

@@ -8,7 +8,6 @@ use std::{io, thread};
 
 use libc::{RLIMIT_NOFILE, getrlimit, rlimit, setrlimit};
 use niri_config::Environment;
-use smithay::wayland::xdg_activation::XdgActivationToken;
 
 use crate::utils::expand_home;
 
@@ -60,7 +59,7 @@ pub fn restore_nofile_rlimit() {
 }
 
 /// Spawns the command to run independently of the compositor.
-pub fn spawn<T: AsRef<OsStr> + Send + 'static>(command: Vec<T>, token: Option<XdgActivationToken>) {
+pub fn spawn<T: AsRef<OsStr> + Send + 'static>(command: Vec<T>) {
     if command.is_empty() {
         return;
     }
@@ -70,7 +69,7 @@ pub fn spawn<T: AsRef<OsStr> + Send + 'static>(command: Vec<T>, token: Option<Xd
         .name("Command Spawner".to_owned())
         .spawn(move || {
             let (command, args) = command.split_first().unwrap();
-            spawn_sync(command, args, token);
+            spawn_sync(command, args);
         });
 
     if let Err(err) = res {
@@ -84,15 +83,11 @@ pub fn spawn<T: AsRef<OsStr> + Send + 'static>(command: Vec<T>, token: Option<Xd
 ///
 /// - https://github.com/swaywm/sway/blob/b3dcde8d69c3f1304b076968a7a64f54d0c958be/sway/commands/exec_always.c#L64
 /// - https://github.com/hyprwm/Hyprland/blob/1ac1ff457ab8ef1ae6a8f2ab17ee7965adfa729f/src/managers/KeybindManager.cpp#L987
-pub fn spawn_sh(command: String, token: Option<XdgActivationToken>) {
-    spawn(vec![String::from("sh"), String::from("-c"), command], token);
+pub fn spawn_sh(command: String) {
+    spawn(vec![String::from("sh"), String::from("-c"), command]);
 }
 
-fn spawn_sync(
-    command: impl AsRef<OsStr>,
-    args: impl IntoIterator<Item = impl AsRef<OsStr>>,
-    token: Option<XdgActivationToken>,
-) {
+fn spawn_sync(command: impl AsRef<OsStr>, args: impl IntoIterator<Item = impl AsRef<OsStr>>) {
     let mut command = command.as_ref();
 
     // Expand `~` at the start.
@@ -136,11 +131,6 @@ fn spawn_sync(
         }
     }
     drop(env);
-
-    if let Some(token) = token.as_ref() {
-        process.env("XDG_ACTIVATION_TOKEN", token.as_str());
-        process.env("DESKTOP_STARTUP_ID", token.as_str());
-    }
 
     unsafe { process.pre_exec(crate::utils::signals::unblock_all) };
 

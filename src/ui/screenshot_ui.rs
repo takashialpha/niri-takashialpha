@@ -88,8 +88,8 @@ pub struct OutputData {
     size: Size<i32, Physical>,
     scale: f64,
     transform: Transform,
-    // Output, screencast, screen capture.
-    screenshot: [OutputScreenshot; 3],
+    // Output, screen capture.
+    screenshot: [OutputScreenshot; 2],
     buffers: [SolidColorBuffer; 8],
     locations: [Point<i32, Physical>; 8],
     panel: Option<(TextureBuffer<GlesTexture>, TextureBuffer<GlesTexture>)>,
@@ -136,8 +136,8 @@ impl ScreenshotUi {
     pub fn open(
         &mut self,
         renderer: &mut GlesRenderer,
-        // Output, screencast, screen capture.
-        screenshots: HashMap<Output, [OutputScreenshot; 3]>,
+        // Output, screen capture.
+        screenshots: HashMap<Output, [OutputScreenshot; 2]>,
         default_output: Output,
         show_pointer: bool,
         path: Option<String>,
@@ -677,8 +677,7 @@ impl ScreenshotUi {
         // The screenshot itself goes last.
         let index = match target {
             RenderTarget::Output => 0,
-            RenderTarget::Screencast => 1,
-            RenderTarget::ScreenCapture => 2,
+            RenderTarget::ScreenCapture => 1,
         };
         let screenshot = &output_data.screenshot[index];
 

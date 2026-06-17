@@ -25,7 +25,6 @@ pub struct Bind {
     pub repeat: bool,
     pub cooldown: Option<Duration>,
     pub allow_when_locked: bool,
-    pub allow_inhibiting: bool,
     pub hotkey_overlay_title: Option<Option<String>>,
 }
 
@@ -106,7 +105,6 @@ pub enum Action {
         show_pointer: bool,
         path: Option<String>,
     },
-    ToggleKeyboardShortcutsInhibit,
     CloseWindow,
     #[knus(skip)]
     CloseWindowById(u64),
@@ -361,9 +359,6 @@ impl From<niri_ipc::Action> for Action {
                 show_pointer,
                 path,
             },
-            niri_ipc::Action::ToggleKeyboardShortcutsInhibit {} => {
-                Self::ToggleKeyboardShortcutsInhibit
-            }
             niri_ipc::Action::CloseWindow { id: None } => Self::CloseWindow,
             niri_ipc::Action::CloseWindow { id: Some(id) } => Self::CloseWindowById(id),
             niri_ipc::Action::FullscreenWindow { id: None } => Self::FullscreenWindow,
@@ -765,7 +760,6 @@ where
         let mut cooldown = None;
         let mut allow_when_locked = false;
         let mut allow_when_locked_node = None;
-        let mut allow_inhibiting = true;
         let mut hotkey_overlay_title = None;
         for (name, val) in &node.properties {
             match &***name {
@@ -780,9 +774,6 @@ where
                 "allow-when-locked" => {
                     allow_when_locked = knus::traits::DecodeScalar::decode(val, ctx)?;
                     allow_when_locked_node = Some(name);
-                }
-                "allow-inhibiting" => {
-                    allow_inhibiting = knus::traits::DecodeScalar::decode(val, ctx)?;
                 }
                 "hotkey-overlay-title" => {
                     hotkey_overlay_title = Some(knus::traits::DecodeScalar::decode(val, ctx)?);
@@ -808,7 +799,6 @@ where
             repeat: true,
             cooldown: None,
             allow_when_locked: false,
-            allow_inhibiting: true,
             hotkey_overlay_title: None,
         };
 
@@ -832,19 +822,12 @@ where
                         ));
                     }
 
-                    // The toggle-inhibit action must always be uninhibitable.
-                    // Otherwise, it would be impossible to trigger it.
-                    if matches!(action, Action::ToggleKeyboardShortcutsInhibit) {
-                        allow_inhibiting = false;
-                    }
-
                     Ok(Self {
                         key,
                         action,
                         repeat,
                         cooldown,
                         allow_when_locked,
-                        allow_inhibiting,
                         hotkey_overlay_title,
                     })
                 }

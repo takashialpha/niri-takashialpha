@@ -148,13 +148,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     watcher::setup(&mut state, &config_path, config_includes);
 
     // Spawn commands from cli and auto-start.
-    spawn(cli.command, None);
+    spawn(cli.command);
 
     for elem in spawn_at_startup {
-        spawn(elem.command, None);
+        spawn(elem.command);
     }
     for elem in spawn_sh_at_startup {
-        spawn_sh(elem.command, None);
+        spawn_sh(elem.command);
     }
 
     // Show the config error notification right away if needed.

@@ -446,11 +446,6 @@ async fn process(ctx: &ClientCtx, request: Request) -> Reply {
             let is_open = state.overview.is_open;
             Response::OverviewState(Overview { is_open })
         }
-        Request::Casts => {
-            let state = ctx.event_stream_state.borrow();
-            let casts = state.casts.casts.values().cloned().collect();
-            Response::Casts(casts)
-        }
     };
 
     Ok(response)
@@ -795,65 +790,6 @@ impl State {
         let event = Event::OverviewOpenedOrClosed { is_open };
         state.apply(event.clone());
         server.send_event(event);
-    }
-
-    pub fn ipc_refresh_casts(&mut self) {
-        let Some(server) = &self.niri.ipc_server else {
-            return;
-        };
-
-        let mut state = server.event_stream_state.borrow_mut();
-        let state = &mut state.casts;
-
-        let mut events = Vec::new();
-        let mut seen = HashSet::new();
-
-        // Check screencopy casts.
-        //
-        // First, clear expired casts. Ideally we'd have a deadline timer, but our 1 second frame
-        // callback timer calls refresh regularly, so that's fine as is.
-        self.niri.screencopy_state.clear_expired_casts();
-
-        for queue in self.niri.screencopy_state.queues() {
-            if let Some(cast_info) = queue.cast() {
-                let stream_id = cast_info.stream_id.get();
-                seen.insert(stream_id);
-
-                if state.casts.get(&stream_id).is_none_or(|existing| {
-                    // Only this property can change.
-                    match &existing.target {
-                        niri_ipc::CastTarget::Output { name } => *name != cast_info.output_name,
-                        _ => true,
-                    }
-                }) {
-                    let cast = niri_ipc::Cast {
-                        session_id: cast_info.session_id.get(),
-                        stream_id,
-                        kind: niri_ipc::CastKind::WlrScreencopy,
-                        target: niri_ipc::CastTarget::Output {
-                            name: cast_info.output_name.clone(),
-                        },
-                        is_active: true,
-                        pid: queue.credentials().map(|creds| creds.pid),
-                    };
-                    events.push(Event::CastStartedOrChanged { cast });
-                }
-            }
-        }
-
-        // Check for stopped casts.
-        for stream_id in state.casts.keys() {
-            if !seen.contains(stream_id) {
-                events.push(Event::CastStopped {
-                    stream_id: *stream_id,
-                });
-            }
-        }
-
-        for event in events {
-            state.apply(event.clone());
-            server.send_event(event);
-        }
     }
 
     pub fn ipc_config_loaded(&mut self, failed: bool) {

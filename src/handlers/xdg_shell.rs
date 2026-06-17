@@ -23,7 +23,6 @@ use smithay::wayland::compositor::{
     add_pre_commit_hook, with_states,
 };
 use smithay::wayland::dmabuf::get_dmabuf;
-use smithay::wayland::input_method::InputMethodSeat;
 use smithay::wayland::shell::kde::decoration::{KdeDecorationHandler, KdeDecorationState};
 use smithay::wayland::shell::wlr_layer::{self, Layer};
 use smithay::wayland::shell::xdg::decoration::XdgDecorationHandler;
@@ -313,17 +312,16 @@ impl XdgShellHandler for State {
         //
         // The second check is for layer surfaces that can't receive keyboard focus, without it
         // popups don't work properly in Waybar (GTK 3).
-        let can_receive_keyboard_focus = !self.niri.seat.input_method().keyboard_grabbed()
-            && self
-                .niri
-                .layout
-                .active_output()
-                .and_then(|output| {
-                    layer_map_for_output(output)
-                        .layer_for_surface(&root, WindowSurfaceType::TOPLEVEL)
-                        .map(|layer_surface| layer_surface.can_receive_keyboard_focus())
-                })
-                .unwrap_or(true);
+        let can_receive_keyboard_focus = self
+            .niri
+            .layout
+            .active_output()
+            .and_then(|output| {
+                layer_map_for_output(output)
+                    .layer_for_surface(&root, WindowSurfaceType::TOPLEVEL)
+                    .map(|layer_surface| layer_surface.can_receive_keyboard_focus())
+            })
+            .unwrap_or(true);
 
         let keyboard_grab_mismatches = keyboard.is_grabbed()
             && !(keyboard.has_grab(serial)

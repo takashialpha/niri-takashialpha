@@ -4,14 +4,13 @@ use std::ffi::OsString;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::{mem, thread};
 
 use _server_decoration::server::org_kde_kwin_server_decoration_manager::Mode as KdeDecorationsMode;
-use anyhow::{Context, bail, ensure};
+use anyhow::Context;
 use calloop::futures::Scheduler;
 use niri_config::output::MaxBpc;
 use niri_config::{
@@ -21,7 +20,6 @@ use niri_config::{
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::input::Keycode;
 use smithay::backend::renderer::Color32F;
-use smithay::backend::renderer::damage::OutputDamageTracker;
 use smithay::backend::renderer::element::memory::MemoryRenderBufferRenderElement;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::utils::{
@@ -29,11 +27,10 @@ use smithay::backend::renderer::element::utils::{
     select_dmabuf_feedback,
 };
 use smithay::backend::renderer::element::{
-    Element, Id, Kind, PrimaryScanoutOutput, RenderElement, RenderElementStates,
+    Element, Id, Kind, PrimaryScanoutOutput, RenderElementStates,
     default_primary_scanout_output_compare,
 };
 use smithay::backend::renderer::gles::GlesRenderer;
-use smithay::backend::renderer::sync::SyncPoint;
 use smithay::desktop::utils::{
     OutputPresentationFeedback, bbox_from_surface_tree, output_update,
     send_dmabuf_feedback_surface_tree, send_frames_surface_tree,
@@ -51,7 +48,7 @@ use smithay::input::pointer::{
     GrabStartData as PointerGrabStartData, MotionEvent,
 };
 use smithay::input::{Seat, SeatState};
-use smithay::output::{self, Output, OutputModeSource, PhysicalProperties, Subpixel};
+use smithay::output::{self, Output, PhysicalProperties, Subpixel};
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::{
@@ -60,7 +57,6 @@ use smithay::reexports::calloop::{
 use smithay::reexports::wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::WmCapabilities;
 use smithay::reexports::wayland_protocols_misc::server_decoration as _server_decoration;
-use smithay::reexports::wayland_protocols_wlr::screencopy::v1::server::zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1;
 use smithay::reexports::wayland_server::backend::{
     ClientData, ClientId, DisconnectReason, GlobalId,
 };
@@ -78,22 +74,12 @@ use smithay::wayland::compositor::{
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::dmabuf::DmabufState;
 use smithay::wayland::fractional_scale::FractionalScaleManagerState;
-use smithay::wayland::idle_inhibit::IdleInhibitManagerState;
-use smithay::wayland::idle_notify::IdleNotifierState;
-use smithay::wayland::input_method::InputMethodManagerState;
-use smithay::wayland::keyboard_shortcuts_inhibit::{
-    KeyboardShortcutsInhibitState, KeyboardShortcutsInhibitor,
-};
 use smithay::wayland::output::OutputManagerState;
 use smithay::wayland::pointer_constraints::{PointerConstraintsState, with_pointer_constraint};
-use smithay::wayland::pointer_gestures::PointerGesturesState;
 use smithay::wayland::presentation::PresentationState;
 use smithay::wayland::relative_pointer::RelativePointerManagerState;
-use smithay::wayland::security_context::SecurityContextState;
 use smithay::wayland::selection::data_device::{DataDeviceState, set_data_device_selection};
-use smithay::wayland::selection::ext_data_control::DataControlState as ExtDataControlState;
 use smithay::wayland::selection::primary_selection::PrimarySelectionState;
-use smithay::wayland::selection::wlr_data_control::DataControlState as WlrDataControlState;
 use smithay::wayland::session_lock::{LockSurface, SessionLockManagerState, SessionLocker};
 use smithay::wayland::shell::kde::decoration::KdeDecorationState;
 use smithay::wayland::shell::wlr_layer::{self, Layer, WlrLayerShellState};
@@ -101,10 +87,7 @@ use smithay::wayland::shell::xdg::XdgShellState;
 use smithay::wayland::shell::xdg::decoration::XdgDecorationState;
 use smithay::wayland::shm::ShmState;
 use smithay::wayland::socket::ListeningSocketSource;
-use smithay::wayland::text_input::TextInputManagerState;
 use smithay::wayland::viewporter::ViewporterState;
-use smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState;
-use smithay::wayland::xdg_activation::XdgActivationState;
 use smithay::wayland::xdg_foreign::XdgForeignState;
 use wayland_server::protocol::wl_output::WlOutput;
 
@@ -113,7 +96,7 @@ use crate::backend::tty::SurfaceDmabufFeedback;
 use crate::backend::{Backend, Headless, RenderResult, Tty};
 use crate::cursor::{CursorManager, CursorTextureCache, RenderCursor, XCursor};
 use crate::frame_clock::FrameClock;
-use crate::handlers::{XDG_ACTIVATION_TOKEN_TIMEOUT, configure_lock_surface};
+use crate::handlers::configure_lock_surface;
 use crate::input::pick_color_grab::PickColorGrab;
 use crate::input::scroll_tracker::ScrollTracker;
 use crate::input::{apply_libinput_settings, mods_with_mouse_binds, mods_with_wheel_binds};
@@ -126,18 +109,14 @@ use crate::layout::{
     HitType, Layout, LayoutElement as _, LayoutElementRenderElement, MonitorRenderElement,
 };
 use crate::niri_render_elements;
-use crate::protocols::ext_workspace::{self, ExtWorkspaceManagerState};
-use crate::protocols::foreign_toplevel::{self, ForeignToplevelManagerState};
-use crate::protocols::output_management::OutputManagementManagerState;
-use crate::protocols::screencopy::{Screencopy, ScreencopyBuffer, ScreencopyManagerState};
 use crate::render_helpers::primary_gpu_texture::PrimaryGpuTextureRenderElement;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use crate::render_helpers::surface::push_elements_from_surface_tree;
 use crate::render_helpers::texture::TextureBuffer;
 use crate::render_helpers::{
-    RenderCtx, RenderTarget, encompassing_geo, render_to_dmabuf, render_to_encompassing_texture,
-    render_to_shm, render_to_texture, render_to_vec, shaders,
+    RenderCtx, RenderTarget, encompassing_geo, render_to_encompassing_texture, render_to_texture,
+    render_to_vec, shaders,
 };
 use crate::ui::config_error_notification::ConfigErrorNotification;
 use crate::ui::exit_confirm_dialog::{ExitConfirmDialog, ExitConfirmDialogRenderElement};
@@ -238,10 +217,6 @@ pub struct Niri {
     pub kde_decoration_state: KdeDecorationState,
     pub layer_shell_state: WlrLayerShellState,
     pub session_lock_state: SessionLockManagerState,
-    pub foreign_toplevel_state: ForeignToplevelManagerState,
-    pub ext_workspace_state: ExtWorkspaceManagerState,
-    pub screencopy_state: ScreencopyManagerState,
-    pub output_management_state: OutputManagementManagerState,
     pub viewporter_state: ViewporterState,
     pub xdg_foreign_state: XdgForeignState,
     pub shm_state: ShmState,
@@ -249,24 +224,13 @@ pub struct Niri {
     pub dmabuf_state: DmabufState,
     pub fractional_scale_manager_state: FractionalScaleManagerState,
     pub seat_state: SeatState<State>,
-    pub text_input_state: TextInputManagerState,
-    pub input_method_state: InputMethodManagerState,
-    pub keyboard_shortcuts_inhibit_state: KeyboardShortcutsInhibitState,
-    pub virtual_keyboard_state: VirtualKeyboardManagerState,
-    pub pointer_gestures_state: PointerGesturesState,
     pub relative_pointer_state: RelativePointerManagerState,
     pub pointer_constraints_state: PointerConstraintsState,
-    pub idle_notifier_state: IdleNotifierState<State>,
-    pub idle_inhibit_manager_state: IdleInhibitManagerState,
     pub data_device_state: DataDeviceState,
     pub primary_selection_state: PrimarySelectionState,
-    pub wlr_data_control_state: WlrDataControlState,
-    pub ext_data_control_state: ExtDataControlState,
     pub popups: PopupManager,
     pub popup_grab: Option<PopupGrabState>,
     pub presentation_state: PresentationState,
-    pub security_context_state: SecurityContextState,
-    pub activation_state: XdgActivationState,
 
     pub seat: Seat<State>,
     /// Scancodes of the keys to suppress.
@@ -277,9 +241,6 @@ pub struct Niri {
     pub bind_repeat_timer: Option<RegistrationToken>,
     pub keyboard_focus: KeyboardFocus,
     pub layer_shell_on_demand_focus: Option<LayerSurface>,
-    pub idle_inhibiting_surfaces: HashSet<WlSurface>,
-    pub is_fdo_idle_inhibited: Arc<AtomicBool>,
-    pub keyboard_shortcuts_inhibiting_surfaces: HashMap<WlSurface, KeyboardShortcutsInhibitor>,
 
     /// Most recent XKB settings from org.freedesktop.locale1.
     pub xkb_from_locale1: Option<Xkb>,
@@ -366,7 +327,6 @@ pub struct OutputState {
     pub global: GlobalId,
     pub frame_clock: FrameClock,
     pub redraw_state: RedrawState,
-    pub on_demand_vrr_enabled: bool,
     // After the last redraw, some ongoing animations still remain.
     pub unfinished_animations_remain: bool,
     pub vblank_throttle: VBlankThrottle,
@@ -635,14 +595,7 @@ impl State {
         self.niri.cursor_manager.check_cursor_image_surface_alive();
         self.niri.refresh_pointer_outputs();
         self.niri.global_space.refresh();
-        self.niri.refresh_idle_inhibit();
         self.refresh_pointer_contents();
-        foreign_toplevel::refresh(self);
-        ext_workspace::refresh(self);
-
-        // Should happen before refresh_window_rules(), but after anything that can start or stop
-        // screencasts.
-        self.ipc_refresh_casts();
 
         self.niri.refresh_window_rules();
         self.refresh_ipc_outputs();
@@ -1493,9 +1446,6 @@ impl State {
         self.backend.on_output_config_changed(&mut self.niri);
 
         self.niri.reposition_outputs(None);
-
-        let config = self.niri.config.borrow().outputs.clone();
-        self.niri.output_management_state.on_config_changed(config);
     }
 
     pub fn modify_output_config<F>(&mut self, name: &str, fun: F)
@@ -1603,15 +1553,6 @@ impl State {
                     }),
                 }
             }
-            niri_ipc::OutputAction::Vrr { vrr } => {
-                config.variable_refresh_rate = if vrr.vrr {
-                    Some(niri_config::Vrr {
-                        on_demand: vrr.on_demand,
-                    })
-                } else {
-                    None
-                }
-            }
             niri_ipc::OutputAction::MaxBpc { max_bpc } => config.max_bpc = Some(MaxBpc(max_bpc)),
         });
 
@@ -1633,9 +1574,6 @@ impl State {
                 .map(logical_output);
             ipc_output.logical = logical;
         }
-
-        let new_config = self.backend.ipc_outputs().lock().unwrap().clone();
-        self.niri.output_management_state.notify_changes(new_config);
     }
 
     pub fn open_screenshot_ui(&mut self, show_pointer: bool, path: Option<String>) {
@@ -1797,11 +1735,8 @@ impl Niri {
         let fractional_scale_manager_state =
             FractionalScaleManagerState::new::<State>(&display_handle);
         let mut seat_state = SeatState::new();
-        let pointer_gestures_state = PointerGesturesState::new::<State>(&display_handle);
         let relative_pointer_state = RelativePointerManagerState::new::<State>(&display_handle);
         let pointer_constraints_state = PointerConstraintsState::new::<State>(&display_handle);
-        let idle_notifier_state = IdleNotifierState::new(&display_handle, event_loop.clone());
-        let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(&display_handle);
         let data_device_state = DataDeviceState::new::<State>(&display_handle);
         let primary_selection_state =
             PrimarySelectionState::new_with_filter::<State, _>(&display_handle, |client| {
@@ -1810,52 +1745,11 @@ impl Niri {
                     .unwrap()
                     .primary_selection_disabled
             });
-        let wlr_data_control_state = WlrDataControlState::new::<State, _>(
-            &display_handle,
-            Some(&primary_selection_state),
-            client_is_unrestricted,
-        );
-        let ext_data_control_state = ExtDataControlState::new::<State, _>(
-            &display_handle,
-            Some(&primary_selection_state),
-            client_is_unrestricted,
-        );
         let presentation_state =
             PresentationState::new::<State>(&display_handle, Monotonic::ID as u32);
-        let security_context_state =
-            SecurityContextState::new::<State, _>(&display_handle, client_is_unrestricted);
 
-        let text_input_state = TextInputManagerState::new::<State>(&display_handle);
-        let input_method_state =
-            InputMethodManagerState::new::<State, _>(&display_handle, client_is_unrestricted);
-        let keyboard_shortcuts_inhibit_state =
-            KeyboardShortcutsInhibitState::new::<State>(&display_handle);
-        let virtual_keyboard_state =
-            VirtualKeyboardManagerState::new::<State, _>(&display_handle, client_is_unrestricted);
-        let foreign_toplevel_state =
-            ForeignToplevelManagerState::new::<State, _>(&display_handle, client_is_unrestricted);
-        let ext_workspace_state =
-            ExtWorkspaceManagerState::new::<State, _>(&display_handle, client_is_unrestricted);
-        let mut output_management_state =
-            OutputManagementManagerState::new::<State, _>(&display_handle, client_is_unrestricted);
-        output_management_state.on_config_changed(config_.outputs.clone());
-        let screencopy_state =
-            ScreencopyManagerState::new::<State, _>(&display_handle, client_is_unrestricted);
         let viewporter_state = ViewporterState::new::<State>(&display_handle);
         let xdg_foreign_state = XdgForeignState::new::<State>(&display_handle);
-
-        let activation_state = XdgActivationState::new::<State>(&display_handle);
-        event_loop
-            .insert_source(
-                Timer::from_duration(XDG_ACTIVATION_TOKEN_TIMEOUT),
-                |_, _, state| {
-                    state.niri.activation_state.retain_tokens(|_, token_data| {
-                        token_data.timestamp.elapsed() < XDG_ACTIVATION_TOKEN_TIMEOUT
-                    });
-                    TimeoutAction::ToDuration(XDG_ACTIVATION_TOKEN_TIMEOUT)
-                },
-            )
-            .unwrap();
 
         let mut seat: Seat<State> = seat_state.new_wl_seat(&display_handle, backend.seat_name());
         let keyboard = match seat.add_keyboard(
@@ -1996,30 +1890,17 @@ impl Niri {
             kde_decoration_state,
             layer_shell_state,
             session_lock_state,
-            foreign_toplevel_state,
-            ext_workspace_state,
-            output_management_state,
-            screencopy_state,
             viewporter_state,
             xdg_foreign_state,
-            text_input_state,
-            input_method_state,
-            keyboard_shortcuts_inhibit_state,
-            virtual_keyboard_state,
             shm_state,
             output_manager_state,
             dmabuf_state,
             fractional_scale_manager_state,
             seat_state,
-            pointer_gestures_state,
             relative_pointer_state,
             pointer_constraints_state,
-            idle_notifier_state,
-            idle_inhibit_manager_state,
             data_device_state,
             primary_selection_state,
-            wlr_data_control_state,
-            ext_data_control_state,
             popups: PopupManager::default(),
             popup_grab: None,
             suppressed_keys: HashSet::new(),
@@ -2027,15 +1908,10 @@ impl Niri {
             bind_cooldown_timers: HashMap::new(),
             bind_repeat_timer: Option::default(),
             presentation_state,
-            security_context_state,
-            activation_state,
 
             seat,
             keyboard_focus: KeyboardFocus::Layout { surface: None },
             layer_shell_on_demand_focus: None,
-            idle_inhibiting_surfaces: HashSet::new(),
-            is_fdo_idle_inhibited: Arc::new(AtomicBool::new(false)),
-            keyboard_shortcuts_inhibiting_surfaces: HashMap::new(),
             xkb_from_locale1: None,
             cursor_manager,
             cursor_texture_cache: Default::default(),
@@ -2214,7 +2090,7 @@ impl Niri {
         }
     }
 
-    pub fn add_output(&mut self, output: Output, refresh_interval: Option<Duration>, vrr: bool) {
+    pub fn add_output(&mut self, output: Output, refresh_interval: Option<Duration>) {
         let global = output.create_global::<State>(&self.display_handle);
 
         let name = output.user_data().get::<OutputName>().unwrap();
@@ -2268,9 +2144,8 @@ impl Niri {
         let state = OutputState {
             global,
             redraw_state: RedrawState::Idle,
-            on_demand_vrr_enabled: false,
             unfinished_animations_remain: false,
-            frame_clock: FrameClock::new(refresh_interval, vrr),
+            frame_clock: FrameClock::new(refresh_interval),
             vblank_throttle: VBlankThrottle::new(self.event_loop.clone(), name.connector.clone()),
             frame_callback_sequence: 0,
             backdrop_buffer: SolidColorBuffer::new(size, backdrop_color),
@@ -2318,8 +2193,6 @@ impl Niri {
             RedrawState::WaitingForEstimatedVBlank(token) => self.event_loop.remove(token),
             RedrawState::WaitingForEstimatedVBlankAndQueued(token) => self.event_loop.remove(token),
         }
-
-        self.screencopy_state.remove_output(output);
 
         // Disable the output global and remove some time later to give the clients some time to
         // process it.
@@ -3334,18 +3207,6 @@ impl Niri {
         self.layout.refresh(layout_is_active);
     }
 
-    pub fn refresh_idle_inhibit(&mut self) {
-        self.idle_inhibiting_surfaces.retain(|s| s.is_alive());
-
-        let is_inhibited = self.is_fdo_idle_inhibited.load(Ordering::SeqCst)
-            || self.idle_inhibiting_surfaces.iter().any(|surface| {
-                with_states(surface, |states| {
-                    surface_primary_scanout_output(surface, states).is_some()
-                })
-            });
-        self.idle_notifier_state.set_is_inhibited(is_inhibited);
-    }
-
     pub fn refresh_window_states(&mut self) {
         let config = self.config.borrow();
         self.layout.with_windows_mut(|mapped, _output| {
@@ -3798,8 +3659,6 @@ impl Niri {
             lock_state => self.lock_state = lock_state,
         }
 
-        self.refresh_on_demand_vrr(backend, output);
-
         // Send the frame callbacks.
         //
         // FIXME: The logic here could be a bit smarter. Currently, during an animation, the
@@ -3812,38 +3671,6 @@ impl Niri {
         // However, this should probably be restricted to sending frame callbacks to more surfaces,
         // to err on the safe side.
         self.send_frame_callbacks(output);
-        backend.with_primary_renderer(|renderer| {
-            self.render_for_screencopy_with_damage(renderer, output);
-        });
-    }
-
-    pub fn refresh_on_demand_vrr(&mut self, backend: &mut Backend, output: &Output) {
-        let name = output.user_data().get::<OutputName>().unwrap();
-        let on_demand = self
-            .config
-            .borrow()
-            .outputs
-            .find(name)
-            .is_some_and(|output| output.is_vrr_on_demand());
-        if !on_demand {
-            return;
-        }
-
-        let current = self.layout.windows_for_output(output).any(|mapped| {
-            mapped.rules().variable_refresh_rate == Some(true) && {
-                let mut visible = false;
-                mapped.window.with_surfaces(|surface, states| {
-                    if !visible
-                        && surface_primary_scanout_output(surface, states).as_ref() == Some(output)
-                    {
-                        visible = true;
-                    }
-                });
-                visible
-            }
-        });
-
-        backend.set_output_on_demand_vrr(self, output, current);
     }
 
     pub fn update_primary_scanout_output(
@@ -4333,193 +4160,17 @@ impl Niri {
         feedback
     }
 
-    pub fn render_for_screencopy_with_damage(
-        &mut self,
-        renderer: &mut GlesRenderer,
-        output: &Output,
-    ) {
-        let mut screencopy_state = mem::take(&mut self.screencopy_state);
-
-        screencopy_state.with_queues_mut(|queue| {
-            let (damage_tracker, screencopy) = queue.split();
-            if let Some(screencopy) = screencopy
-                && screencopy.output() == output
-            {
-                let ctx = RenderCtx {
-                    renderer,
-                    target: RenderTarget::ScreenCapture,
-                };
-                let offset = screencopy.region_loc().upscale(-1);
-                let mut elements = Vec::new();
-                self.render(ctx, output, screencopy.overlay_cursor(), &mut |elem| {
-                    let elem =
-                        RelocateRenderElement::from_element(elem, offset, Relocate::Relative);
-                    elements.push(elem);
-                });
-
-                let (damages, states) =
-                    Self::damage_screencopy_internal(output, &elements, damage_tracker, screencopy);
-                if let Some(damages) = damages {
-                    // Convert from Physical coordinates back to Buffer coordinates.
-                    let transform = output.current_transform();
-                    let physical_size = transform.transform_size(screencopy.buffer_size());
-                    let damages = damages.iter().map(|dmg| {
-                        dmg.to_logical(1).to_buffer(
-                            1,
-                            transform.invert(),
-                            &physical_size.to_logical(1),
-                        )
-                    });
-
-                    screencopy.damage(damages);
-
-                    let render_result = Self::render_for_screencopy_internal(
-                        renderer,
-                        damage_tracker,
-                        &elements,
-                        states,
-                        screencopy,
-                    );
-                    match render_result {
-                        Ok(sync) => {
-                            queue.pop().submit_after_sync(false, sync, &self.event_loop);
-                        }
-                        Err(err) => {
-                            // Recreate damage tracker to report full damage next check.
-                            *damage_tracker =
-                                OutputDamageTracker::new((0, 0), 1.0, Transform::Normal);
-                            queue.pop();
-                            warn!("error rendering for screencopy: {err:?}");
-                        }
-                    }
-                } else {
-                    trace!("no damage found, waiting till next redraw");
-                }
-            };
-        });
-
-        self.screencopy_state = screencopy_state;
-    }
-
-    pub fn render_for_screencopy_without_damage(
-        &mut self,
-        renderer: &mut GlesRenderer,
-        manager: &ZwlrScreencopyManagerV1,
-        screencopy: Screencopy,
-    ) -> anyhow::Result<()> {
-        let output = screencopy.output();
-        ensure!(
-            self.output_state.contains_key(output),
-            "screencopy output missing"
-        );
-
-        self.update_render_elements(Some(output));
-
-        let ctx = RenderCtx {
-            renderer,
-            target: RenderTarget::ScreenCapture,
-        };
-        let offset = screencopy.region_loc().upscale(-1);
-        let mut elements = Vec::new();
-        self.render(ctx, output, screencopy.overlay_cursor(), &mut |elem| {
-            let elem = RelocateRenderElement::from_element(elem, offset, Relocate::Relative);
-            elements.push(elem);
-        });
-
-        let Some(damage_tracker) = self.screencopy_state.damage_tracker(manager) else {
-            error!("screencopy queue must not be deleted as long as frames exist");
-            bail!("screencopy queue missing");
-        };
-
-        let (_damages, states) =
-            Self::damage_screencopy_internal(output, &elements, damage_tracker, &screencopy);
-        let res = Self::render_for_screencopy_internal(
-            renderer,
-            damage_tracker,
-            &elements,
-            states,
-            &screencopy,
-        );
-        let res = res.map(|sync| screencopy.submit_after_sync(false, sync, &self.event_loop));
-
-        if res.is_err() {
-            // Recreate damage tracker to report full damage next check.
-            *damage_tracker = OutputDamageTracker::new((0, 0), 1.0, Transform::Normal);
-        }
-
-        res
-    }
-
-    fn damage_screencopy_internal<'a>(
-        output: &Output,
-        elements: &[impl Element],
-        damage_tracker: &'a mut OutputDamageTracker,
-        screencopy: &Screencopy,
-    ) -> (
-        Option<&'a Vec<Rectangle<i32, Physical>>>,
-        RenderElementStates,
-    ) {
-        let OutputModeSource::Static {
-            size: last_size,
-            scale: last_scale,
-            transform: last_transform,
-        } = damage_tracker.mode().clone()
-        else {
-            unreachable!("damage tracker must have static mode");
-        };
-
-        let size = screencopy.buffer_size();
-        let scale: Scale<f64> = output.current_scale().fractional_scale().into();
-        let transform = output.current_transform();
-
-        if size != last_size || scale != last_scale || transform != last_transform {
-            *damage_tracker = OutputDamageTracker::new(size, scale, transform);
-        }
-
-        // Just checked damage tracker has static mode
-        damage_tracker.damage_output(1, elements).unwrap()
-    }
-
-    #[allow(clippy::type_complexity)]
-    fn render_for_screencopy_internal(
-        renderer: &mut GlesRenderer,
-        damage_tracker: &mut OutputDamageTracker,
-        elements: &[impl RenderElement<GlesRenderer>],
-        states: RenderElementStates,
-        screencopy: &Screencopy,
-    ) -> anyhow::Result<Option<SyncPoint>> {
-        let sync = match screencopy.buffer() {
-            ScreencopyBuffer::Dmabuf(dmabuf) => {
-                let sync =
-                    render_to_dmabuf(renderer, damage_tracker, dmabuf.clone(), elements, states)
-                        .context("error rendering to screencopy dmabuf")?;
-                Some(sync)
-            }
-            ScreencopyBuffer::Shm(wl_buffer) => {
-                render_to_shm(renderer, damage_tracker, wl_buffer, elements, states)
-                    .context("error rendering to screencopy shm buffer")?;
-                None
-            }
-        };
-
-        Ok(sync)
-    }
-
     pub fn capture_screenshots<'a>(
         &'a self,
         renderer: &'a mut GlesRenderer,
-    ) -> impl Iterator<Item = (Output, [OutputScreenshot; 3])> + 'a {
+    ) -> impl Iterator<Item = (Output, [OutputScreenshot; 2])> + 'a {
         self.global_space.outputs().cloned().filter_map(|output| {
             let size = output.current_mode().unwrap().size;
             let transform = output.current_transform();
             let size = transform.transform_size(size);
 
             let scale = Scale::from(output.current_scale().fractional_scale());
-            let targets = [
-                RenderTarget::Output,
-                RenderTarget::Screencast,
-                RenderTarget::ScreenCapture,
-            ];
+            let targets = [RenderTarget::Output, RenderTarget::ScreenCapture];
             let screenshot = targets.map(|target| {
                 let ctx = RenderCtx { renderer, target };
                 let elements = self.render_to_vec(ctx, &output, false);
@@ -5078,11 +4729,7 @@ impl Niri {
                 let transform = output.current_transform();
 
                 let scale = Scale::from(output.current_scale().fractional_scale());
-                let targets = [
-                    RenderTarget::Output,
-                    RenderTarget::Screencast,
-                    RenderTarget::ScreenCapture,
-                ];
+                let targets = [RenderTarget::Output, RenderTarget::ScreenCapture];
                 let textures = targets.map(|target| {
                     let ctx = RenderCtx { renderer, target };
                     let elements = self.render_to_vec(ctx, &output, false);
@@ -5233,8 +4880,6 @@ impl Niri {
         if self.notified_activity_this_iteration {
             return;
         }
-
-        self.idle_notifier_state.notify_activity(&self.seat);
 
         self.notified_activity_this_iteration = true;
     }
