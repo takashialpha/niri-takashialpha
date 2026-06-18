@@ -2,8 +2,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::iter::zip;
-use std::num::NonZeroU64;
-use std::os::fd::{AsFd, OwnedFd};
+use std::os::fd::OwnedFd;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -11,7 +10,6 @@ use std::time::Duration;
 use std::{io, mem};
 
 use anyhow::{Context, anyhow, bail, ensure};
-use bytemuck::cast_slice_mut;
 use drm_ffi::drm_mode_modeinfo;
 use libc::dev_t;
 use niri_config::output::{MaxBpc, Modeline};
@@ -326,8 +324,6 @@ pub struct SurfaceDmabufFeedback {
 struct GammaProps {
     crtc: crtc::Handle,
     gamma_lut: property::Handle,
-    gamma_lut_size: property::Handle,
-    previous_blob: Option<NonZeroU64>,
 }
 
 struct ConnectorProperties<'a> {
@@ -575,9 +571,9 @@ impl Tty {
                         }
 
                         if let Some(gamma_props) = &surface.gamma_props
-                            && let Err(err) = gamma_props.restore_gamma(&device.drm)
+                            && let Err(err) = gamma_props.reset_gamma(&device.drm)
                         {
-                            warn!("error restoring gamma: {err:?}");
+                            warn!("error resetting gamma: {err:?}");
                         }
                     }
                 }
@@ -1157,9 +1153,9 @@ impl Tty {
 
         // Reset gamma in case it was set before.
         let res = if let Some(gamma_props) = &mut gamma_props {
-            gamma_props.set_gamma(&device.drm, None)
+            gamma_props.reset_gamma(&device.drm)
         } else {
-            set_gamma_for_crtc(&device.drm, crtc, None)
+            reset_gamma_for_crtc(&device.drm, crtc)
         };
         if let Err(err) = res {
             debug!("couldn't reset gamma: {err:?}");
@@ -2044,7 +2040,6 @@ impl Tty {
 impl GammaProps {
     fn new(device: &DrmDevice, crtc: crtc::Handle) -> anyhow::Result<Self> {
         let mut gamma_lut = None;
-        let mut gamma_lut_size = None;
 
         let props = device
             .get_properties(crtc)
@@ -2058,115 +2053,24 @@ impl GammaProps {
                 continue;
             };
 
-            match name {
-                "GAMMA_LUT" => {
-                    ensure!(
-                        matches!(info.value_type(), property::ValueType::Blob),
-                        "wrong GAMMA_LUT value type"
-                    );
-                    gamma_lut = Some(prop);
-                }
-                "GAMMA_LUT_SIZE" => {
-                    ensure!(
-                        matches!(info.value_type(), property::ValueType::UnsignedRange(_, _)),
-                        "wrong GAMMA_LUT_SIZE value type"
-                    );
-                    gamma_lut_size = Some(prop);
-                }
-                _ => (),
+            if name == "GAMMA_LUT" {
+                ensure!(
+                    matches!(info.value_type(), property::ValueType::Blob),
+                    "wrong GAMMA_LUT value type"
+                );
+                gamma_lut = Some(prop);
             }
         }
 
         let gamma_lut = gamma_lut.context("missing GAMMA_LUT property")?;
-        let gamma_lut_size = gamma_lut_size.context("missing GAMMA_LUT_SIZE property")?;
 
-        Ok(Self {
-            crtc,
-            gamma_lut,
-            gamma_lut_size,
-            previous_blob: None,
-        })
+        Ok(Self { crtc, gamma_lut })
     }
 
-    fn gamma_size(&self, device: &DrmDevice) -> anyhow::Result<u32> {
-        let value = get_drm_property(device, self.crtc, self.gamma_lut_size)
-            .context("missing GAMMA_LUT_SIZE property")?;
-        Ok(value as u32)
-    }
-
-    fn set_gamma(&mut self, device: &DrmDevice, gamma: Option<&[u16]>) -> anyhow::Result<()> {
-        let blob = if let Some(gamma) = gamma {
-            let gamma_size = self
-                .gamma_size(device)
-                .context("error getting gamma size")? as usize;
-
-            ensure!(gamma.len() == gamma_size * 3, "wrong gamma length");
-
-            #[allow(non_camel_case_types)]
-            #[repr(C)]
-            #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-            pub struct drm_color_lut {
-                pub red: u16,
-                pub green: u16,
-                pub blue: u16,
-                pub reserved: u16,
-            }
-
-            let (red, rest) = gamma.split_at(gamma_size);
-            let (blue, green) = rest.split_at(gamma_size);
-            let mut data = zip(zip(red, blue), green)
-                .map(|((&red, &green), &blue)| drm_color_lut {
-                    red,
-                    green,
-                    blue,
-                    reserved: 0,
-                })
-                .collect::<Vec<_>>();
-            let data = cast_slice_mut(&mut data);
-
-            let blob = drm_ffi::mode::create_property_blob(device.as_fd(), data)
-                .context("error creating property blob")?;
-            NonZeroU64::new(u64::from(blob.blob_id))
-        } else {
-            None
-        };
-
-        {
-            let blob = blob.map(NonZeroU64::get).unwrap_or(0);
-            device
-                .set_property(
-                    self.crtc,
-                    self.gamma_lut,
-                    property::Value::Blob(blob).into(),
-                )
-                .context("error setting GAMMA_LUT")
-                .inspect_err(|_| {
-                    if blob != 0 {
-                        // Destroy the blob we just allocated.
-                        if let Err(err) = device.destroy_property_blob(blob) {
-                            warn!("error destroying GAMMA_LUT property blob: {err:?}");
-                        }
-                    }
-                })?;
-        }
-
-        if let Some(blob) = mem::replace(&mut self.previous_blob, blob)
-            && let Err(err) = device.destroy_property_blob(blob.get())
-        {
-            warn!("error destroying previous GAMMA_LUT blob: {err:?}");
-        }
-
-        Ok(())
-    }
-
-    fn restore_gamma(&self, device: &DrmDevice) -> anyhow::Result<()> {
-        let blob = self.previous_blob.map(NonZeroU64::get).unwrap_or(0);
+    /// Resets the GAMMA_LUT to identity by clearing it (blob 0).
+    fn reset_gamma(&self, device: &DrmDevice) -> anyhow::Result<()> {
         device
-            .set_property(
-                self.crtc,
-                self.gamma_lut,
-                property::Value::Blob(blob).into(),
-            )
+            .set_property(self.crtc, self.gamma_lut, property::Value::Blob(0).into())
             .context("error setting GAMMA_LUT")?;
 
         Ok(())
@@ -2266,24 +2170,6 @@ fn find_drm_property(
 
         (n == name).then_some((handle, info, value))
     })
-}
-
-fn get_drm_property(
-    drm: &DrmDevice,
-    resource: impl ResourceHandle,
-    prop: property::Handle,
-) -> Option<property::RawValue> {
-    let props = match drm.get_properties(resource) {
-        Ok(props) => props,
-        Err(err) => {
-            warn!("error getting properties: {err:?}");
-            return None;
-        }
-    };
-
-    props
-        .into_iter()
-        .find_map(|(handle, value)| (handle == prop).then_some(value))
 }
 
 fn refresh_interval(mode: DrmMode) -> Duration {
@@ -2753,39 +2639,28 @@ fn set_connector_properties(
     }
 }
 
-pub fn set_gamma_for_crtc(
-    device: &DrmDevice,
-    crtc: crtc::Handle,
-    ramp: Option<&[u16]>,
-) -> anyhow::Result<()> {
+/// Resets the gamma to identity via the legacy DRM API (fallback when atomic GAMMA_LUT is
+/// unavailable).
+pub fn reset_gamma_for_crtc(device: &DrmDevice, crtc: crtc::Handle) -> anyhow::Result<()> {
     let info = device.get_crtc(crtc).context("error getting crtc info")?;
     let gamma_length = info.gamma_length() as usize;
 
     ensure!(gamma_length != 0, "setting gamma is not supported");
 
-    let mut temp;
-    let ramp = if let Some(ramp) = ramp {
-        ensure!(ramp.len() == gamma_length * 3, "wrong gamma length");
-        ramp
-    } else {
-        // The legacy API provides no way to reset the gamma, so set a linear one manually.
-        temp = vec![0u16; gamma_length * 3];
+    // The legacy API provides no way to reset the gamma, so set a linear one manually.
+    let mut ramp = vec![0u16; gamma_length * 3];
+    let (red, rest) = ramp.split_at_mut(gamma_length);
+    let (green, blue) = rest.split_at_mut(gamma_length);
+    let denom = gamma_length as u64 - 1;
+    for (i, ((r, g), b)) in zip(zip(red, green), blue).enumerate() {
+        let value = (0xFFFFu64 * i as u64 / denom) as u16;
+        *r = value;
+        *g = value;
+        *b = value;
+    }
 
-        let (red, rest) = temp.split_at_mut(gamma_length);
-        let (green, blue) = rest.split_at_mut(gamma_length);
-        let denom = gamma_length as u64 - 1;
-        for (i, ((r, g), b)) in zip(zip(red, green), blue).enumerate() {
-            let value = (0xFFFFu64 * i as u64 / denom) as u16;
-            *r = value;
-            *g = value;
-            *b = value;
-        }
-
-        &temp
-    };
-
-    let (red, ramp) = ramp.split_at(gamma_length);
-    let (green, blue) = ramp.split_at(gamma_length);
+    let (red, rest) = ramp.split_at(gamma_length);
+    let (green, blue) = rest.split_at(gamma_length);
 
     device
         .set_gamma(crtc, red, green, blue)

@@ -49,7 +49,6 @@ GPL-3.0-or-later, same as upstream niri. See [LICENSE](LICENSE).
 
 ---
 
-## TODO (add work here)
+## TODO
 
-- Final review on the diff and across the repo
-- See if it's worth dropping: session_lock
+- None yet :)
