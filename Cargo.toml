@@ -49,7 +49,6 @@ anyhow.workspace = true
 arrayvec = "0.7"
 async-channel = "2.5"
 bitflags.workspace = true
-bytemuck = { version = "1.25", features = ["derive"] }
 calloop = { version = "0.14", features = ["executor", "futures-io", "signals"] }
 clap = { workspace = true, features = ["string"] }
 drm-ffi = "0.9"
