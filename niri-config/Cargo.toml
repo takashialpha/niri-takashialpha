@@ -9,7 +9,7 @@ edition.workspace = true
 [dependencies]
 bitflags.workspace = true
 csscolorparser = "0.8"
-knus = "3.3"
+knus = "3.4"
 miette = "7.6"
 niri-ipc = { path = "../niri-ipc" }
 regex = "1.12"
