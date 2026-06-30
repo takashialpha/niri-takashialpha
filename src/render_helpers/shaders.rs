@@ -35,8 +35,8 @@ impl Shaders {
         let border = ShaderProgram::compile(
             renderer,
             concat!(
-                include_str!("border.frag"),
-                include_str!("rounding_alpha.frag")
+                include_str!("shaders/border.frag"),
+                include_str!("shaders/rounding_alpha.frag")
             ),
             &[
                 UniformName::new("colorspace", UniformType::_1f),
@@ -61,8 +61,8 @@ impl Shaders {
         let shadow = ShaderProgram::compile(
             renderer,
             concat!(
-                include_str!("shadow.frag"),
-                include_str!("rounding_alpha.frag")
+                include_str!("shaders/shadow.frag"),
+                include_str!("shaders/rounding_alpha.frag")
             ),
             &[
                 UniformName::new("shadow_color", UniformType::_4f),
@@ -84,8 +84,8 @@ impl Shaders {
         let clipped_surface = renderer
             .compile_custom_texture_shader(
                 concat!(
-                    include_str!("clipped_surface.frag"),
-                    include_str!("rounding_alpha.frag"),
+                    include_str!("shaders/clipped_surface.frag"),
+                    include_str!("shaders/rounding_alpha.frag"),
                     "\nvec4 postprocess(vec4 color) { return color; }",
                 ),
                 &[
@@ -103,9 +103,9 @@ impl Shaders {
         let postprocess_and_clip = renderer
             .compile_custom_texture_shader(
                 concat!(
-                    include_str!("clipped_surface.frag"),
-                    include_str!("rounding_alpha.frag"),
-                    include_str!("postprocess.frag"),
+                    include_str!("shaders/clipped_surface.frag"),
+                    include_str!("shaders/rounding_alpha.frag"),
+                    include_str!("shaders/postprocess.frag"),
                 ),
                 &[
                     UniformName::new("niri_scale", UniformType::_1f),
@@ -122,7 +122,7 @@ impl Shaders {
             })
             .ok();
 
-        let resize = compile_resize_program(renderer, include_str!("resize.frag"))
+        let resize = compile_resize_program(renderer, include_str!("shaders/resize.frag"))
             .map_err(|err| {
                 warn!("error compiling resize shader: {err:?}");
             })
@@ -130,7 +130,7 @@ impl Shaders {
 
         let gradient_fade = renderer
             .compile_custom_texture_shader(
-                include_str!("gradient_fade.frag"),
+                include_str!("shaders/gradient_fade.frag"),
                 &[UniformName::new("cutoff", UniformType::_2f)],
             )
             .map_err(|err| {
@@ -212,10 +212,10 @@ fn compile_resize_program(
     renderer: &mut GlesRenderer,
     src: &str,
 ) -> Result<ShaderProgram, GlesError> {
-    let mut program = include_str!("resize_prelude.frag").to_string();
+    let mut program = include_str!("shaders/resize_prelude.frag").to_string();
     program.push_str(src);
-    program.push_str(include_str!("resize_epilogue.frag"));
-    program.push_str(include_str!("rounding_alpha.frag"));
+    program.push_str(include_str!("shaders/resize_epilogue.frag"));
+    program.push_str(include_str!("shaders/rounding_alpha.frag"));
 
     ShaderProgram::compile(
         renderer,
@@ -260,9 +260,9 @@ fn compile_close_program(
     renderer: &mut GlesRenderer,
     src: &str,
 ) -> Result<ShaderProgram, GlesError> {
-    let mut program = include_str!("close_prelude.frag").to_string();
+    let mut program = include_str!("shaders/close_prelude.frag").to_string();
     program.push_str(src);
-    program.push_str(include_str!("close_epilogue.frag"));
+    program.push_str(include_str!("shaders/close_epilogue.frag"));
 
     ShaderProgram::compile(
         renderer,
@@ -303,9 +303,9 @@ fn compile_open_program(
     renderer: &mut GlesRenderer,
     src: &str,
 ) -> Result<ShaderProgram, GlesError> {
-    let mut program = include_str!("open_prelude.frag").to_string();
+    let mut program = include_str!("shaders/open_prelude.frag").to_string();
     program.push_str(src);
-    program.push_str(include_str!("open_epilogue.frag"));
+    program.push_str(include_str!("shaders/open_epilogue.frag"));
 
     ShaderProgram::compile(
         renderer,
