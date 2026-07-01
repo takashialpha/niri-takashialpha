@@ -1,6 +1,6 @@
 # niri-takashialpha
 
-A personal fork of [**niri**](https://github.com/niri-wm/niri) — a scrollable-tiling
+A personal fork of [**niri**](https://github.com/niri-wm/niri), a scrollable-tiling
 Wayland compositor.
 
 > **All credit for niri goes to [Ivan Molodetskikh (YaLTeR)](https://github.com/YaLTeR)
@@ -9,13 +9,13 @@ Wayland compositor.
 ## What this is
 
 This is *takashialpha's personal fork* of niri. It is not a rewrite, a competitor,
-or a separate project — it follows upstream niri and exists for maintenance-flavored
+or a separate project; it follows upstream niri and exists for maintenance-flavored
 changes: dependency dieting, build/packaging tweaks, and review-driven cleanups. It
 also deliberately **removes** features and protocols this fork doesn't use, in favor
-of a smaller, cleaner codebase — so behavior can diverge from upstream on purpose.
+of a smaller, cleaner codebase, so behavior can diverge from upstream on purpose.
 
-If you want **niri itself** — what it is, how to install it, how to configure it,
-the keybindings, the IPC, screencasting, everything — go to upstream. This README
+If you want **niri itself** (what it is, how to install it, how to configure it,
+the keybindings, the IPC, screencasting, everything), go to upstream. This README
 intentionally does **not** duplicate niri's documentation:
 
 - **niri repository:** <https://github.com/niri-wm/niri>
@@ -40,7 +40,7 @@ intentionally does **not** duplicate niri's documentation:
 
 There is **no automatic tracking of upstream.** Because this fork removes code and
 diverges on purpose, it does not merge upstream wholesale. Everything wanted from
-upstream — features and fixes — is reviewed and **ported by hand**, commit by commit.
+upstream (features and fixes) is reviewed and **ported by hand**, commit by commit.
 Merge conflicts are expected and accepted as the cost of a smaller, hand-curated tree.
 
 ## License
