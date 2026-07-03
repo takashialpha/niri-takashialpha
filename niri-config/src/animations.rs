@@ -489,16 +489,6 @@ where
 }
 
 impl Animation {
-    pub fn new_off() -> Self {
-        Self {
-            off: true,
-            kind: Kind::Easing(EasingParams {
-                duration_ms: 0,
-                curve: Curve::Linear,
-            }),
-        }
-    }
-
     fn decode_node<S: knus::traits::ErrorSpan>(
         node: &knus::ast::SpannedNode<S>,
         ctx: &mut knus::decode::Context<S>,

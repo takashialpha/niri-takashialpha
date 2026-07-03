@@ -143,16 +143,6 @@ impl OutputName {
         }
     }
 
-    /// Returns an output description matching what Smithay's `Output::new()` does.
-    pub fn format_description(&self) -> String {
-        format!(
-            "{} - {} - {}",
-            self.make.as_deref().unwrap_or("Unknown"),
-            self.model.as_deref().unwrap_or("Unknown"),
-            self.connector,
-        )
-    }
-
     /// Returns an output name that will match by make/model/serial or, if they are missing, by
     /// connector.
     pub fn format_make_model_serial_or_connector(&self) -> String {
