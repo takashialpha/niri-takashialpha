@@ -47,16 +47,16 @@ impl HotkeyOverlay {
         }
     }
 
-    pub fn show(&mut self) -> bool {
-        if !self.is_open {
+    pub const fn show(&mut self) -> bool {
+        if self.is_open {
+            false
+        } else {
             self.is_open = true;
             true
-        } else {
-            false
         }
     }
 
-    pub fn hide(&mut self) -> bool {
+    pub const fn hide(&mut self) -> bool {
         if self.is_open {
             self.is_open = false;
             true
@@ -65,7 +65,7 @@ impl HotkeyOverlay {
         }
     }
 
-    pub fn is_open(&self) -> bool {
+    pub const fn is_open(&self) -> bool {
         self.is_open
     }
 
@@ -269,7 +269,7 @@ fn collect_actions(config: &Config) -> Vec<&Action> {
 
     if config.hotkey_overlay.hide_not_bound {
         // Only keep actions that have been bound
-        actions.retain(|&action| binds.iter().any(|bind| bind.action == *action))
+        actions.retain(|&action| binds.iter().any(|bind| bind.action == *action));
     }
 
     actions

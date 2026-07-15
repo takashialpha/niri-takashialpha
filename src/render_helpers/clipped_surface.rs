@@ -31,7 +31,7 @@ pub struct RoundedCornerDamage {
 }
 
 impl<R: NiriRenderer> ClippedSurfaceRenderElement<R> {
-    pub fn new(
+    pub const fn new(
         elem: WaylandSurfaceRenderElement<R>,
         scale: Scale<f64>,
         geometry: Rectangle<f64, Logical>,
@@ -128,10 +128,10 @@ impl<R: NiriRenderer> ClippedSurfaceRenderElement<R> {
         geo: Rectangle<f64, Logical>,
         corner_radius: CornerRadius,
     ) -> [Rectangle<f64, Logical>; 4] {
-        let top_left = corner_radius.top_left as f64;
-        let top_right = corner_radius.top_right as f64;
-        let bottom_right = corner_radius.bottom_right as f64;
-        let bottom_left = corner_radius.bottom_left as f64;
+        let top_left = f64::from(corner_radius.top_left);
+        let top_right = f64::from(corner_radius.top_right);
+        let bottom_right = f64::from(corner_radius.bottom_right);
+        let bottom_left = f64::from(corner_radius.bottom_left);
 
         [
             Rectangle::new(geo.loc, Size::from((top_left, top_left))),
@@ -300,6 +300,7 @@ impl RoundedCornerDamage {
         self.damage.damage_all();
     }
 
+    #[must_use]
     pub fn render(&self, geometry: Rectangle<f64, Logical>) -> ExtraDamage {
         self.damage.render(geometry)
     }

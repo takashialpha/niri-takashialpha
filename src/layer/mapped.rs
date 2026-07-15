@@ -59,6 +59,7 @@ niri_render_elements! {
 }
 
 impl MappedLayer {
+    #[must_use]
     pub fn new(
         surface: LayerSurface,
         pre_commit_hook: HookId,
@@ -98,7 +99,7 @@ impl MappedLayer {
         self.shadow.update_shaders();
     }
 
-    pub fn update_sizes(&mut self, view_size: Size<f64, Logical>, scale: f64) {
+    pub const fn update_sizes(&mut self, view_size: Size<f64, Logical>, scale: f64) {
         self.view_size = view_size;
         self.scale = scale;
     }
@@ -117,15 +118,18 @@ impl MappedLayer {
             .update_render_elements(size, true, radius, self.scale, 1.);
     }
 
-    pub fn are_animations_ongoing(&self) -> bool {
+    #[must_use]
+    pub const fn are_animations_ongoing(&self) -> bool {
         self.rules.baba_is_float
     }
 
-    pub fn surface(&self) -> &LayerSurface {
+    #[must_use]
+    pub const fn surface(&self) -> &LayerSurface {
         &self.surface
     }
 
-    pub fn rules(&self) -> &ResolvedLayerRules {
+    #[must_use]
+    pub const fn rules(&self) -> &ResolvedLayerRules {
         &self.rules
     }
 
@@ -140,7 +144,7 @@ impl MappedLayer {
         true
     }
 
-    pub fn set_recompute_rules_on_commit(&mut self) {
+    pub const fn set_recompute_rules_on_commit(&mut self) {
         self.recompute_rules_on_commit = true;
     }
 
@@ -148,6 +152,7 @@ impl MappedLayer {
         std::mem::take(&mut self.recompute_rules_on_commit)
     }
 
+    #[must_use]
     pub fn place_within_backdrop(&self) -> bool {
         if !self.rules.place_within_backdrop {
             return false;
@@ -165,6 +170,7 @@ impl MappedLayer {
         true
     }
 
+    #[must_use]
     pub fn bob_offset(&self) -> Point<f64, Logical> {
         if !self.rules.baba_is_float {
             return Point::from((0., 0.));

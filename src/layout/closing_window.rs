@@ -94,6 +94,10 @@ impl AnimationState {
 }
 
 impl ClosingWindow {
+    /// # Errors
+    ///
+    /// Returns an error if rendering `snapshot`'s contents (or blocked-out-background contents,
+    /// if present) to a texture fails.
     pub fn new<E: RenderElement<GlesRenderer>>(
         renderer: &mut GlesRenderer,
         snapshot: RenderSnapshot<E, E>,
@@ -167,6 +171,7 @@ impl ClosingWindow {
         }
     }
 
+    #[must_use]
     pub fn are_animations_ongoing(&self) -> bool {
         match &self.anim_state {
             AnimationState::Waiting { .. } => true,
@@ -174,6 +179,19 @@ impl ClosingWindow {
         }
     }
 
+    /// # Panics
+    ///
+    /// Panics if `self.buffer_with_blocked_out_bg` is observed as `Some` in the initial branch
+    /// check and then read back a few lines later as `None`; this can't happen since nothing
+    /// mutates `self` (only `&self`) between the check and the `.unwrap()`.
+    // `RenderCtx` already wraps a `&mut R`, so passing it by value is passing a reference-sized
+    // wrapper, not an owned value; the function needs `ctx.renderer` as `&mut GlesRenderer` (for
+    // `Shaders::get`), which a `&RenderCtx` could not give back without violating aliasing rules.
+    #[allow(clippy::needless_pass_by_value)]
+    // Logical-pixel geometry and texture dimensions are narrowed to f32 for the GL shader;
+    // neither ever approaches f32's precision limits.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+    #[must_use]
     pub fn render(
         &self,
         ctx: RenderCtx<GlesRenderer>,

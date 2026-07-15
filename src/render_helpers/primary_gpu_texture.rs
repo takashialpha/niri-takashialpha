@@ -55,6 +55,11 @@ impl Element for PrimaryGpuTextureRenderElement {
 }
 
 impl RenderElement<GlesRenderer> for PrimaryGpuTextureRenderElement {
+    // `gles_frame`'s guard is used on the next line and the function returns right
+    // after; there is no later code it could be held across, so an explicit early
+    // `drop()` would fire at the same point as the implicit end-of-scope drop already
+    // does.
+    #[allow(clippy::significant_drop_tightening)]
     fn draw(
         &self,
         frame: &mut GlesFrame<'_, '_>,
@@ -85,6 +90,11 @@ impl RenderElement<GlesRenderer> for PrimaryGpuTextureRenderElement {
 }
 
 impl<'render> RenderElement<TtyRenderer<'render>> for PrimaryGpuTextureRenderElement {
+    // `gles_frame`'s guard is used on the next line and the function returns right
+    // after; there is no later code it could be held across, so an explicit early
+    // `drop()` would fire at the same point as the implicit end-of-scope drop already
+    // does.
+    #[allow(clippy::significant_drop_tightening)]
     fn draw(
         &self,
         frame: &mut TtyFrame<'_, '_, '_>,

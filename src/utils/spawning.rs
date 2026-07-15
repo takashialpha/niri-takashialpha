@@ -24,7 +24,7 @@ pub fn store_and_increase_nofile_rlimit() {
         rlim_cur: 0,
         rlim_max: 0,
     };
-    if unsafe { getrlimit(RLIMIT_NOFILE, &mut rlim) } != 0 {
+    if unsafe { getrlimit(RLIMIT_NOFILE, &raw mut rlim) } != 0 {
         let err = io::Error::last_os_error();
         warn!("error getting nofile rlimit: {err:?}");
         return;
@@ -39,7 +39,7 @@ pub fn store_and_increase_nofile_rlimit() {
     );
     rlim.rlim_cur = rlim.rlim_max;
 
-    if unsafe { setrlimit(RLIMIT_NOFILE, &rlim) } != 0 {
+    if unsafe { setrlimit(RLIMIT_NOFILE, &raw const rlim) } != 0 {
         let err = io::Error::last_os_error();
         warn!("error setting nofile rlimit: {err:?}");
     }
@@ -55,10 +55,15 @@ pub fn restore_nofile_rlimit() {
     }
 
     let rlim = rlimit { rlim_cur, rlim_max };
-    unsafe { setrlimit(RLIMIT_NOFILE, &rlim) };
+    unsafe { setrlimit(RLIMIT_NOFILE, &raw const rlim) };
 }
 
 /// Spawns the command to run independently of the compositor.
+///
+/// # Panics
+///
+/// Does not panic: the early `command.is_empty()` return guarantees `split_first()`
+/// always returns `Some` inside the spawned thread.
 pub fn spawn<T: AsRef<OsStr> + Send + 'static>(command: Vec<T>) {
     if command.is_empty() {
         return;
@@ -81,8 +86,8 @@ pub fn spawn<T: AsRef<OsStr> + Send + 'static>(command: Vec<T>) {
 ///
 /// We hardcode `sh -c`, consistent with other compositors:
 ///
-/// - https://github.com/swaywm/sway/blob/b3dcde8d69c3f1304b076968a7a64f54d0c958be/sway/commands/exec_always.c#L64
-/// - https://github.com/hyprwm/Hyprland/blob/1ac1ff457ab8ef1ae6a8f2ab17ee7965adfa729f/src/managers/KeybindManager.cpp#L987
+/// - <https://github.com/swaywm/sway/blob/b3dcde8d69c3f1304b076968a7a64f54d0c958be/sway/commands/exec_always.c#L64>
+/// - <https://github.com/hyprwm/Hyprland/blob/1ac1ff457ab8ef1ae6a8f2ab17ee7965adfa729f/src/managers/KeybindManager.cpp#L987>
 pub fn spawn_sh(command: String) {
     spawn(vec![String::from("sh"), String::from("-c"), command]);
 }

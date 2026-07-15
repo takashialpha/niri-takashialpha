@@ -9,7 +9,7 @@ pub struct CubicBezier {
 }
 
 impl CubicBezier {
-    pub fn new(x1: f64, y1: f64, x2: f64, y2: f64) -> Self {
+    pub const fn new(x1: f64, y1: f64, x2: f64, y2: f64) -> Self {
         Self { x1, y1, x2, y2 }
     }
 
@@ -18,12 +18,12 @@ impl CubicBezier {
 
     fn x_for_t(&self, t: f64) -> f64 {
         let omt = 1. - t;
-        3. * omt * omt * t * self.x1 + 3. * omt * t * t * self.x2 + t * t * t
+        (t * t).mul_add(t, (3. * omt * t * t).mul_add(self.x2, 3. * omt * omt * t * self.x1))
     }
 
     fn y_for_t(&self, t: f64) -> f64 {
         let omt = 1. - t;
-        3. * omt * omt * t * self.y1 + 3. * omt * t * t * self.y2 + t * t * t
+        (t * t).mul_add(t, (3. * omt * t * t).mul_add(self.y2, 3. * omt * omt * t * self.y1))
     }
 
     fn t_for_x(&self, x: f64) -> f64 {
@@ -31,7 +31,7 @@ impl CubicBezier {
         let mut max_t = 1.;
 
         for _ in 0..=30 {
-            let guess_t = (min_t + max_t) / 2.;
+            let guess_t = f64::midpoint(min_t, max_t);
             let guess_x = self.x_for_t(guess_t);
 
             if x < guess_x {
@@ -41,7 +41,7 @@ impl CubicBezier {
             }
         }
 
-        (min_t + max_t) / 2.
+        f64::midpoint(min_t, max_t)
     }
 }
 

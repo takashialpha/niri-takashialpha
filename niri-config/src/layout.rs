@@ -85,11 +85,11 @@ impl MergeWith<LayoutPart> for Layout {
         }
 
         if self.preset_column_widths.is_empty() {
-            self.preset_column_widths = Layout::default().preset_column_widths;
+            self.preset_column_widths = Self::default().preset_column_widths;
         }
 
         if self.preset_window_heights.is_empty() {
-            self.preset_window_heights = Layout::default().preset_window_heights;
+            self.preset_window_heights = Self::default().preset_window_heights;
         }
     }
 }
@@ -137,8 +137,8 @@ pub enum PresetSize {
 impl From<PresetSize> for SizeChange {
     fn from(value: PresetSize) -> Self {
         match value {
-            PresetSize::Proportion(prop) => SizeChange::SetProportion(prop * 100.),
-            PresetSize::Fixed(fixed) => SizeChange::SetFixed(fixed),
+            PresetSize::Proportion(prop) => Self::SetProportion(prop * 100.),
+            PresetSize::Fixed(fixed) => Self::SetFixed(fixed),
         }
     }
 }
@@ -182,17 +182,18 @@ where
 
         let mut children = node.children();
 
-        if let Some(child) = children.next() {
-            if let Some(unwanted_child) = children.next() {
-                ctx.emit_error(DecodeError::unexpected(
-                    unwanted_child,
-                    "node",
-                    "expected no more than one child",
-                ));
-            }
-            PresetSize::decode_node(child, ctx).map(Some).map(Self)
-        } else {
-            Ok(Self(None))
-        }
+        children.next().map_or_else(
+            || Ok(Self(None)),
+            |child| {
+                if let Some(unwanted_child) = children.next() {
+                    ctx.emit_error(DecodeError::unexpected(
+                        unwanted_child,
+                        "node",
+                        "expected no more than one child",
+                    ));
+                }
+                PresetSize::decode_node(child, ctx).map(Some).map(Self)
+            },
+        )
     }
 }

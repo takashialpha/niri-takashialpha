@@ -107,7 +107,7 @@ impl XdgShellHandler for State {
         let window = mapped.window.clone();
         let output = output.clone();
 
-        if let Some(grab) = MoveGrab::new(self, start_data, window.clone(), true, None) {
+        if let Some(grab) = MoveGrab::new(self, start_data, window, true, None) {
             pointer.set_grab(self, grab, serial, Focus::Clear);
         }
 
@@ -319,7 +319,7 @@ impl XdgShellHandler for State {
             .and_then(|output| {
                 layer_map_for_output(output)
                     .layer_for_surface(&root, WindowSurfaceType::TOPLEVEL)
-                    .map(|layer_surface| layer_surface.can_receive_keyboard_focus())
+                    .map(smithay::desktop::LayerSurface::can_receive_keyboard_focus)
             })
             .unwrap_or(true);
 
@@ -403,7 +403,7 @@ impl XdgShellHandler for State {
                     let mon = mon.map(|(mon, _)| mon);
 
                     let ws = mon
-                        .map(|mon| mon.active_workspace_ref())
+                        .map(super::super::layout::monitor::Monitor::active_workspace_ref)
                         .or_else(|| self.niri.layout.active_workspace());
 
                     if let Some(ws) = ws {
@@ -502,7 +502,7 @@ impl XdgShellHandler for State {
                         .as_deref()
                         .and_then(|name| mon.map(|mon| mon.find_named_workspace(name)))
                         .unwrap_or_else(|| {
-                            mon.map(|mon| mon.active_workspace_ref())
+                            mon.map(super::super::layout::monitor::Monitor::active_workspace_ref)
                                 .or_else(|| self.niri.layout.active_workspace())
                         });
 
@@ -619,7 +619,7 @@ impl XdgShellHandler for State {
                     let mon = mon.map(|(mon, _)| mon);
 
                     let ws = mon
-                        .map(|mon| mon.active_workspace_ref())
+                        .map(super::super::layout::monitor::Monitor::active_workspace_ref)
                         .or_else(|| self.niri.layout.active_workspace());
 
                     if let Some(ws) = ws {
@@ -713,7 +713,7 @@ impl XdgShellHandler for State {
                         .as_deref()
                         .and_then(|name| mon.map(|mon| mon.find_named_workspace(name)))
                         .unwrap_or_else(|| {
-                            mon.map(|mon| mon.active_workspace_ref())
+                            mon.map(super::super::layout::monitor::Monitor::active_workspace_ref)
                                 .or_else(|| self.niri.layout.active_workspace())
                         });
 
@@ -917,7 +917,7 @@ pub struct KdeDecorationsModeState {
 }
 
 impl KdeDecorationsModeState {
-    pub fn is_server(&self) -> bool {
+    pub const fn is_server(&self) -> bool {
         self.server.get()
     }
 }
@@ -1050,7 +1050,7 @@ impl State {
             .as_deref()
             .and_then(|name| mon.map(|mon| mon.find_named_workspace(name)))
             .unwrap_or_else(|| {
-                mon.map(|mon| mon.active_workspace_ref())
+                mon.map(super::super::layout::monitor::Monitor::active_workspace_ref)
                     .or_else(|| self.niri.layout.active_workspace())
             });
 
@@ -1335,11 +1335,11 @@ fn unconstrain_with_padding(
     let mut padded = target;
     if PADDING * 2. < padded.size.w {
         padded.loc.x += PADDING;
-        padded.size.w -= PADDING * 2.;
+        padded.size.w = PADDING.mul_add(-2., padded.size.w);
     }
     if PADDING * 2. < padded.size.h {
         padded.loc.y += PADDING;
-        padded.size.h -= PADDING * 2.;
+        padded.size.h = PADDING.mul_add(-2., padded.size.h);
     }
 
     // No padding, so just unconstrain with the original target.
@@ -1426,7 +1426,7 @@ pub fn add_mapped_toplevel_pre_commit_hook(toplevel: &ToplevelSurface) -> HookId
                         if let Some(client) = surface.client() {
                             transaction.add_notification(
                                 state.niri.blocker_cleared_tx.clone(),
-                                client.clone(),
+                                client,
                             );
                             add_blocker(surface, transaction.blocker());
                         }
@@ -1442,7 +1442,7 @@ pub fn add_mapped_toplevel_pre_commit_hook(toplevel: &ToplevelSurface) -> HookId
             animate = mapped.should_animate_commit(serial);
         } else if !got_unmapped {
             error!("commit on a mapped surface without a configured serial");
-        };
+        }
 
         if let Some((blocker, source)) =
             dmabuf.and_then(|dmabuf| dmabuf.generate_blocker(Interest::READ).ok())
@@ -1451,7 +1451,7 @@ pub fn add_mapped_toplevel_pre_commit_hook(toplevel: &ToplevelSurface) -> HookId
             let res = state
                 .niri
                 .event_loop
-                .insert_source(source, move |_, _, state| {
+                .insert_source(source, move |(), _, state| {
                     // This surface is now ready for the transaction.
                     drop(transaction_for_dmabuf.take());
 

@@ -109,11 +109,11 @@ niri_render_elements! {
 }
 
 impl Button {
-    fn is_down(&self) -> bool {
+    const fn is_down(&self) -> bool {
         matches!(self, Self::Down { .. })
     }
 
-    fn is_dragging_selection(&self) -> bool {
+    const fn is_dragging_selection(&self) -> bool {
         matches!(
             self,
             Self::Down {
@@ -125,7 +125,7 @@ impl Button {
 }
 
 impl ScreenshotUi {
-    pub fn new(clock: Clock, config: Rc<RefCell<Config>>) -> Self {
+    pub const fn new(clock: Clock, config: Rc<RefCell<Config>>) -> Self {
         Self::Closed {
             last_selection: None,
             clock,
@@ -268,14 +268,15 @@ impl ScreenshotUi {
         true
     }
 
-    pub fn toggle_pointer(&mut self) {
+    pub const fn toggle_pointer(&mut self) {
         if let Self::Open { show_pointer, .. } = self {
             *show_pointer = !*show_pointer;
         }
     }
 
-    pub fn is_open(&self) -> bool {
-        matches!(self, ScreenshotUi::Open { .. })
+    #[must_use]
+    pub const fn is_open(&self) -> bool {
+        matches!(self, Self::Open { .. })
     }
 
     pub fn set_space_down(&mut self, down: bool) {
@@ -426,8 +427,8 @@ impl ScreenshotUi {
         );
         let current_rect = current_rect.to_f64();
 
-        let rel_x = current_rect.loc.x / current_data.size.w as f64;
-        let rel_y = current_rect.loc.y / current_data.size.h as f64;
+        let rel_x = current_rect.loc.x / f64::from(current_data.size.w);
+        let rel_y = current_rect.loc.y / f64::from(current_data.size.h);
 
         let factor = target_data.scale / current_data.scale;
         let mut new_width = (current_rect.size.w * factor).round() as i32;
@@ -436,8 +437,8 @@ impl ScreenshotUi {
         new_width = new_width.clamp(1, target_data.size.w);
         new_height = new_height.clamp(1, target_data.size.h);
 
-        let new_x = (rel_x * target_data.size.w as f64).round() as i32;
-        let new_y = (rel_y * target_data.size.h as f64).round() as i32;
+        let new_x = (rel_x * f64::from(target_data.size.w)).round() as i32;
+        let new_y = (rel_y * f64::from(target_data.size.h)).round() as i32;
 
         let max_x = target_data.size.w - new_width;
         let max_y = target_data.size.h - new_height;
@@ -534,8 +535,9 @@ impl ScreenshotUi {
         self.update_buffers();
     }
 
-    pub fn advance_animations(&mut self) {}
+    pub const fn advance_animations(&mut self) {}
 
+    #[must_use]
     pub fn are_animations_ongoing(&self) -> bool {
         let Self::Open { open_anim, .. } = self else {
             return false;
@@ -754,6 +756,7 @@ impl ScreenshotUi {
         Ok((rect.size, copy.to_vec()))
     }
 
+    #[must_use]
     pub fn action(&self, raw: Keysym, mods: ModifiersState) -> Option<Action> {
         let Self::Open { button, .. } = self else {
             return None;
@@ -767,7 +770,8 @@ impl ScreenshotUi {
         action(raw, mods)
     }
 
-    pub fn selection_output(&self) -> Option<&Output> {
+    #[must_use]
+    pub const fn selection_output(&self) -> Option<&Output> {
         if let Self::Open {
             selection: (output, _, _),
             ..
@@ -779,6 +783,7 @@ impl ScreenshotUi {
         }
     }
 
+    #[must_use]
     pub fn output_size(&self, output: &Output) -> Option<(Size<i32, Physical>, f64, Transform)> {
         if let Self::Open { output_data, .. } = self {
             let data = output_data.get(output)?;
@@ -959,7 +964,7 @@ impl ScreenshotUi {
                 && state.touch_slot.is_some_and(|m_slot| Some(m_slot) == slot)
             {
                 *move_state = None;
-            };
+            }
 
             return None;
         }
@@ -1083,6 +1088,7 @@ fn action(raw: Keysym, mods: ModifiersState) -> Option<Action> {
     None
 }
 
+#[must_use]
 pub fn rect_from_corner_points(
     a: Point<i32, Physical>,
     b: Point<i32, Physical>,
@@ -1174,11 +1180,11 @@ fn render_panel(
     cr.fill()?;
 
     cr.new_sub_path();
-    cr.arc(padding + r, yc, r - circle_stroke * 2., 0., TAU);
+    cr.arc(padding + r, yc, circle_stroke.mul_add(-2., r), 0., TAU);
     cr.set_source_rgb(1., 1., 1.);
     cr.fill()?;
 
-    cr.move_to(padding + r * 2. + padding - half_border_width, padding);
+    cr.move_to(r.mul_add(2., padding) + padding - half_border_width, padding);
 
     let layout = pangocairo::functions::create_layout(&cr);
     layout.context().set_round_glyph_positions(false);

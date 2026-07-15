@@ -11,6 +11,11 @@ use super::BakedBuffer;
 use super::texture::TextureBuffer;
 
 /// Renders elements from a surface tree as textures into `storage`.
+///
+/// # Panics
+///
+/// Panics if a surface's internal renderer-state mutex is poisoned (i.e. a prior panic
+/// occurred while another thread held the same lock).
 pub fn render_snapshot_from_surface_tree(
     renderer: &mut GlesRenderer,
     surface: &WlSurface,
@@ -24,18 +29,14 @@ pub fn render_snapshot_from_surface_tree(
             let mut location = *location;
             let data = states.data_map.get::<RendererSurfaceStateUserData>();
 
-            if let Some(data) = data {
+            data.map_or(TraversalAction::SkipChildren, |data| {
                 let data = &*data.lock().unwrap();
 
-                if let Some(view) = data.view() {
+                data.view().map_or(TraversalAction::SkipChildren, |view| {
                     location += view.offset.to_f64();
                     TraversalAction::DoChildren(location)
-                } else {
-                    TraversalAction::SkipChildren
-                }
-            } else {
-                TraversalAction::SkipChildren
-            }
+                })
+            })
         },
         |_, states, location| {
             let mut location = *location;
@@ -79,6 +80,10 @@ pub fn render_snapshot_from_surface_tree(
     );
 }
 
+/// # Panics
+///
+/// Panics if a surface's internal renderer-state mutex is poisoned (i.e. a prior panic
+/// occurred while another thread held the same lock).
 pub fn push_elements_from_surface_tree<R>(
     renderer: &mut R,
     surface: &WlSurface,
@@ -101,28 +106,27 @@ pub fn push_elements_from_surface_tree<R>(
             let mut location = *location;
             let data = states.data_map.get::<RendererSurfaceStateUserData>();
 
-            if let Some(data) = data {
-                if let Some(view) = data.lock().unwrap().view() {
+            data.map_or(TraversalAction::SkipChildren, |data| {
+                let guard = data.lock().unwrap();
+                guard.view().map_or(TraversalAction::SkipChildren, |view| {
                     location += view.offset.to_f64().to_physical(scale);
                     TraversalAction::DoChildren(location)
-                } else {
-                    TraversalAction::SkipChildren
-                }
-            } else {
-                TraversalAction::SkipChildren
-            }
+                })
+            })
         },
         |surface, states, location| {
             let mut location = *location;
             let data = states.data_map.get::<RendererSurfaceStateUserData>();
 
             if let Some(data) = data {
-                let has_view = if let Some(view) = data.lock().unwrap().view() {
+                let guard = data.lock().unwrap();
+                let has_view = guard.view().map_or(false, |view| {
                     location += view.offset.to_f64().to_physical(scale);
                     true
-                } else {
-                    false
-                };
+                });
+                // Drop the lock before calling into `from_surface` below, matching the
+                // original scope: the guard must not be held across that call.
+                drop(guard);
 
                 if has_view {
                     match WaylandSurfaceRenderElement::from_surface(
@@ -133,7 +137,7 @@ pub fn push_elements_from_surface_tree<R>(
                         Err(err) => {
                             warn!("failed to import surface: {}", err);
                         }
-                    };
+                    }
                 }
             }
         },

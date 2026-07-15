@@ -51,6 +51,18 @@ where
     EC: RenderElement<GlesRenderer>,
     EB: RenderElement<GlesRenderer>,
 {
+    /// # Panics
+    ///
+    /// Does not panic in practice: the internal `.unwrap()` on
+    /// `contents_with_blocked_out_bg` is only reached after an `is_some()` check on the
+    /// same value in the same branch condition.
+    //
+    // `ctx` must be taken by value, not by reference: `ctx.renderer` (a `&mut R`) is
+    // moved into whichever one of the three `get_or_init` closures below actually runs,
+    // which requires owning the field rather than reborrowing it. Callers already follow
+    // this codebase's `RenderCtx::r()` reborrow convention (see `layout/tile.rs`) to get
+    // an owned, shorter-lived `RenderCtx` for calls like this one.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn texture(
         &self,
         ctx: RenderCtx<GlesRenderer>,

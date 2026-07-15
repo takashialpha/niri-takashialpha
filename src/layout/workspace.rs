@@ -116,6 +116,11 @@ pub struct Workspace<W: LayoutElement> {
 pub struct OutputId(String);
 
 impl OutputId {
+    /// # Panics
+    ///
+    /// Panics if `output` does not have an [`OutputName`] in its user data, which niri always
+    /// sets when an output is created.
+    #[must_use]
     pub fn matches(&self, output: &Output) -> bool {
         let output_name = output.user_data().get::<OutputName>().unwrap();
         output_name.matches(&self.0)
@@ -128,15 +133,17 @@ static WORKSPACE_ID_COUNTER: IdCounter = IdCounter::new();
 pub struct WorkspaceId(u64);
 
 impl WorkspaceId {
-    fn next() -> WorkspaceId {
-        WorkspaceId(WORKSPACE_ID_COUNTER.next())
+    fn next() -> Self {
+        Self(WORKSPACE_ID_COUNTER.next())
     }
 
-    pub fn get(self) -> u64 {
+    #[must_use]
+    pub const fn get(self) -> u64 {
         self.0
     }
 
-    pub fn specific(id: u64) -> Self {
+    #[must_use]
+    pub const fn specific(id: u64) -> Self {
         Self(id)
     }
 }
@@ -192,6 +199,11 @@ pub enum WorkspaceAddWindowTarget<'a, W: LayoutElement> {
 }
 
 impl OutputId {
+    /// # Panics
+    ///
+    /// Panics if `output` does not have an [`OutputName`] in its user data, which niri always
+    /// sets when an output is created.
+    #[must_use]
     pub fn new(output: &Output) -> Self {
         let output_name = output.user_data().get::<OutputName>().unwrap();
         Self(output_name.format_make_model_serial_or_connector())
@@ -205,6 +217,7 @@ impl FloatingActive {
 }
 
 impl<W: LayoutElement> Workspace<W> {
+    #[must_use]
     pub fn new(output: Output, clock: Clock, options: Rc<Options>) -> Self {
         Self::new_with_config(output, None, clock, options)
     }
@@ -218,8 +231,7 @@ impl<W: LayoutElement> Workspace<W> {
         let original_output = config
             .as_ref()
             .and_then(|c| c.open_on_output.clone())
-            .map(OutputId)
-            .unwrap_or(OutputId::new(&output));
+            .map_or_else(|| OutputId::new(&output), OutputId);
 
         let layout_config = config.as_mut().and_then(|c| c.layout.take().map(|x| x.0));
 
@@ -273,6 +285,7 @@ impl<W: LayoutElement> Workspace<W> {
         }
     }
 
+    #[must_use]
     pub fn new_with_config_no_outputs(
         mut config: Option<WorkspaceConfig>,
         clock: Clock,
@@ -337,15 +350,16 @@ impl<W: LayoutElement> Workspace<W> {
         }
     }
 
+    #[must_use]
     pub fn new_no_outputs(clock: Clock, options: Rc<Options>) -> Self {
         Self::new_with_config_no_outputs(None, clock, options)
     }
 
-    pub fn id(&self) -> WorkspaceId {
+    pub const fn id(&self) -> WorkspaceId {
         self.id
     }
 
-    pub fn name(&self) -> Option<&String> {
+    pub const fn name(&self) -> Option<&String> {
         self.name.as_ref()
     }
 
@@ -357,7 +371,7 @@ impl<W: LayoutElement> Workspace<W> {
         self.has_windows() || self.name.is_some()
     }
 
-    pub fn scale(&self) -> smithay::output::Scale {
+    pub const fn scale(&self) -> smithay::output::Scale {
         self.scale
     }
 
@@ -463,7 +477,7 @@ impl<W: LayoutElement> Workspace<W> {
         self.floating.has_window(id)
     }
 
-    pub fn current_output(&self) -> Option<&Output> {
+    pub const fn current_output(&self) -> Option<&Output> {
         self.output.as_ref()
     }
 
@@ -521,6 +535,9 @@ impl<W: LayoutElement> Workspace<W> {
         }
     }
 
+    /// # Panics
+    ///
+    /// Panics if this workspace does not currently have an output assigned.
     pub fn update_output_size(&mut self) {
         let output = self.output.as_ref().unwrap();
         let scale = output.current_scale();
@@ -530,6 +547,9 @@ impl<W: LayoutElement> Workspace<W> {
         self.set_view_size(scale, transform, view_size, working_area);
     }
 
+    // Exact equality is intentional throughout: we want to skip re-layout only when the scale
+    // truly hasn't changed at all, not merely when it's close.
+    #[allow(clippy::float_cmp)]
     fn set_view_size(
         &mut self,
         scale: smithay::output::Scale,
@@ -583,7 +603,7 @@ impl<W: LayoutElement> Workspace<W> {
         }
     }
 
-    pub fn view_size(&self) -> Size<f64, Logical> {
+    pub const fn view_size(&self) -> Size<f64, Logical> {
         self.view_size
     }
 
@@ -597,6 +617,17 @@ impl<W: LayoutElement> Workspace<W> {
         )
     }
 
+    /// # Panics
+    ///
+    /// Panics if `target` is [`WorkspaceAddWindowTarget::NextTo`] and there is no currently
+    /// active window on this workspace.
+    // `WorkspaceAddWindowTarget<W>` derives Copy, but the derive bounds it on `W: Copy` even
+    // though W only ever appears behind a reference (`&'a W::Id`) — so for a non-Copy window
+    // type W (the common case) this is not statically Copy and clippy can't see it's cheap.
+    // The variants only hold a `usize` or a `&W::Id`, so passing by value is already free; taking
+    // a reference instead would require touching every `add_tile` call site across
+    // monitor.rs/layout.rs, several of which share this method name on other types.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn add_tile(
         &mut self,
         mut tile: Tile<W>,
@@ -719,7 +750,7 @@ impl<W: LayoutElement> Workspace<W> {
         }
     }
 
-    fn update_focus_floating_tiling_after_removing(&mut self, removed_from_floating: bool) {
+    const fn update_focus_floating_tiling_after_removing(&mut self, removed_from_floating: bool) {
         if removed_from_floating {
             if self.floating.is_empty() {
                 self.floating_is_active = FloatingActive::No;
@@ -799,17 +830,16 @@ impl<W: LayoutElement> Workspace<W> {
         }
     }
 
-    pub fn resolve_default_height(
+    pub const fn resolve_default_height(
         &self,
         default_height: Option<Option<PresetSize>>,
         is_floating: bool,
     ) -> Option<PresetSize> {
         match default_height {
             Some(Some(height)) => Some(height),
-            Some(None) => None,
             None if is_floating => None,
             // We don't have a global default at the moment.
-            None => None,
+            Some(None) | None => None,
         }
     }
 
@@ -844,6 +874,10 @@ impl<W: LayoutElement> Workspace<W> {
         size
     }
 
+    /// # Panics
+    ///
+    /// Panics if `window` is an X11 window without a toplevel (X11 windows are not supported
+    /// here).
     pub fn configure_new_window(
         &self,
         window: &Window,
@@ -857,6 +891,9 @@ impl<W: LayoutElement> Workspace<W> {
         });
 
         let toplevel = window.toplevel().expect("no x11 support");
+        // `current` borrows from `guard` and is used in the very next statement to build the
+        // tuple, so `guard` cannot be dropped any earlier than it already is here.
+        #[allow(clippy::significant_drop_tightening)]
         let (min_size, max_size) = with_states(toplevel.wl_surface(), |state| {
             let mut guard = state.cached_state.get::<SurfaceCachedState>();
             let current = guard.current();
@@ -895,7 +932,7 @@ impl<W: LayoutElement> Workspace<W> {
                 let rules = window.rules();
                 let border = self.options.layout.border.merged_with(&rules.border);
                 if !border.off {
-                    fixed += border.width * 2.;
+                    fixed = border.width.mul_add(2., fixed);
                 }
 
                 ColumnWidth::Fixed(fixed)
@@ -1096,7 +1133,7 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn consume_or_expel_window_left(&mut self, window: Option<&W::Id>) {
-        if window.map_or(self.floating_is_active.get(), |id| {
+        if window.map_or_else(|| self.floating_is_active.get(), |id| {
             self.floating.has_window(id)
         }) {
             return;
@@ -1105,7 +1142,7 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn consume_or_expel_window_right(&mut self, window: Option<&W::Id>) {
-        if window.map_or(self.floating_is_active.get(), |id| {
+        if window.map_or_else(|| self.floating_is_active.get(), |id| {
             self.floating.has_window(id)
         }) {
             return;
@@ -1157,7 +1194,7 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn center_window(&mut self, id: Option<&W::Id>) {
-        if id.map_or(self.floating_is_active.get(), |id| {
+        if id.map_or_else(|| self.floating_is_active.get(), |id| {
             self.floating.has_window(id)
         }) {
             self.floating.center_window(id);
@@ -1199,7 +1236,7 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn set_window_width(&mut self, window: Option<&W::Id>, change: SizeChange) {
-        if window.map_or(self.floating_is_active.get(), |id| {
+        if window.map_or_else(|| self.floating_is_active.get(), |id| {
             self.floating.has_window(id)
         }) {
             self.floating.set_window_width(window, change, true);
@@ -1209,7 +1246,7 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn set_window_height(&mut self, window: Option<&W::Id>, change: SizeChange) {
-        if window.map_or(self.floating_is_active.get(), |id| {
+        if window.map_or_else(|| self.floating_is_active.get(), |id| {
             self.floating.has_window(id)
         }) {
             self.floating.set_window_height(window, change, true);
@@ -1219,7 +1256,7 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn reset_window_height(&mut self, window: Option<&W::Id>) {
-        if window.map_or(self.floating_is_active.get(), |id| {
+        if window.map_or_else(|| self.floating_is_active.get(), |id| {
             self.floating.has_window(id)
         }) {
             return;
@@ -1228,7 +1265,7 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn toggle_window_width(&mut self, window: Option<&W::Id>, forwards: bool) {
-        if window.map_or(self.floating_is_active.get(), |id| {
+        if window.map_or_else(|| self.floating_is_active.get(), |id| {
             self.floating.has_window(id)
         }) {
             self.floating.toggle_window_width(window, forwards);
@@ -1238,7 +1275,7 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn toggle_window_height(&mut self, window: Option<&W::Id>, forwards: bool) {
-        if window.map_or(self.floating_is_active.get(), |id| {
+        if window.map_or_else(|| self.floating_is_active.get(), |id| {
             self.floating.has_window(id)
         }) {
             self.floating.toggle_window_height(window, forwards);
@@ -1254,6 +1291,10 @@ impl<W: LayoutElement> Workspace<W> {
         self.scrolling.expand_column_to_available_width();
     }
 
+    /// # Panics
+    ///
+    /// Panics if `window` does not belong to this workspace (neither the floating nor the
+    /// scrolling layout has it).
     pub fn set_fullscreen(&mut self, window: &W::Id, is_fullscreen: bool) {
         let mut restore_to_floating = false;
         if self.floating.has_window(window) {
@@ -1310,6 +1351,9 @@ impl<W: LayoutElement> Workspace<W> {
         }
     }
 
+    /// # Panics
+    ///
+    /// Panics if `window` does not belong to this workspace.
     pub fn toggle_fullscreen(&mut self, window: &W::Id) {
         let tile = self
             .tiles()
@@ -1319,6 +1363,10 @@ impl<W: LayoutElement> Workspace<W> {
         self.set_fullscreen(window, !current);
     }
 
+    /// # Panics
+    ///
+    /// Panics if `window` does not belong to this workspace's scrolling layout when it needs to
+    /// be looked up there.
     pub fn set_maximized(&mut self, window: &W::Id, maximize: bool) {
         let mut restore_to_floating = false;
         if self.floating.has_window(window) {
@@ -1370,20 +1418,24 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn toggle_maximized(&mut self, window: &W::Id) {
-        let mut current = false;
-
         // We have to check the column property in case the window is in the scrolling layout and
         // both maximized and fullscreen. In this case, only the column knows whether it's
         // maximized.
         //
         // In the floating layout, windows cannot be maximized.
-        if let Some(col) = self.scrolling.columns().find(|col| col.contains(window)) {
-            current = col.is_pending_maximized();
-        }
+        let current = self
+            .scrolling
+            .columns()
+            .find(|col| col.contains(window))
+            .is_some_and(|col| col.is_pending_maximized());
 
         self.set_maximized(window, !current);
     }
 
+    /// # Panics
+    ///
+    /// Panics if `id` (or, when `id` is `None`, the active window) does not currently belong to
+    /// this workspace.
     pub fn toggle_window_floating(&mut self, id: Option<&W::Id>) {
         let active_id = self.active_window().map(|win| win.id().clone());
         let target_is_active = id.is_none_or(|id| Some(id) == active_id.as_ref());
@@ -1445,7 +1497,7 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn set_window_floating(&mut self, id: Option<&W::Id>, floating: bool) {
-        if id.map_or(self.floating_is_active.get(), |id| {
+        if id.map_or_else(|| self.floating_is_active.get(), |id| {
             self.floating.has_window(id)
         }) == floating
         {
@@ -1483,6 +1535,10 @@ impl<W: LayoutElement> Workspace<W> {
         };
     }
 
+    /// # Panics
+    ///
+    /// Panics if `id` is `Some` but does not belong to this workspace's scrolling layout when it
+    /// needs to be looked up there.
     pub fn move_floating_window(
         &mut self,
         id: Option<&W::Id>,
@@ -1490,7 +1546,9 @@ impl<W: LayoutElement> Workspace<W> {
         y: PositionChange,
         animate: bool,
     ) {
-        if id.map_or(self.floating_is_active.get(), |id| {
+        const MAX_F: f64 = 10000.;
+
+        if id.map_or_else(|| self.floating_is_active.get(), |id| {
             self.floating.has_window(id)
         }) {
             self.floating.move_window(id, x, y, animate);
@@ -1531,32 +1589,30 @@ impl<W: LayoutElement> Workspace<W> {
             let available_height = working_area.size.h;
             let working_area_loc = working_area.loc;
 
-            const MAX_F: f64 = 10000.;
-
             match x {
                 PositionChange::SetFixed(x) => pos.x = x + working_area_loc.x,
                 PositionChange::SetProportion(prop) => {
                     let prop = (prop / 100.).clamp(0., MAX_F);
-                    pos.x = available_width * prop + working_area_loc.x;
+                    pos.x = available_width.mul_add(prop, working_area_loc.x);
                 }
                 PositionChange::AdjustFixed(x) => pos.x += x,
                 PositionChange::AdjustProportion(prop) => {
                     let current_prop = (pos.x - working_area_loc.x) / available_width.max(1.);
                     let prop = (current_prop + prop / 100.).clamp(0., MAX_F);
-                    pos.x = available_width * prop + working_area_loc.x;
+                    pos.x = available_width.mul_add(prop, working_area_loc.x);
                 }
             }
             match y {
                 PositionChange::SetFixed(y) => pos.y = y + working_area_loc.y,
                 PositionChange::SetProportion(prop) => {
                     let prop = (prop / 100.).clamp(0., MAX_F);
-                    pos.y = available_height * prop + working_area_loc.y;
+                    pos.y = available_height.mul_add(prop, working_area_loc.y);
                 }
                 PositionChange::AdjustFixed(y) => pos.y += y,
                 PositionChange::AdjustProportion(prop) => {
                     let current_prop = (pos.y - working_area_loc.y) / available_height.max(1.);
                     let prop = (current_prop + prop / 100.).clamp(0., MAX_F);
-                    pos.y = available_height * prop + working_area_loc.y;
+                    pos.y = available_height.mul_add(prop, working_area_loc.y);
                 }
             }
 
@@ -1649,7 +1705,7 @@ impl<W: LayoutElement> Workspace<W> {
         let floating_focus_ring = focus_ring && self.floating_is_active();
         self.floating
             .render(ctx, view_rect, floating_focus_ring, &mut |elem| {
-                push(elem.into())
+                push(elem.into());
             });
     }
 
@@ -1807,7 +1863,7 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn is_urgent(&self) -> bool {
-        self.windows().any(|win| win.is_urgent())
+        self.windows().any(super::LayoutElement::is_urgent)
     }
 
     pub fn activate_window(&mut self, window: &W::Id) -> bool {
@@ -1829,8 +1885,7 @@ impl<W: LayoutElement> Workspace<W> {
         } else if self.scrolling.activate_window(window) {
             self.floating_is_active = match self.floating_is_active {
                 FloatingActive::No => FloatingActive::No,
-                FloatingActive::NoButRaised => FloatingActive::NoButRaised,
-                FloatingActive::Yes => FloatingActive::NoButRaised,
+                FloatingActive::NoButRaised | FloatingActive::Yes => FloatingActive::NoButRaised,
             };
             true
         } else {
@@ -1949,11 +2004,11 @@ impl<W: LayoutElement> Workspace<W> {
         self.floating.logical_to_size_frac(logical_pos)
     }
 
-    pub fn working_area(&self) -> Rectangle<f64, Logical> {
+    pub const fn working_area(&self) -> Rectangle<f64, Logical> {
         self.working_area
     }
 
-    pub fn layout_config(&self) -> Option<&niri_config::LayoutPart> {
+    pub const fn layout_config(&self) -> Option<&niri_config::LayoutPart> {
         self.layout_config.as_ref()
     }
 }

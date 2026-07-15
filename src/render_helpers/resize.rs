@@ -21,6 +21,7 @@ pub struct ResizeRenderElement(ShaderRenderElement);
 
 impl ResizeRenderElement {
     #[allow(clippy::too_many_arguments)]
+    #[must_use]
     pub fn new(
         area: Rectangle<f64, Logical>,
         scale: Scale<f64>,
@@ -193,6 +194,11 @@ impl RenderElement<GlesRenderer> for ResizeRenderElement {
 }
 
 impl<'render> RenderElement<TtyRenderer<'render>> for ResizeRenderElement {
+    // `frame`'s GLES-frame guard is used on the very next line and the function returns
+    // right after; there is no later code it could be held across, so an explicit early
+    // `drop()` would fire at the same point as the implicit end-of-scope drop already
+    // does.
+    #[allow(clippy::significant_drop_tightening)]
     fn draw(
         &self,
         frame: &mut TtyFrame<'_, '_, '_>,

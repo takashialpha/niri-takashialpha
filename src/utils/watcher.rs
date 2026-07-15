@@ -52,6 +52,9 @@ enum CheckResult {
 }
 
 impl Watcher {
+    /// # Panics
+    ///
+    /// Panics if spawning the background watcher thread fails.
     pub fn new(
         path: ConfigPath,
         includes: Vec<PathBuf>,
@@ -151,10 +154,7 @@ impl WatcherInner {
 
     pub fn check(&mut self) -> CheckResult {
         if let Ok(new_props) = Props::from_config_path(&self.path) {
-            if self.last_props.as_ref() != Some(&new_props) {
-                self.last_props = Some(new_props);
-                CheckResult::Changed
-            } else {
+            if self.last_props.as_ref() == Some(&new_props) {
                 for (path, last_props) in &mut self.includes {
                     let new_props = Props::from_path(path).ok();
 
@@ -166,6 +166,9 @@ impl WatcherInner {
                 }
 
                 CheckResult::Unchanged
+            } else {
+                self.last_props = Some(new_props);
+                CheckResult::Changed
             }
         } else {
             CheckResult::Missing
@@ -200,7 +203,7 @@ pub fn setup(state: &mut State, config_path: &ConfigPath, includes: Vec<PathBuf>
         .event_loop
         .insert_source(
             rx,
-            |event: calloop::channel::Event<Result<Config, ()>>, _, state| match event {
+            |event: calloop::channel::Event<Result<Config, ()>>, (), state| match event {
                 calloop::channel::Event::Msg(config) => {
                     let failed = config.is_err();
                     state.reload_config(config);

@@ -1,6 +1,6 @@
-//! VBlank throttling.
+//! `VBlank` throttling.
 //!
-//! Some buggy drivers deliver VBlanks way earlier than necessary. This helper throttles the VBlank
+//! Some buggy drivers deliver `VBlanks` way earlier than necessary. This helper throttles the `VBlank`
 //! in such cases to avoid tearing and to get more consistent timings.
 
 use std::time::Duration;
@@ -20,7 +20,8 @@ pub struct VBlankThrottle {
 }
 
 impl VBlankThrottle {
-    pub fn new(event_loop: LoopHandle<'static, State>, output_name: String) -> Self {
+    #[must_use]
+    pub const fn new(event_loop: LoopHandle<'static, State>, output_name: String) -> Self {
         Self {
             event_loop,
             last_vblank_timestamp: None,
@@ -30,6 +31,10 @@ impl VBlankThrottle {
         }
     }
 
+    /// # Panics
+    ///
+    /// Does not panic: `refresh.checked_sub(passed)` is only reached when
+    /// `passed < refresh / 2`, so `passed < refresh` always holds.
     pub fn throttle(
         &mut self,
         refresh_interval: Option<Duration>,
@@ -52,10 +57,10 @@ impl VBlankThrottle {
                     );
                 }
 
-                let remaining = refresh - passed;
+                let remaining = refresh.checked_sub(passed).unwrap();
                 let token = self
                     .event_loop
-                    .insert_source(Timer::from_duration(remaining), move |_, _, state| {
+                    .insert_source(Timer::from_duration(remaining), move |_, (), state| {
                         call_vblank(state);
                         TimeoutAction::Drop
                     })

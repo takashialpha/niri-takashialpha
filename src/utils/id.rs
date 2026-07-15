@@ -6,6 +6,7 @@ pub struct IdCounter {
 }
 
 impl IdCounter {
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             // Start from 1 to reduce the possibility that some other code that uses these IDs will

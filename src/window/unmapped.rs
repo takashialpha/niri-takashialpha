@@ -76,7 +76,8 @@ pub enum InitialConfigureState {
 
 impl Unmapped {
     /// Wraps a newly created window that hasn't been initially configured yet.
-    pub fn new(window: Window) -> Self {
+    #[must_use]
+    pub const fn new(window: Window) -> Self {
         Self {
             window,
             state: InitialConfigureState::NotConfigured {
@@ -86,10 +87,12 @@ impl Unmapped {
         }
     }
 
-    pub fn needs_initial_configure(&self) -> bool {
+    #[must_use]
+    pub const fn needs_initial_configure(&self) -> bool {
         matches!(self.state, InitialConfigureState::NotConfigured { .. })
     }
 
+    #[must_use]
     pub fn toplevel(&self) -> &ToplevelSurface {
         self.window.toplevel().expect("no X11 support")
     }

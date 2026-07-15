@@ -162,6 +162,11 @@ impl OutputDevice {
         info.name.clone()
     }
 
+    // This walks connectors/planes/CRTCs in the exact order the DRM atomic cleanup requires;
+    // splitting it into smaller functions would just scatter that ordering dependency across
+    // files without reducing complexity, in code that can't be unit-tested without real KMS
+    // hardware.
+    #[allow(clippy::too_many_lines)]
     fn cleanup_mismatching_resources(
         &self,
         should_be_off: &dyn Fn(crtc::Handle, &connector::Info) -> bool,
@@ -370,14 +375,14 @@ impl Tty {
 
         let input_backend = LibinputInputBackend::new(libinput.clone());
         event_loop
-            .insert_source(input_backend, |mut event, _, state| {
+            .insert_source(input_backend, |mut event, (), state| {
                 state.process_libinput_event(&mut event);
                 state.process_input_event(event);
             })
             .unwrap();
 
         event_loop
-            .insert_source(notifier, move |event, _, state| {
+            .insert_source(notifier, move |event, (), state| {
                 state.backend.tty().on_session_event(&mut state.niri, event);
             })
             .unwrap();
@@ -450,7 +455,7 @@ impl Tty {
             }
         } else {
             warn!("primary node is missing, display-only devices may not work");
-        };
+        }
 
         for (device_id, path) in udev.device_list() {
             if device_id == self.primary_node.dev_id() {
@@ -481,7 +486,7 @@ impl Tty {
                     return;
                 }
 
-                self.device_changed(device_id, niri, false)
+                self.device_changed(device_id, niri, false);
             }
             UdevEvent::Removed { device_id } => {
                 if !self.session.is_active() {
@@ -489,7 +494,7 @@ impl Tty {
                     return;
                 }
 
-                self.device_removed(device_id, niri)
+                self.device_removed(device_id, niri);
             }
         }
     }
@@ -719,7 +724,7 @@ impl Tty {
             assert!(self.dmabuf_global.replace(dmabuf_global).is_none());
 
             // Update the dmabuf feedbacks for all surfaces.
-            for (node, device) in self.devices.iter_mut() {
+            for (node, device) in &mut self.devices {
                 for surface in device.surfaces.values_mut() {
                     match surface_dmabuf_feedback(
                         &surface.compositor,
@@ -759,7 +764,7 @@ impl Tty {
                         tty.on_vblank(&mut state.niri, node, crtc, meta);
                     }
                     DrmEvent::Error(error) => warn!("DRM error: {error}"),
-                };
+                }
             })
             .unwrap();
 
@@ -1018,7 +1023,7 @@ impl Tty {
                     niri.event_loop
                         .insert_source(
                             Timer::from_duration(Duration::from_secs(10)),
-                            move |_, _, state| {
+                            move |_, (), state| {
                                 state
                                     .niri
                                     .dmabuf_state
@@ -1174,7 +1179,7 @@ impl Tty {
         let (physical_width, physical_height) = connector.size().unwrap_or((0, 0));
 
         let output = Output::new(
-            connector_name.clone(),
+            connector_name,
             PhysicalProperties {
                 size: (physical_width as i32, physical_height as i32).into(),
                 subpixel: connector.subpixel().into(),
@@ -1224,19 +1229,10 @@ impl Tty {
 
                 let is_ccs = matches!(
                     format.modifier,
-                    Modifier::I915_y_tiled_ccs
-                    // I915_FORMAT_MOD_Yf_TILED_CCS
-                    | Modifier::Unrecognized(0x100000000000005)
-                    | Modifier::I915_y_tiled_gen12_rc_ccs
-                    | Modifier::I915_y_tiled_gen12_mc_ccs
-                    // I915_FORMAT_MOD_Y_TILED_GEN12_RC_CCS_CC
-                    | Modifier::Unrecognized(0x100000000000008)
-                    // I915_FORMAT_MOD_4_TILED_DG2_RC_CCS
-                    | Modifier::Unrecognized(0x10000000000000a)
-                    // I915_FORMAT_MOD_4_TILED_DG2_MC_CCS
-                    | Modifier::Unrecognized(0x10000000000000b)
-                    // I915_FORMAT_MOD_4_TILED_DG2_RC_CCS_CC
-                    | Modifier::Unrecognized(0x10000000000000c)
+                    Modifier::I915_y_tiled_ccs |
+Modifier::Unrecognized(0x100000000000005 | 0x100000000000008 |
+0x10000000000000a | 0x10000000000000b | 0x10000000000000c) |
+Modifier::I915_y_tiled_gen12_rc_ccs | Modifier::I915_y_tiled_gen12_mc_ccs
                 );
 
                 !is_ccs
@@ -1383,7 +1379,7 @@ impl Tty {
             niri.remove_output(&output);
         } else {
             error!("missing output for crtc {crtc:?}");
-        };
+        }
     }
 
     fn on_vblank(
@@ -1489,7 +1485,7 @@ impl Tty {
                 };
 
                 // FIXME: ideally should be monotonically increasing for a surface.
-                let seq = meta.sequence as u64;
+                let seq = u64::from(meta.sequence);
                 let mut flags = wp_presentation_feedback::Kind::Vsync
                     | wp_presentation_feedback::Kind::HwCompletion;
 
@@ -1625,7 +1621,9 @@ impl Tty {
                     niri.send_dmabuf_feedbacks(output, dmabuf_feedback, &res.states);
                 }
 
-                if !res.is_empty {
+                if res.is_empty {
+                    rv = RenderResult::NoDamage;
+                } else {
                     let presentation_feedbacks =
                         niri.take_presentation_feedbacks(output, &res.states);
                     let data = (presentation_feedbacks, target_presentation_time);
@@ -1644,7 +1642,7 @@ impl Tty {
                                 RedrawState::WaitingForEstimatedVBlankAndQueued(token) => {
                                     niri.event_loop.remove(token);
                                 }
-                            };
+                            }
 
                             // We queued this frame successfully, so the current client buffers were
                             // latched. We can send frame callbacks now, since a new client commit
@@ -1658,8 +1656,6 @@ impl Tty {
                             warn!("error queueing frame: {err}");
                         }
                     }
-                } else {
-                    rv = RenderResult::NoDamage;
                 }
             }
             Err(err) => {
@@ -1680,7 +1676,7 @@ impl Tty {
         }
     }
 
-    pub fn suspend(&self) {}
+    pub const fn suspend(&self) {}
 
     pub fn import_dmabuf(&mut self, dmabuf: &Dmabuf) -> bool {
         let mut renderer = match self.gpu_manager.single_renderer(&self.primary_render_node) {
@@ -1852,7 +1848,7 @@ impl Tty {
         let mut to_connect = vec![];
 
         for (&node, device) in &mut self.devices {
-            for (&crtc, surface) in device.surfaces.iter_mut() {
+            for (&crtc, surface) in &mut device.surfaces {
                 let config = self
                     .config
                     .borrow()
@@ -1888,12 +1884,9 @@ impl Tty {
 
                 let (mode, fallback) = match mode {
                     Some(x) => (x, false),
-                    None => match pick_mode(connector, config.mode) {
-                        Some(result) => result,
-                        None => {
-                            warn!("couldn't pick mode for enabled connector");
-                            continue;
-                        }
+                    None => if let Some(result) = pick_mode(connector, config.mode) { result } else {
+                        warn!("couldn't pick mode for enabled connector");
+                        continue;
                     },
                 };
 
@@ -2067,7 +2060,7 @@ impl GammaProps {
         Ok(Self { crtc, gamma_lut })
     }
 
-    /// Resets the GAMMA_LUT to identity by clearing it (blob 0).
+    /// Resets the `GAMMA_LUT` to identity by clearing it (blob 0).
     fn reset_gamma(&self, device: &DrmDevice) -> anyhow::Result<()> {
         device
             .set_property(self.crtc, self.gamma_lut, property::Value::Blob(0).into())
@@ -2173,9 +2166,9 @@ fn find_drm_property(
 }
 
 fn refresh_interval(mode: DrmMode) -> Duration {
-    let clock = mode.clock() as u64;
-    let htotal = mode.hsync().2 as u64;
-    let vtotal = mode.vsync().2 as u64;
+    let clock = u64::from(mode.clock());
+    let htotal = u64::from(mode.hsync().2);
+    let vtotal = u64::from(mode.vsync().2);
 
     let mut numerator = htotal * vtotal * 1_000_000;
     let mut denominator = clock;
@@ -2189,7 +2182,7 @@ fn refresh_interval(mode: DrmMode) -> Duration {
     }
 
     if mode.vscan() > 1 {
-        numerator *= mode.vscan() as u64;
+        numerator *= u64::from(mode.vscan());
     }
 
     let refresh_interval = (numerator + denominator / 2) / denominator;
@@ -2232,7 +2225,7 @@ fn queue_estimated_vblank_timer(
     let timer = Timer::from_duration(duration);
     let token = niri
         .event_loop
-        .insert_source(timer, move |_, _, data| {
+        .insert_source(timer, move |_, (), data| {
             data.backend
                 .tty()
                 .on_estimated_vblank_timer(&mut data.niri, output.clone());
@@ -2284,7 +2277,7 @@ pub fn calculate_drm_mode_from_modeline(modeline: &Modeline) -> anyhow::Result<D
     // Calculated as documented in the CVT 1.2 standard:
     // https://app.box.com/s/vcocw3z73ta09txiskj7cnk6289j356b/file/93518784646
     let vrefresh_hertz = (pixel_clock_kilo_hertz * 1000.0)
-        / (modeline.htotal as u64 * modeline.vtotal as u64) as f64;
+        / (u64::from(modeline.htotal) * u64::from(modeline.vtotal)) as f64;
     ensure!(
         vrefresh_hertz.is_finite(),
         "calculated refresh rate is not finite"
@@ -2326,14 +2319,15 @@ pub fn calculate_drm_mode_from_modeline(modeline: &Modeline) -> anyhow::Result<D
     }))
 }
 
+#[must_use]
 pub fn calculate_mode_cvt(width: u16, height: u16, refresh: f64) -> DrmMode {
     // Cross-checked with sway's implementation:
     // https://gitlab.freedesktop.org/wlroots/wlroots/-/blob/22528542970687720556035790212df8d9bb30bb/backend/drm/util.c#L251
 
     let options = libdisplay_info::cvt::Options {
         red_blank_ver: libdisplay_info::cvt::ReducedBlankingVersion::None,
-        h_pixels: width as i32,
-        v_lines: height as i32,
+        h_pixels: i32::from(width),
+        v_lines: i32::from(height),
         ip_freq_rqd: refresh,
 
         // Defaults
@@ -2417,9 +2411,8 @@ fn pick_mode(
                 let custom_mode =
                     calculate_mode_cvt(target_mode.width, target_mode.height, refresh);
                 return Some((custom_mode, false));
-            } else {
-                warn!("ignoring custom mode without refresh rate");
             }
+            warn!("ignoring custom mode without refresh rate");
         }
 
         let refresh = target_mode.refresh.map(|r| (r * 1000.).round() as i32);
@@ -2543,7 +2536,7 @@ impl<'a> ConnectorProperties<'a> {
                 2 => Ok(Transform::_90),
                 // "Right Side Up"
                 3 => Ok(Transform::_270),
-                _ => bail!("panel orientation has invalid value: {:?}", val),
+                _ => bail!("panel orientation has invalid value: {val:?}"),
             },
             _ => bail!("panel orientation has wrong value type"),
         }
@@ -2639,7 +2632,7 @@ fn set_connector_properties(
     }
 }
 
-/// Resets the gamma to identity via the legacy DRM API (fallback when atomic GAMMA_LUT is
+/// Resets the gamma to identity via the legacy DRM API (fallback when atomic `GAMMA_LUT` is
 /// unavailable).
 pub fn reset_gamma_for_crtc(device: &DrmDevice, crtc: crtc::Handle) -> anyhow::Result<()> {
     let info = device.get_crtc(crtc).context("error getting crtc info")?;
@@ -2687,9 +2680,9 @@ fn make_output_name(
         .ok();
     OutputName {
         connector: connector_name,
-        make: info.as_ref().and_then(|info| info.make()),
-        model: info.as_ref().and_then(|info| info.model()),
-        serial: info.as_ref().and_then(|info| info.serial()),
+        make: info.as_ref().and_then(libdisplay_info::info::Info::make),
+        model: info.as_ref().and_then(libdisplay_info::info::Info::model),
+        serial: info.as_ref().and_then(libdisplay_info::info::Info::serial),
     }
 }
 
@@ -2698,7 +2691,7 @@ fn make_output_name(
 /// # Safety
 ///
 /// This function must be called before libinput iterates through the devices, i.e. before
-/// libinput_udev_assign_seat() or the first call to libinput_path_add_device().
+/// `libinput_udev_assign_seat()` or the first call to `libinput_path_add_device()`.
 unsafe fn init_libinput_plugin_system(libinput: &Libinput) {
     unsafe {
         use std::ffi::{CString, c_char, c_int};

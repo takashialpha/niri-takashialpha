@@ -38,7 +38,7 @@ impl<T: Texture> TextureBuffer<T> {
         transform: Transform,
         opaque_regions: Vec<Rectangle<i32, Buffer>>,
     ) -> Self {
-        TextureBuffer {
+        Self {
             id: Id::new(),
             commit_counter: CommitCounter::default(),
             renderer_context_id: renderer.context_id(),
@@ -49,6 +49,9 @@ impl<T: Texture> TextureBuffer<T> {
         }
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the renderer fails to import `data` as a texture.
     #[allow(clippy::too_many_arguments)]
     pub fn from_memory<R: Renderer<TextureId = T> + ImportMem>(
         renderer: &mut R,
@@ -61,7 +64,7 @@ impl<T: Texture> TextureBuffer<T> {
         opaque_regions: Vec<Rectangle<i32, Buffer>>,
     ) -> Result<Self, R::Error> {
         let texture = renderer.import_memory(data, format, size.into(), flipped)?;
-        Ok(TextureBuffer::from_texture(
+        Ok(Self::from_texture(
             renderer,
             texture,
             scale,
@@ -70,6 +73,9 @@ impl<T: Texture> TextureBuffer<T> {
         ))
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the renderer fails to import `buffer`'s data as a texture.
     pub fn from_memory_buffer<R: Renderer<TextureId = T> + ImportMem>(
         renderer: &mut R,
         buffer: &MemoryBuffer,
@@ -86,11 +92,11 @@ impl<T: Texture> TextureBuffer<T> {
         )
     }
 
-    pub fn texture(&self) -> &T {
+    pub const fn texture(&self) -> &T {
         &self.texture
     }
 
-    pub fn texture_scale(&self) -> Scale<f64> {
+    pub const fn texture_scale(&self) -> Scale<f64> {
         self.scale
     }
 
@@ -98,7 +104,7 @@ impl<T: Texture> TextureBuffer<T> {
         self.scale = scale.into();
     }
 
-    pub fn set_texture_transform(&mut self, transform: Transform) {
+    pub const fn set_texture_transform(&mut self, transform: Transform) {
         self.transform = transform;
     }
 }
@@ -121,7 +127,7 @@ impl<T: Texture> TextureRenderElement<T> {
         size: Option<Size<f64, Logical>>,
         kind: Kind,
     ) -> Self {
-        TextureRenderElement {
+        Self {
             buffer,
             location: location.into(),
             alpha,
@@ -131,7 +137,7 @@ impl<T: Texture> TextureRenderElement<T> {
         }
     }
 
-    pub fn buffer(&self) -> &TextureBuffer<T> {
+    pub const fn buffer(&self) -> &TextureBuffer<T> {
         &self.buffer
     }
 }
@@ -168,15 +174,13 @@ impl<T: Texture> Element for TextureRenderElement<T> {
     }
 
     fn src(&self) -> Rectangle<f64, Buffer> {
-        self.src
-            .map(|src| {
+        self.src.map_or_else(|| Rectangle::from_size(self.buffer.texture.size()).to_f64(), |src| {
                 src.to_buffer(
                     self.buffer.scale,
                     self.buffer.transform,
                     &self.buffer.logical_size(),
                 )
             })
-            .unwrap_or_else(|| Rectangle::from_size(self.buffer.texture.size()).to_f64())
     }
 
     fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {

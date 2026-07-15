@@ -5,6 +5,7 @@ pub struct RubberBand {
 }
 
 impl RubberBand {
+    #[must_use]
     pub fn band(&self, x: f64) -> f64 {
         let c = self.stiffness;
         let d = self.limit;
@@ -12,13 +13,15 @@ impl RubberBand {
         (1. - (1. / (x * c / d + 1.))) * d
     }
 
+    #[must_use]
     pub fn derivative(&self, x: f64) -> f64 {
         let c = self.stiffness;
         let d = self.limit;
 
-        c * d * d / (c * x + d).powi(2)
+        c * d * d / c.mul_add(x, d).powi(2)
     }
 
+    #[must_use]
     pub fn clamp(&self, min: f64, max: f64, x: f64) -> f64 {
         let clamped = x.clamp(min, max);
         let sign = if x < clamped { -1. } else { 1. };
@@ -27,6 +30,7 @@ impl RubberBand {
         clamped + sign * self.band(diff)
     }
 
+    #[must_use]
     pub fn clamp_derivative(&self, min: f64, max: f64, x: f64) -> f64 {
         if min <= x && x <= max {
             return 1.;

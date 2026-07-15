@@ -51,7 +51,7 @@ impl SeatHandler for State {
     type PointerFocus = WlSurface;
     type TouchFocus = WlSurface;
 
-    fn seat_state(&mut self) -> &mut SeatState<State> {
+    fn seat_state(&mut self) -> &mut SeatState<Self> {
         &mut self.niri.seat_state
     }
 
@@ -305,7 +305,7 @@ impl DmabufHandler for State {
         notifier: ImportNotifier,
     ) {
         if self.backend.import_dmabuf(&dmabuf) {
-            let _ = notifier.successful::<State>();
+            let _ = notifier.successful::<Self>();
         } else {
             notifier.failed();
         }

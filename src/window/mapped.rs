@@ -137,23 +137,23 @@ pub struct Mapped {
 
     /// Whether this window is pending to go to windowed (fake) fullscreen.
     ///
-    /// Several places in the layout code assume that is_fullscreen() can flip only on a commit.
-    /// Which is something that we do want to flip when changing is_windowed_fullscreen. Flipping
-    /// it right away would mean remembering to call layout.update_window() after any operation
-    /// that may change is_windowed_fullscreen, which is quite tricky and error-prone, especially
+    /// Several places in the layout code assume that `is_fullscreen()` can flip only on a commit.
+    /// Which is something that we do want to flip when changing `is_windowed_fullscreen`. Flipping
+    /// it right away would mean remembering to call `layout.update_window()` after any operation
+    /// that may change `is_windowed_fullscreen`, which is quite tricky and error-prone, especially
     /// for deeply nested operations.
     ///
     /// It's also not clear what's the best way to go about it. Ideally we'd wait for configure ack
-    /// and commit before "committing" to is_windowed_fullscreen, however, since it's not real
+    /// and commit before "committing" to `is_windowed_fullscreen`, however, since it's not real
     /// Wayland state, we may end up with no Wayland state change to configure at all.
     ///
     /// For example: when the window is in real fullscreen, but its non-fullscreen size matches
-    /// its fullscreen size. Then turning on is_windowed_fullscreen will both keep the
+    /// its fullscreen size. Then turning on `is_windowed_fullscreen` will both keep the
     /// fullscreen state, and keep the size (since it matches), resulting in no configure.
     ///
     /// So we work around this by emulating a configure-ack/commit cycle through
-    /// is_pending_windowed_fullscreen and uncommitted_windowed_fullscreen. We ensure we send
-    /// actual configures in all cases through needs_configure. This can result in unnecessary
+    /// `is_pending_windowed_fullscreen` and `uncommitted_windowed_fullscreen`. We ensure we send
+    /// actual configures in all cases through `needs_configure`. This can result in unnecessary
     /// configures (like in the example above), but in most cases there will be a configure
     /// anyway to change the Fullscreen state and/or the size. What this gives us is being able
     /// to synchronize our windowed fullscreen state to the real window updates to avoid any
@@ -203,11 +203,12 @@ static MAPPED_ID_COUNTER: IdCounter = IdCounter::new();
 pub struct MappedId(u64);
 
 impl MappedId {
-    pub fn next() -> MappedId {
-        MappedId(MAPPED_ID_COUNTER.next())
+    pub fn next() -> Self {
+        Self(MAPPED_ID_COUNTER.next())
     }
 
-    pub fn get(self) -> u64 {
+    #[must_use]
+    pub const fn get(self) -> u64 {
         self.0
     }
 }
@@ -227,11 +228,11 @@ enum InteractiveResize {
 }
 
 impl InteractiveResize {
-    fn data(&self) -> InteractiveResizeData {
+    const fn data(&self) -> InteractiveResizeData {
         match self {
-            InteractiveResize::Ongoing(data) => *data,
-            InteractiveResize::WaitingForLastConfigure(data) => *data,
-            InteractiveResize::WaitingForLastCommit { data, .. } => *data,
+            Self::Ongoing(data) => *data,
+            Self::WaitingForLastConfigure(data) => *data,
+            Self::WaitingForLastCommit { data, .. } => *data,
         }
     }
 }
@@ -248,6 +249,7 @@ enum RequestSizeOnce {
 }
 
 impl Mapped {
+    #[must_use]
     pub fn new(window: Window, rules: ResolvedWindowRules, hook: HookId) -> Self {
         let surface = window.wl_surface().expect("no X11 support");
         let credentials = get_credentials_for_surface(&surface);
@@ -326,15 +328,15 @@ impl Mapped {
         self.recompute_window_rules(rules, is_at_startup)
     }
 
-    pub fn set_needs_configure(&mut self) {
+    pub const fn set_needs_configure(&mut self) {
         self.needs_configure = true;
     }
 
-    pub fn id(&self) -> MappedId {
+    pub const fn id(&self) -> MappedId {
         self.id
     }
 
-    pub fn credentials(&self) -> Option<&Credentials> {
+    pub const fn credentials(&self) -> Option<&Credentials> {
         self.credentials.as_ref()
     }
 
@@ -342,27 +344,27 @@ impl Mapped {
         self.offscreen_data.borrow()
     }
 
-    pub fn is_focused(&self) -> bool {
+    pub const fn is_focused(&self) -> bool {
         self.is_focused
     }
 
-    pub fn is_active_in_column(&self) -> bool {
+    pub const fn is_active_in_column(&self) -> bool {
         self.is_active_in_column
     }
 
-    pub fn is_floating(&self) -> bool {
+    pub const fn is_floating(&self) -> bool {
         self.is_floating
     }
 
-    pub fn is_window_cast_target(&self) -> bool {
+    pub const fn is_window_cast_target(&self) -> bool {
         self.is_window_cast_target
     }
 
-    pub fn toggle_ignore_opacity_window_rule(&mut self) {
+    pub const fn toggle_ignore_opacity_window_rule(&mut self) {
         self.ignore_opacity_window_rule = !self.ignore_opacity_window_rule;
     }
 
-    pub fn set_is_focused(&mut self, is_focused: bool) {
+    pub const fn set_is_focused(&mut self, is_focused: bool) {
         if self.is_focused == is_focused {
             return;
         }
@@ -455,15 +457,15 @@ impl Mapped {
         rv
     }
 
-    pub fn last_interactive_resize_start(&self) -> &Cell<Option<(Duration, ResizeEdge)>> {
+    pub const fn last_interactive_resize_start(&self) -> &Cell<Option<(Duration, ResizeEdge)>> {
         &self.last_interactive_resize_start
     }
 
-    pub fn get_focus_timestamp(&self) -> Option<Duration> {
+    pub const fn get_focus_timestamp(&self) -> Option<Duration> {
         self.focus_timestamp
     }
 
-    pub fn set_focus_timestamp(&mut self, timestamp: Duration) {
+    pub const fn set_focus_timestamp(&mut self, timestamp: Duration) {
         self.focus_timestamp.replace(timestamp);
     }
 
@@ -496,11 +498,11 @@ impl Mapped {
         update_tiled_state(self.toplevel(), prefer_no_csd, self.rules.tiled_state);
     }
 
-    pub fn is_windowed_fullscreen(&self) -> bool {
+    pub const fn is_windowed_fullscreen(&self) -> bool {
         self.is_windowed_fullscreen
     }
 
-    pub fn set_urgent(&mut self, urgent: bool) {
+    pub const fn set_urgent(&mut self, urgent: bool) {
         if self.is_focused && urgent {
             return;
         }
@@ -510,7 +512,7 @@ impl Mapped {
         self.need_to_recompute_rules |= changed;
     }
 
-    pub fn is_urgent(&self) -> bool {
+    pub const fn is_urgent(&self) -> bool {
         self.is_urgent
     }
 }
@@ -567,7 +569,7 @@ impl LayoutElement for Mapped {
                 alpha,
                 Kind::ScanoutCandidate,
                 &mut push,
-            )
+            );
         }
     }
 
@@ -704,19 +706,19 @@ impl LayoutElement for Mapped {
             });
             if let Some(current_serial) = current_serial {
                 // God this triple negative...
-                if !current_serial.is_no_older_than(&serial) {
-                    // We have already sent a request for the new size, but the surface has not
-                    // committed in response yet, so we will wait for that commit.
-                    self.request_size_once = Some(RequestSizeOnce::WaitingForCommit(serial));
-                } else {
+                if current_serial.is_no_older_than(&serial) {
                     // We have already sent a request for the new size, and the surface has
                     // committed in response, so we will start using the current size right away.
                     self.request_size_once = Some(RequestSizeOnce::UseWindowSize);
+                } else {
+                    // We have already sent a request for the new size, but the surface has not
+                    // committed in response yet, so we will wait for that commit.
+                    self.request_size_once = Some(RequestSizeOnce::WaitingForCommit(serial));
                 }
             } else {
                 warn!("no current serial; did the surface not ack the initial configure?");
                 self.request_size_once = Some(RequestSizeOnce::UseWindowSize);
-            };
+            }
             return;
         }
 
@@ -777,9 +779,7 @@ impl LayoutElement for Mapped {
             None => with_states(toplevel.wl_surface(), |states| {
                 states
                     .data_map
-                    .get::<KdeDecorationsModeState>()
-                    .map(KdeDecorationsModeState::is_server)
-                    == Some(true)
+                    .get::<KdeDecorationsModeState>().is_some_and(KdeDecorationsModeState::is_server)
             }),
             _ => false,
         }
@@ -787,11 +787,11 @@ impl LayoutElement for Mapped {
 
     fn output_enter(&self, output: &Output) {
         let overlap = Rectangle::from_size(Size::from((i32::MAX, i32::MAX)));
-        self.window.output_enter(output, overlap)
+        self.window.output_enter(output, overlap);
     }
 
     fn output_leave(&self, output: &Output) {
-        self.window.output_leave(output)
+        self.window.output_leave(output);
     }
 
     fn set_offscreen_data(&self, data: Option<OffscreenData>) {
@@ -859,7 +859,10 @@ impl LayoutElement for Mapped {
         with_toplevel_role_and_current(self.toplevel(), |attributes, current_committed| {
             if let Some(server_pending) = &attributes.server_pending {
                 let current_server = attributes.current_server_state();
-                if *server_pending != current_server {
+                if *server_pending == current_server {
+                    // Nothing changed since the last configure.
+                    ConfigureIntent::NotNeeded
+                } else {
                     // Something changed. Check if the only difference is the size, and if the
                     // current server size matches the current committed size.
                     let mut current_server_same_size = current_server.clone();
@@ -895,9 +898,6 @@ impl LayoutElement for Mapped {
                         trace!("something changed other than the size");
                         ConfigureIntent::ShouldSend
                     }
-                } else {
-                    // Nothing changed since the last configure.
-                    ConfigureIntent::NotNeeded
                 }
             } else {
                 // Nothing changed since the last configure.
@@ -924,7 +924,7 @@ impl LayoutElement for Mapped {
 
                 // With UseWindowSize, we do not consider size-only changes, because we will
                 // request the current window size and do not expect it to actually change.
-                if let Some(RequestSizeOnce::UseWindowSize) = self.request_size_once {
+                if matches!(self.request_size_once, Some(RequestSizeOnce::UseWindowSize)) {
                     server_pending.size = current_server_size;
                 }
 
@@ -934,7 +934,7 @@ impl LayoutElement for Mapped {
 
         if has_pending_changes {
             // If needed, replace the pending size with the current window size.
-            if let Some(RequestSizeOnce::UseWindowSize) = self.request_size_once {
+            if matches!(self.request_size_once, Some(RequestSizeOnce::UseWindowSize)) {
                 let size = self.window.geometry().size;
                 toplevel.with_pending_state(|state| {
                     state.size = Some(size);
@@ -967,7 +967,7 @@ impl LayoutElement for Mapped {
                 x => x,
             };
 
-            if let Some(RequestSizeOnce::WaitingForConfigure) = self.request_size_once {
+            if matches!(self.request_size_once, Some(RequestSizeOnce::WaitingForConfigure)) {
                 self.request_size_once = Some(RequestSizeOnce::WaitingForCommit(serial));
             }
 
@@ -976,8 +976,7 @@ impl LayoutElement for Mapped {
             let last_sent_windowed_fullscreen = self
                 .uncommitted_windowed_fullscreen
                 .last()
-                .map(|(_, value)| *value)
-                .unwrap_or(self.is_windowed_fullscreen);
+                .map_or(self.is_windowed_fullscreen, |(_, value)| *value);
             if last_sent_windowed_fullscreen != self.is_pending_windowed_fullscreen {
                 self.uncommitted_windowed_fullscreen
                     .push((serial, self.is_pending_windowed_fullscreen));
@@ -988,8 +987,7 @@ impl LayoutElement for Mapped {
             let last_sent_maximized = self
                 .uncommitted_maximized
                 .last()
-                .map(|(_, value)| *value)
-                .unwrap_or(self.is_maximized);
+                .map_or(self.is_maximized, |(_, value)| *value);
             if last_sent_maximized != self.is_pending_maximized {
                 self.uncommitted_maximized
                     .push((serial, self.is_pending_maximized));
@@ -1079,7 +1077,7 @@ impl LayoutElement for Mapped {
         // In this case self.request_size_once will already flip to UseWindowSize and this branch
         // will return the window's own new size, but the logic below would see an uncommitted size
         // change and return our size.
-        if let Some(RequestSizeOnce::UseWindowSize) = self.request_size_once {
+        if matches!(self.request_size_once, Some(RequestSizeOnce::UseWindowSize)) {
             return current_size;
         }
 

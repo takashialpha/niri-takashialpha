@@ -5,6 +5,8 @@ authors.workspace = true
 license.workspace = true
 edition.workspace = true
 description.workspace = true
+repository.workspace = true
+readme = "../README.md"
 keywords = ["wayland"]
 categories = ["api-bindings", "os"]
 

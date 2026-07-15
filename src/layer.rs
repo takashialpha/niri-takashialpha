@@ -33,8 +33,9 @@ pub struct ResolvedLayerRules {
 }
 
 impl ResolvedLayerRules {
+    #[must_use]
     pub fn compute(rules: &[LayerRule], surface: &LayerSurface, is_at_startup: bool) -> Self {
-        let mut resolved = ResolvedLayerRules::default();
+        let mut resolved = Self::default();
 
         for rule in rules {
             let matches = |m: &Match| {

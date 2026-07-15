@@ -36,7 +36,7 @@ const WORKSPACE_GESTURE_RUBBER_BAND: RubberBand = RubberBand {
     limit: 0.05,
 };
 
-/// Amount of DnD edge scrolling to scroll the height of one workspace.
+/// Amount of `DnD` edge scrolling to scroll the height of one workspace.
 ///
 /// This constant is tied to the default dnd-edge-workspace-switch max-speed setting.
 const WORKSPACE_DND_EDGE_SCROLL_MOVEMENT: f64 = 1500.;
@@ -98,14 +98,14 @@ pub struct WorkspaceSwitchGesture {
     center_idx: usize,
     /// Fractional workspace index where the gesture was started.
     ///
-    /// Can differ from center_idx when starting a gesture in the middle between workspaces, for
+    /// Can differ from `center_idx` when starting a gesture in the middle between workspaces, for
     /// example by "catching" an animation.
     start_idx: f64,
     /// Current, fractional workspace index.
     pub(super) current_idx: f64,
     /// Animation for the extra offset to the current position.
     ///
-    /// For example, if there's a workspace switch during a DnD scroll.
+    /// For example, if there's a workspace switch during a `DnD` scroll.
     animation: Option<Animation>,
     tracker: SwipeTracker,
     /// Whether the gesture is clamped to +-1 workspace around the center.
@@ -169,9 +169,9 @@ pub enum MonitorAddWindowTarget<'a, W: LayoutElement> {
     NextTo(&'a W::Id),
 }
 
-impl<'a, W: LayoutElement> Copy for MonitorAddWindowTarget<'a, W> {}
+impl<W: LayoutElement> Copy for MonitorAddWindowTarget<'_, W> {}
 
-impl<'a, W: LayoutElement> Clone for MonitorAddWindowTarget<'a, W> {
+impl<W: LayoutElement> Clone for MonitorAddWindowTarget<'_, W> {
     fn clone(&self) -> Self {
         *self
     }
@@ -191,26 +191,35 @@ pub type MonitorRenderElement<R> =
     RelocateRenderElement<RescaleRenderElement<MonitorInnerRenderElement<R>>>;
 
 impl WorkspaceSwitch {
+    #[must_use]
     pub fn current_idx(&self) -> f64 {
         match self {
-            WorkspaceSwitch::Animation(anim) => anim.value(),
-            WorkspaceSwitch::Gesture(gesture) => {
-                gesture.current_idx + gesture.animation.as_ref().map_or(0., |anim| anim.value())
+            Self::Animation(anim) => anim.value(),
+            Self::Gesture(gesture) => {
+                gesture.current_idx + gesture.animation.as_ref().map_or(0., super::super::animation::Animation::value)
             }
         }
     }
 
-    pub fn target_idx(&self) -> f64 {
+    #[must_use]
+    pub const fn target_idx(&self) -> f64 {
         match self {
-            WorkspaceSwitch::Animation(anim) => anim.to(),
-            WorkspaceSwitch::Gesture(gesture) => gesture.current_idx,
+            Self::Animation(anim) => anim.to(),
+            Self::Gesture(gesture) => gesture.current_idx,
         }
     }
 
+    // Workspace indices/deltas are always tiny in practice (nowhere near usize::MAX or
+    // f64's 52-bit mantissa limit), so these conversions never lose meaningful precision or sign.
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_sign_loss,
+        clippy::cast_possible_wrap
+    )]
     pub fn offset(&mut self, delta: isize) {
         match self {
-            WorkspaceSwitch::Animation(anim) => anim.offset(delta as f64),
-            WorkspaceSwitch::Gesture(gesture) => {
+            Self::Animation(anim) => anim.offset(delta as f64),
+            Self::Gesture(gesture) => {
                 if delta >= 0 {
                     gesture.center_idx += delta as usize;
                 } else {
@@ -222,15 +231,17 @@ impl WorkspaceSwitch {
         }
     }
 
-    fn is_animation_ongoing(&self) -> bool {
+    const fn is_animation_ongoing(&self) -> bool {
         match self {
-            WorkspaceSwitch::Animation(_) => true,
-            WorkspaceSwitch::Gesture(gesture) => gesture.animation.is_some(),
+            Self::Animation(_) => true,
+            Self::Gesture(gesture) => gesture.animation.is_some(),
         }
     }
 }
 
 impl WorkspaceSwitchGesture {
+    // Workspace count is always tiny in practice, so usize -> f64 never loses precision.
+    #[allow(clippy::cast_precision_loss)]
     fn min_max(&self, workspace_count: usize) -> (f64, f64) {
         if self.is_clamped {
             let min = self.center_idx.saturating_sub(1) as f64;
@@ -248,10 +259,10 @@ impl WorkspaceSwitchGesture {
 }
 
 impl InsertWorkspace {
-    fn existing_id(self) -> Option<WorkspaceId> {
+    const fn existing_id(self) -> Option<WorkspaceId> {
         match self {
-            InsertWorkspace::Existing(id) => Some(id),
-            InsertWorkspace::NewAt(_) => None,
+            Self::Existing(id) => Some(id),
+            Self::NewAt(_) => None,
         }
     }
 }
@@ -259,15 +270,15 @@ impl InsertWorkspace {
 impl OverviewProgress {
     pub fn value(&self) -> f64 {
         match self {
-            OverviewProgress::Animation(anim) => anim.value(),
-            OverviewProgress::Value(v) => *v,
+            Self::Animation(anim) => anim.value(),
+            Self::Value(v) => *v,
         }
     }
 
     pub fn clamped_value(&self) -> f64 {
         match self {
-            OverviewProgress::Animation(anim) => anim.clamped_value(),
-            OverviewProgress::Value(v) => *v,
+            Self::Animation(anim) => anim.clamped_value(),
+            Self::Value(v) => *v,
         }
     }
 }
@@ -282,6 +293,11 @@ impl From<&super::OverviewProgress> for OverviewProgress {
 }
 
 impl<W: LayoutElement> Monitor<W> {
+    /// # Panics
+    ///
+    /// Panics if any workspace in `workspaces` is both empty and unnamed (every workspace passed
+    /// in must either contain windows or have an explicit name).
+    #[must_use]
     pub fn new(
         output: Output,
         mut workspaces: Vec<Workspace<W>>,
@@ -342,8 +358,9 @@ impl<W: LayoutElement> Monitor<W> {
         }
     }
 
+    #[must_use]
     pub fn into_workspaces(mut self) -> Vec<Workspace<W>> {
-        self.workspaces.retain(|ws| ws.has_windows_or_name());
+        self.workspaces.retain(super::workspace::Workspace::has_windows_or_name);
 
         for ws in &mut self.workspaces {
             ws.set_output(None);
@@ -352,22 +369,27 @@ impl<W: LayoutElement> Monitor<W> {
         self.workspaces
     }
 
-    pub fn output(&self) -> &Output {
+    #[must_use]
+    pub const fn output(&self) -> &Output {
         &self.output
     }
 
-    pub fn output_name(&self) -> &String {
+    #[must_use]
+    pub const fn output_name(&self) -> &String {
         &self.output_name
     }
 
-    pub fn active_workspace_idx(&self) -> usize {
+    #[must_use]
+    pub const fn active_workspace_idx(&self) -> usize {
         self.active_workspace_idx
     }
 
+    #[must_use]
     pub fn active_workspace_ref(&self) -> &Workspace<W> {
         &self.workspaces[self.active_workspace_idx]
     }
 
+    #[must_use]
     pub fn find_named_workspace(&self, workspace_name: &str) -> Option<&Workspace<W>> {
         self.workspaces.iter().find(|ws| {
             ws.name
@@ -381,13 +403,15 @@ impl<W: LayoutElement> Monitor<W> {
     }
 
     pub fn windows(&self) -> impl Iterator<Item = &W> {
-        self.workspaces.iter().flat_map(|ws| ws.windows())
+        self.workspaces.iter().flat_map(super::workspace::Workspace::windows)
     }
 
     pub fn has_window(&self, window: &W::Id) -> bool {
         self.windows().any(|win| win.id() == window)
     }
 
+    // Workspace indices are always tiny in practice, so usize -> f64 never loses precision.
+    #[allow(clippy::cast_precision_loss)]
     pub fn add_workspace_at(&mut self, idx: usize) {
         let ws = Workspace::new(
             self.output.clone(),
@@ -419,6 +443,8 @@ impl<W: LayoutElement> Monitor<W> {
         self.activate_workspace_with_anim_config(idx, None);
     }
 
+    // Workspace indices are always tiny in practice, so usize -> f64 never loses precision.
+    #[allow(clippy::cast_precision_loss)]
     pub fn activate_workspace_with_anim_config(
         &mut self,
         idx: usize,
@@ -477,11 +503,9 @@ impl<W: LayoutElement> Monitor<W> {
             }
             MonitorAddWindowTarget::Workspace { id, column_idx } => {
                 let idx = self.workspaces.iter().position(|ws| ws.id() == id).unwrap();
-                let target = if let Some(column_idx) = column_idx {
+                let target = column_idx.map_or(WorkspaceAddWindowTarget::Auto, |column_idx| {
                     WorkspaceAddWindowTarget::NewColumnAt(column_idx)
-                } else {
-                    WorkspaceAddWindowTarget::Auto
-                };
+                });
                 (idx, target)
             }
             MonitorAddWindowTarget::NextTo(win_id) => {
@@ -607,14 +631,13 @@ impl<W: LayoutElement> Monitor<W> {
         }
     }
 
+    /// # Panics
+    ///
+    /// Panics if a workspace switch animation or gesture is currently in progress.
     pub fn clean_up_workspaces(&mut self) {
         assert!(self.workspace_switch.is_none());
 
-        let range_start = if self.options.layout.empty_workspace_above_first {
-            1
-        } else {
-            0
-        };
+        let range_start = usize::from(self.options.layout.empty_workspace_above_first);
         for idx in (range_start..self.workspaces.len() - 1).rev() {
             if self.active_workspace_idx == idx {
                 continue;
@@ -835,6 +858,9 @@ impl<W: LayoutElement> Monitor<W> {
         );
     }
 
+    /// # Panics
+    ///
+    /// Panics if `window` is `Some` but does not belong to any workspace on this monitor.
     pub fn move_to_workspace(
         &mut self,
         window: Option<&W::Id>,
@@ -857,7 +883,7 @@ impl<W: LayoutElement> Monitor<W> {
         let new_id = self.workspaces[new_idx].id();
 
         let activate = activate.map_smart(|| {
-            window.is_none_or(|win| self.active_window().map(|win| win.id()) == Some(win))
+            window.is_none_or(|win| self.active_window().map(super::LayoutElement::id) == Some(win))
         });
 
         let workspace = &mut self.workspaces[source_workspace_idx];
@@ -960,6 +986,13 @@ impl<W: LayoutElement> Monitor<W> {
         self.add_column(new_idx, column, activate);
     }
 
+    // `new` is clamped to [0, workspaces.len() - 1] just above, and workspace counts are always
+    // tiny, so the f64 -> usize cast can never truncate, wrap, or lose sign here.
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
     pub fn switch_workspace_up(&mut self) {
         let new_idx = match &self.workspace_switch {
             // During a DnD scroll, select the prev apparent workspace.
@@ -974,6 +1007,12 @@ impl<W: LayoutElement> Monitor<W> {
         self.activate_workspace(new_idx);
     }
 
+    // See the comment on `switch_workspace_up` above.
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
     pub fn switch_workspace_down(&mut self) {
         let new_idx = match &self.workspace_switch {
             // During a DnD scroll, select the next apparent workspace.
@@ -1015,6 +1054,7 @@ impl<W: LayoutElement> Monitor<W> {
         }
     }
 
+    #[must_use]
     pub fn active_window(&self) -> Option<&W> {
         self.active_workspace_ref().active_window()
     }
@@ -1062,18 +1102,23 @@ impl<W: LayoutElement> Monitor<W> {
     pub(super) fn are_animations_ongoing(&self) -> bool {
         self.workspace_switch
             .as_ref()
-            .is_some_and(|s| s.is_animation_ongoing())
-            || self.workspaces.iter().any(|ws| ws.are_animations_ongoing())
+            .is_some_and(WorkspaceSwitch::is_animation_ongoing)
+            || self.workspaces.iter().any(super::workspace::Workspace::are_animations_ongoing)
     }
 
+    #[must_use]
     pub fn are_transitions_ongoing(&self) -> bool {
         self.workspace_switch.is_some()
             || self
                 .workspaces
                 .iter()
-                .any(|ws| ws.are_transitions_ongoing())
+                .any(super::workspace::Workspace::are_transitions_ongoing)
     }
 
+    /// # Panics
+    ///
+    /// Panics if `self.insert_hint` points at an existing workspace id that is not actually
+    /// present in `self.workspaces`; this should never happen in practice.
     pub fn update_render_elements(&mut self, is_active: bool) {
         let mut insert_hint_ws_geo = None;
         let insert_hint_ws_id = self
@@ -1330,6 +1375,7 @@ impl<W: LayoutElement> Monitor<W> {
     /// Returns the geometry of the active window relative to and clamped to the output.
     ///
     /// During animations, assumes the final view position.
+    #[must_use]
     pub fn active_window_visual_rectangle(&self) -> Option<Rectangle<f64, Logical>> {
         if self.overview_open {
             return None;
@@ -1355,8 +1401,9 @@ impl<W: LayoutElement> Monitor<W> {
         self.workspace_size(zoom) + Size::from((0., gap))
     }
 
+    #[must_use]
     pub fn overview_zoom(&self) -> f64 {
-        let progress = self.overview_progress.as_ref().map(|p| p.value());
+        let progress = self.overview_progress.as_ref().map(OverviewProgress::value);
         compute_overview_zoom(&self.options, progress)
     }
 
@@ -1367,7 +1414,9 @@ impl<W: LayoutElement> Monitor<W> {
 
         // If the view jumped (can happen when going from corrected to uncorrected render_idx, for
         // example when toggling the overview in the middle of an overview animation), then restart
-        // the workspace switch to avoid jumps.
+        // the workspace switch to avoid jumps. Exact equality is intentional: we want to detect
+        // *any* jump, not just ones larger than some arbitrary epsilon.
+        #[allow(clippy::float_cmp)]
         if prev_render_idx != new_render_idx
             && let Some(WorkspaceSwitch::Animation(anim)) = &mut self.workspace_switch
         {
@@ -1376,6 +1425,9 @@ impl<W: LayoutElement> Monitor<W> {
         }
     }
 
+    // Workspace indices are always tiny in practice, so usize -> f64 never loses precision.
+    #[allow(clippy::cast_precision_loss)]
+    #[must_use]
     pub fn workspace_render_idx(&self) -> f64 {
         // If workspace switch and overview progress are matching animations, then compute a
         // correction term to make the movement appear monotonic.
@@ -1435,19 +1487,18 @@ impl<W: LayoutElement> Monitor<W> {
             let zoom = self.overview_zoom();
             let ws_height_with_gap = self.workspace_size_with_gap(zoom).h;
 
-            let first_ws_y = -switch_anim.value() * from_ws_height_with_gap
-                + switch_anim.to() * (from_ws_height_with_gap - ws_height_with_gap);
+            let first_ws_y = switch_anim.to().mul_add(from_ws_height_with_gap - ws_height_with_gap, -switch_anim.value() * from_ws_height_with_gap);
 
             return -first_ws_y / ws_height_with_gap;
-        };
-
-        if let Some(switch) = &self.workspace_switch {
-            switch.current_idx()
-        } else {
-            self.active_workspace_idx as f64
         }
+
+        self.workspace_switch
+            .as_ref()
+            .map_or(self.active_workspace_idx as f64, WorkspaceSwitch::current_idx)
     }
 
+    // Workspace count/indices are always tiny in practice, so usize -> f64 never loses precision.
+    #[allow(clippy::cast_precision_loss)]
     pub fn workspaces_render_geo(&self) -> impl Iterator<Item = Rectangle<f64, Logical>> {
         let scale = self.scale.fractional_scale();
         let zoom = self.overview_zoom();
@@ -1466,7 +1517,7 @@ impl<W: LayoutElement> Monitor<W> {
 
         // Return position for one-past-last workspace too.
         (0..=self.workspaces.len()).map(move |idx| {
-            let y = first_ws_y + idx as f64 * ws_height_with_gap;
+            let y = (idx as f64).mul_add(ws_height_with_gap, first_ws_y);
             let loc = Point::from((0., y)) + static_offset;
 
             // Even though all components that go into loc are rounded to physical pixels, the
@@ -1513,6 +1564,7 @@ impl<W: LayoutElement> Monitor<W> {
             .filter(move |(_ws, geo)| !cull || geo.intersection(output_geo).is_some())
     }
 
+    #[must_use]
     pub fn workspace_under(
         &self,
         pos_within_output: Point<f64, Logical>,
@@ -1528,6 +1580,7 @@ impl<W: LayoutElement> Monitor<W> {
         Some((ws, geo))
     }
 
+    #[must_use]
     pub fn workspace_under_narrow(
         &self,
         pos_within_output: Point<f64, Logical>,
@@ -1536,6 +1589,7 @@ impl<W: LayoutElement> Monitor<W> {
             .find_map(|(ws, geo)| geo.contains(pos_within_output).then_some(ws))
     }
 
+    #[must_use]
     pub fn window_under(&self, pos_within_output: Point<f64, Logical>) -> Option<(&W, HitType)> {
         let (ws, geo) = self.workspace_under(pos_within_output)?;
 
@@ -1552,6 +1606,7 @@ impl<W: LayoutElement> Monitor<W> {
         }
     }
 
+    #[must_use]
     pub fn resize_edges_under(&self, pos_within_output: Point<f64, Logical>) -> Option<ResizeEdge> {
         if self.overview_progress.is_some() {
             return None;
@@ -1610,6 +1665,7 @@ impl<W: LayoutElement> Monitor<W> {
         (InsertWorkspace::NewAt(last_idx + 1), dummy)
     }
 
+    #[must_use]
     pub fn render_above_top_layer(&self) -> bool {
         // Render above the top layer only if the view is stationary.
         if self.workspace_switch.is_some() || self.overview_progress.is_some() {
@@ -1652,7 +1708,8 @@ impl<W: LayoutElement> Monitor<W> {
         push: &mut dyn FnMut(MonitorRenderElement<R>),
     ) {
         let scale = self.scale.fractional_scale();
-        // Ceil the height in physical pixels.
+        // Ceil the height in physical pixels. Output sizes are always far below i32::MAX.
+        #[allow(clippy::cast_possible_truncation)]
         let height = (self.view_size.h * scale).ceil() as i32;
 
         // Crop the elements to prevent them overflowing, currently visible during a workspace
@@ -1727,9 +1784,11 @@ impl<W: LayoutElement> Monitor<W> {
         renderer: &mut R,
         push: &mut dyn FnMut(MonitorRenderElement<R>),
     ) {
-        let Some(progress) = self.overview_progress.as_ref().map(|p| p.clamped_value()) else {
+        let Some(progress) = self.overview_progress.as_ref().map(OverviewProgress::clamped_value) else {
             return;
         };
+        // f32 is what the renderer wants for alpha; precision loss on a 0..1 value is harmless.
+        #[allow(clippy::cast_possible_truncation)]
         let alpha = progress.clamp(0., 1.) as f32;
 
         let scale = self.scale.fractional_scale();
@@ -1830,6 +1889,8 @@ impl<W: LayoutElement> Monitor<W> {
         let new_idx = gesture.start_idx + pos;
         let new_idx = rubber_band.clamp(min, max, new_idx);
 
+        // Exact equality is intentional: skip work only when truly nothing changed.
+        #[allow(clippy::float_cmp)]
         if gesture.current_idx == new_idx {
             return Some(false);
         }
@@ -1923,6 +1984,13 @@ impl<W: LayoutElement> Monitor<W> {
         true
     }
 
+    // `new_idx` is clamped to [min, max] (bounded by workspace count) before the f64 -> usize
+    // cast, and workspace counts/indices are always tiny, so these conversions are safe.
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss
+    )]
     pub fn workspace_switch_gesture_end(&mut self) -> bool {
         let Some(WorkspaceSwitch::Gesture(gesture)) = &self.workspace_switch else {
             return false;
@@ -1984,24 +2052,28 @@ impl<W: LayoutElement> Monitor<W> {
         ) {
             // Not a DnD scroll.
             return;
-        };
+        }
 
         self.workspace_switch_gesture_end();
     }
 
-    pub fn scale(&self) -> smithay::output::Scale {
+    #[must_use]
+    pub const fn scale(&self) -> smithay::output::Scale {
         self.scale
     }
 
-    pub fn view_size(&self) -> Size<f64, Logical> {
+    #[must_use]
+    pub const fn view_size(&self) -> Size<f64, Logical> {
         self.view_size
     }
 
-    pub fn working_area(&self) -> Rectangle<f64, Logical> {
+    #[must_use]
+    pub const fn working_area(&self) -> Rectangle<f64, Logical> {
         self.working_area
     }
 
-    pub fn layout_config(&self) -> Option<&niri_config::LayoutPart> {
+    #[must_use]
+    pub const fn layout_config(&self) -> Option<&niri_config::LayoutPart> {
         self.layout_config.as_ref()
     }
 }

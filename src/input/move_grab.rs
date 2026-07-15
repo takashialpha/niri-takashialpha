@@ -66,15 +66,17 @@ impl MoveGrab {
         })
     }
 
+    #[must_use]
     pub fn is_move(&self) -> bool {
         self.gesture == GestureState::Move
     }
 
+    #[must_use]
     pub fn view_offset_output(&self) -> Option<&Output> {
         (self.gesture == GestureState::ViewOffset).then_some(&self.start_output)
     }
 
-    fn on_ungrab(&mut self, data: &mut State) {
+    fn on_ungrab(&self, data: &mut State) {
         let layout = &mut data.niri.layout;
         match self.gesture {
             GestureState::Recognizing => {
@@ -177,7 +179,7 @@ impl MoveGrab {
 
             // Check if the gesture moved far enough to decide.
             let c = self.new_location - self.start_data.location;
-            if c.x * c.x + c.y * c.y >= 8. * 8. {
+            if c.y.mul_add(c.y, c.x * c.x) >= 8. * 8. {
                 let is_floating = data
                     .niri
                     .layout
@@ -365,7 +367,12 @@ impl PointerGrab<State> for MoveGrab {
                 self,
                 data,
                 SERIAL_COUNTER.next_serial(),
-                get_monotonic_time().as_millis() as u32,
+                // Wayland event timestamps are 32-bit milliseconds by protocol design and
+                // are expected to wrap; clients compare them modularly, not absolutely.
+                #[allow(clippy::cast_possible_truncation)]
+                {
+                    get_monotonic_time().as_millis() as u32
+                },
                 true,
             );
         }

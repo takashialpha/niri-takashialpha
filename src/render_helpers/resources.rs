@@ -70,7 +70,7 @@ impl Resources {
             gl.BufferData(
                 ffi::ARRAY_BUFFER,
                 std::mem::size_of_val(vertices) as isize,
-                vertices.as_ptr() as *const _,
+                vertices.as_ptr().cast(),
                 ffi::STATIC_DRAW,
             );
 

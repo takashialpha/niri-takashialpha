@@ -37,7 +37,8 @@ niri_render_elements! {
 }
 
 impl TabIndicator {
-    pub fn new(config: niri_config::TabIndicator) -> Self {
+    #[must_use]
+    pub const fn new(config: niri_config::TabIndicator) -> Self {
         Self {
             shader_locs: Vec::new(),
             shaders: Vec::new(),
@@ -46,7 +47,7 @@ impl TabIndicator {
         }
     }
 
-    pub fn update_config(&mut self, config: niri_config::TabIndicator) {
+    pub const fn update_config(&mut self, config: niri_config::TabIndicator) {
         self.config = config;
     }
 
@@ -64,7 +65,8 @@ impl TabIndicator {
         }
     }
 
-    pub fn are_animations_ongoing(&self) -> bool {
+    #[must_use]
+    pub const fn are_animations_ongoing(&self) -> bool {
         self.open_anim.is_some()
     }
 
@@ -72,6 +74,10 @@ impl TabIndicator {
         self.open_anim = Some(Animation::new(clock, 0., 1., 0., config));
     }
 
+    // `count` is a tab count (always tiny, far below f64's 52-bit mantissa), and `ones_left`
+    // stays within `[0, count)` by construction.
+    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+    #[allow(clippy::cast_sign_loss)]
     fn tab_rects(
         &self,
         area: Rectangle<f64, Logical>,
@@ -99,16 +105,16 @@ impl TabIndicator {
         // Compute px_per_tab before applying the animation to gaps_between in order to avoid it
         // growing and shrinking over the duration of the animation.
         let pixel = 1. / scale;
-        let shortest_length = count as f64 * (pixel + gaps_between) - gaps_between;
+        let shortest_length = (count as f64).mul_add(pixel + gaps_between, -gaps_between);
         let length = f64::max(min_length, shortest_length);
         let px_per_tab = (length + gaps_between) / count as f64 - gaps_between;
 
         let px_per_tab = px_per_tab * progress;
         let gaps_between = round(self.config.gaps_between_tabs * progress);
 
-        let length = count as f64 * (px_per_tab + gaps_between) - gaps_between;
+        let length = (count as f64).mul_add(px_per_tab + gaps_between, -gaps_between);
         let px_per_tab = floor_logical_in_physical_max1(scale, px_per_tab);
-        let floored_length = count as f64 * (px_per_tab + gaps_between) - gaps_between;
+        let floored_length = (count as f64).mul_add(px_per_tab + gaps_between, -gaps_between);
         let mut ones_left = ((length - floored_length) / pixel).round() as usize;
 
         let mut shader_loc = Point::from((-gap - width, round((side - length) / 2.)));
@@ -134,14 +140,14 @@ impl TabIndicator {
 
             match position {
                 TabIndicatorPosition::Left | TabIndicatorPosition::Right => {
-                    shader_loc.y += px_per_tab + gaps_between
+                    shader_loc.y += px_per_tab + gaps_between;
                 }
                 TabIndicatorPosition::Top | TabIndicatorPosition::Bottom => {
-                    shader_loc.x += px_per_tab + gaps_between
+                    shader_loc.x += px_per_tab + gaps_between;
                 }
             }
 
-            let size = match position {
+            let tab_size = match position {
                 TabIndicatorPosition::Left | TabIndicatorPosition::Right => {
                     Size::from((width, px_per_tab))
                 }
@@ -150,11 +156,17 @@ impl TabIndicator {
                 }
             };
 
-            Rectangle::new(loc, size)
+            Rectangle::new(loc, tab_size)
         })
     }
 
+    // Each parameter is independent per-frame render state (enabled flag, area geometry, view
+    // rect, tab count/iterator, active flag, scale) supplied by the caller; grouping them into a
+    // struct would just relocate the same six fields without reducing complexity.
     #[allow(clippy::too_many_arguments)]
+    // Logical-pixel geometry is narrowed to f32 for the border/GL shader; screen dimensions never
+    // approach f32 precision limits.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn update_render_elements(
         &mut self,
         enabled: bool,
@@ -259,7 +271,7 @@ impl TabIndicator {
                 tab.gradient.in_,
                 color_from,
                 color_to,
-                ((tab.gradient.angle as f32) - 90.).to_radians(),
+                (f32::from(tab.gradient.angle) - 90.).to_radians(),
                 Rectangle::from_size(rect.size),
                 0.,
                 radius,
@@ -269,6 +281,7 @@ impl TabIndicator {
         }
     }
 
+    #[must_use]
     pub fn hit(
         &self,
         area: Rectangle<f64, Logical>,
@@ -308,6 +321,7 @@ impl TabIndicator {
     }
 
     /// Extra size occupied by the tab indicator.
+    #[must_use]
     pub fn extra_size(&self, tab_count: usize, scale: f64) -> Size<f64, Logical> {
         if self.config.off
             || !self.config.place_within_column
@@ -331,6 +345,7 @@ impl TabIndicator {
     }
 
     /// Offset of the tabbed content due to space occupied by the tab indicator.
+    #[must_use]
     pub fn content_offset(&self, tab_count: usize, scale: f64) -> Point<f64, Logical> {
         match self.config.position {
             TabIndicatorPosition::Left | TabIndicatorPosition::Top => {
@@ -340,7 +355,8 @@ impl TabIndicator {
         }
     }
 
-    pub fn config(&self) -> niri_config::TabIndicator {
+    #[must_use]
+    pub const fn config(&self) -> niri_config::TabIndicator {
         self.config
     }
 }
@@ -407,6 +423,6 @@ impl TabInfo {
 
         let geometry = Rectangle::new(position, tile.animated_tile_size());
 
-        TabInfo { gradient, geometry }
+        Self { gradient, geometry }
     }
 }

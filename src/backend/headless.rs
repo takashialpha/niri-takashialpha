@@ -29,15 +29,19 @@ pub struct Headless {
 }
 
 impl Headless {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             renderer: None,
-            ipc_outputs: Default::default(),
+            ipc_outputs: Arc::default(),
         }
     }
 
-    pub fn init(&mut self, _niri: &mut Niri) {}
+    pub const fn init(&mut self, _niri: &mut Niri) {}
 
+    /// # Errors
+    ///
+    /// Returns an error if creating the EGL display, context, or renderer fails.
     pub fn add_renderer(&mut self) -> anyhow::Result<()> {
         if self.renderer.is_some() {
             error!("add_renderer: renderer must not already exist");
@@ -58,6 +62,9 @@ impl Headless {
         Ok(())
     }
 
+    /// # Panics
+    ///
+    /// Panics if the internal IPC outputs mutex is poisoned.
     pub fn add_output(&mut self, niri: &mut Niri, n: u8, size: (u16, u16)) {
         let connector = format!("headless-{n}");
         let make = "niri".to_string();
@@ -114,6 +121,7 @@ impl Headless {
         niri.add_output(output, None);
     }
 
+    #[must_use]
     pub fn seat_name(&self) -> String {
         "headless".to_owned()
     }
@@ -125,6 +133,10 @@ impl Headless {
         self.renderer.as_mut().map(f)
     }
 
+    /// # Panics
+    ///
+    /// Panics if `output` has no registered output state, or if its redraw state is anything
+    /// other than [`RedrawState::Queued`].
     pub fn render(&mut self, niri: &mut Niri, output: &Output) -> RenderResult {
         let states = RenderElementStates::default();
         let mut presentation_feedbacks = niri.take_presentation_feedbacks(output, &states);
@@ -137,11 +149,11 @@ impl Headless {
 
         let output_state = niri.output_state.get_mut(output).unwrap();
         match mem::replace(&mut output_state.redraw_state, RedrawState::Idle) {
-            RedrawState::Idle => unreachable!(),
             RedrawState::Queued => (),
-            RedrawState::WaitingForVBlank { .. } => unreachable!(),
-            RedrawState::WaitingForEstimatedVBlank(_) => unreachable!(),
-            RedrawState::WaitingForEstimatedVBlankAndQueued(_) => unreachable!(),
+            RedrawState::Idle
+            | RedrawState::WaitingForVBlank { .. }
+            | RedrawState::WaitingForEstimatedVBlank(_)
+            | RedrawState::WaitingForEstimatedVBlankAndQueued(_) => unreachable!(),
         }
 
         output_state.frame_callback_sequence = output_state.frame_callback_sequence.wrapping_add(1);
@@ -155,6 +167,7 @@ impl Headless {
         unimplemented!()
     }
 
+    #[must_use]
     pub fn ipc_outputs(&self) -> Arc<Mutex<IpcOutputMap>> {
         self.ipc_outputs.clone()
     }

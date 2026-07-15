@@ -69,11 +69,11 @@ pub struct Keyboard {
 impl Default for Keyboard {
     fn default() -> Self {
         Self {
-            xkb: Default::default(),
+            xkb: Xkb::default(),
             // The defaults were chosen to match wlroots and sway.
             repeat_delay: 600,
             repeat_rate: 25,
-            track_layout: Default::default(),
+            track_layout: TrackLayout::default(),
             numlock: Default::default(),
         }
     }
@@ -117,6 +117,7 @@ pub struct Xkb {
 }
 
 impl Xkb {
+    #[must_use]
     pub fn to_xkb_config(&self) -> XkbConfig<'_> {
         XkbConfig {
             rules: &self.rules,
@@ -148,14 +149,18 @@ pub struct ScrollFactor {
 }
 
 impl ScrollFactor {
+    #[must_use]
     pub fn h_v_factors(&self) -> (f64, f64) {
-        let base_value = self.base.map(|f| f.0).unwrap_or(1.0);
-        let h = self.horizontal.map(|f| f.0).unwrap_or(base_value);
-        let v = self.vertical.map(|f| f.0).unwrap_or(base_value);
+        let base_value = self.base.map_or(1.0, |f| f.0);
+        let h = self.horizontal.map_or(base_value, |f| f.0);
+        let v = self.vertical.map_or(base_value, |f| f.0);
         (h, v)
     }
 }
 
+// Each bool is an independently-toggleable KDL config field (`off`, `natural-scroll`, ...);
+// collapsing them into an enum/bitflags would change the on-disk config schema.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(knus::Decode, Debug, Default, Clone, PartialEq)]
 pub struct Mouse {
     #[knus(child)]
@@ -257,14 +262,15 @@ pub enum ModKey {
 }
 
 impl ModKey {
-    pub fn to_modifiers(&self) -> Modifiers {
+    #[must_use]
+    pub const fn to_modifiers(&self) -> Modifiers {
         match self {
-            ModKey::Ctrl => Modifiers::CTRL,
-            ModKey::Shift => Modifiers::SHIFT,
-            ModKey::Alt => Modifiers::ALT,
-            ModKey::Super => Modifiers::SUPER,
-            ModKey::IsoLevel3Shift => Modifiers::ISO_LEVEL3_SHIFT,
-            ModKey::IsoLevel5Shift => Modifiers::ISO_LEVEL5_SHIFT,
+            Self::Ctrl => Modifiers::CTRL,
+            Self::Shift => Modifiers::SHIFT,
+            Self::Alt => Modifiers::ALT,
+            Self::Super => Modifiers::SUPER,
+            Self::IsoLevel3Shift => Modifiers::ISO_LEVEL3_SHIFT,
+            Self::IsoLevel5Shift => Modifiers::ISO_LEVEL5_SHIFT,
         }
     }
 }

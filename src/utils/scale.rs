@@ -15,6 +15,12 @@ const LARGE_TARGET_DPI: f64 = 110.;
 const LARGE_MIN_SIZE_INCHES: f64 = 20.;
 
 /// Calculates the ideal scale for a monitor.
+///
+/// # Panics
+///
+/// Panics if the difference between a candidate scale and the perfect scale is NaN, which
+/// cannot happen since both values are always finite.
+#[must_use]
 pub fn guess_monitor_scale(size_mm: Size<i32, Raw>, resolution: Size<i32, Physical>) -> f64 {
     if size_mm.w == 0 || size_mm.h == 0 {
         return 1.;
@@ -50,6 +56,7 @@ fn is_valid_for_resolution(resolution: Size<i32, Physical>, scale: f64) -> bool 
 }
 
 /// Adjusts the scale to the closest exactly-representable value.
+#[must_use]
 pub fn closest_representable_scale(scale: f64) -> f64 {
     // Current fractional-scale Wayland protocol can only represent N / 120 scales.
     const FRACTIONAL_SCALE_DENOM: f64 = 120.;

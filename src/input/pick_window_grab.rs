@@ -16,11 +16,12 @@ pub struct PickWindowGrab {
 }
 
 impl PickWindowGrab {
-    pub fn new(start_data: PointerGrabStartData<State>) -> Self {
+    #[must_use]
+    pub const fn new(start_data: PointerGrabStartData<State>) -> Self {
         Self { start_data }
     }
 
-    fn on_ungrab(&mut self, state: &mut State) {
+    fn on_ungrab(state: &mut State) {
         if let Some(tx) = state.niri.pick_window.take() {
             let _ = tx.send_blocking(None);
         }
@@ -168,6 +169,6 @@ impl PointerGrab<State> for PickWindowGrab {
     }
 
     fn unset(&mut self, data: &mut State) {
-        self.on_ungrab(data);
+        Self::on_ungrab(data);
     }
 }

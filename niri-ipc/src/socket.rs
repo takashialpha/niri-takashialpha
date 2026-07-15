@@ -24,6 +24,11 @@ impl Socket {
     ///
     /// This is equivalent to calling [`Self::connect_to`] with the path taken from the
     /// [`SOCKET_PATH_ENV`] environment variable.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if [`SOCKET_PATH_ENV`] is not set, or if connecting to the socket
+    /// at that path fails.
     pub fn connect() -> io::Result<Self> {
         let socket_path = env::var_os(SOCKET_PATH_ENV).ok_or_else(|| {
             io::Error::new(
@@ -35,6 +40,10 @@ impl Socket {
     }
 
     /// Connects to the niri IPC socket at the given path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if connecting to the Unix socket at `path` fails.
     pub fn connect_to(path: impl AsRef<Path>) -> io::Result<Self> {
         let stream = UnixStream::connect(path.as_ref())?;
         let stream = BufReader::new(stream);
@@ -48,8 +57,18 @@ impl Socket {
     /// * `Ok(Ok(response))`: successful [`Response`](crate::Response) from niri
     /// * `Ok(Err(message))`: error message from niri
     /// * `Err(error)`: error communicating with niri
-    pub fn send(&mut self, request: Request) -> io::Result<Reply> {
-        let mut buf = serde_json::to_string(&request).unwrap();
+    ///
+    /// # Panics
+    ///
+    /// Panics if `request` fails to serialize to JSON, which should not happen for any
+    /// value of the [`Request`] type.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing to or reading from the socket fails, or if niri's
+    /// response cannot be deserialized.
+    pub fn send(&mut self, request: &Request) -> io::Result<Reply> {
+        let mut buf = serde_json::to_string(request).unwrap();
         buf.push('\n');
         self.stream.get_mut().write_all(buf.as_bytes())?;
 
@@ -75,7 +94,7 @@ impl Socket {
     /// fn main() -> std::io::Result<()> {
     ///     let mut socket = Socket::connect()?;
     ///
-    ///     let reply = socket.send(Request::EventStream)?;
+    ///     let reply = socket.send(&Request::EventStream)?;
     ///     if matches!(reply, Ok(Response::Handled)) {
     ///         let mut read_event = socket.read_events();
     ///         while let Ok(event) = read_event() {

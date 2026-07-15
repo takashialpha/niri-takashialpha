@@ -104,7 +104,7 @@ impl MergeWith<PopupsRule> for ResolvedPopupsRules {
     }
 }
 
-#[derive(knus::Decode, Debug, Default, Clone, PartialEq)]
+#[derive(knus::Decode, Debug, Default, Clone, PartialEq, Eq)]
 pub struct Match {
     #[knus(property, str)]
     pub app_id: Option<RegexEq>,

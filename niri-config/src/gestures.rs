@@ -97,7 +97,10 @@ impl MergeWith<DndEdgeWorkspaceSwitchPart> for DndEdgeWorkspaceSwitch {
     }
 }
 
-#[derive(knus::Decode, Debug, Default, Clone, Copy, PartialEq)]
+// Each bool is an independently-toggleable KDL config field (`off`, `top-left`, ...);
+// collapsing them into an enum/bitflags would change the on-disk config schema.
+#[allow(clippy::struct_excessive_bools)]
+#[derive(knus::Decode, Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct HotCorners {
     #[knus(child)]
     pub off: bool,

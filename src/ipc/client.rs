@@ -51,7 +51,7 @@ pub fn handle_msg(mut msg: Msg, json: bool) -> anyhow::Result<()> {
 
     let mut socket = Socket::connect().context("error connecting to the niri socket")?;
 
-    let result = socket.send(request);
+    let result = socket.send(&request);
 
     // For errors that can be caused by a version mismatch between the running niri instance and
     // the niri msg CLI, we will try to fetch and compare the versions.
@@ -71,7 +71,7 @@ pub fn handle_msg(mut msg: Msg, json: bool) -> anyhow::Result<()> {
     let compositor_version = if check_compositor_version && !matches!(msg, Msg::Version) {
         // Reconnect to support older niri versions with one request per connection.
         Socket::connect()
-            .and_then(|mut socket| socket.send(Request::Version))
+            .and_then(|mut socket| socket.send(&Request::Version))
             .ok()
     } else {
         None
@@ -157,7 +157,7 @@ pub fn handle_msg(mut msg: Msg, json: bool) -> anyhow::Result<()> {
                 .collect::<Vec<_>>();
             outputs.sort_unstable_by(|a, b| a.0.compare(&b.0));
 
-            for (_name, output) in outputs.into_iter() {
+            for (_name, output) in outputs {
                 print_output(output)?;
                 println!();
             }
@@ -309,7 +309,7 @@ pub fn handle_msg(mut msg: Msg, json: bool) -> anyhow::Result<()> {
             if let Some(color) = color {
                 let [r, g, b] = color.rgb.map(|v| (v.clamp(0., 1.) * 255.).round() as u8);
 
-                println!("Picked color: rgb({r}, {g}, {b})",);
+                println!("Picked color: rgb({r}, {g}, {b})");
                 println!("Hex: #{r:02x}{g:02x}{b:02x}");
             } else {
                 println!("No color was picked.");
@@ -545,12 +545,12 @@ fn print_output(output: Output) -> anyhow::Result<()> {
             qualifier.push("current");
             if is_custom_mode {
                 qualifier.push("custom");
-            };
-        };
+            }
+        }
 
         if is_preferred {
             qualifier.push("preferred");
-        };
+        }
 
         if qualifier.is_empty() {
             String::new()
@@ -569,7 +569,7 @@ fn print_output(output: Output) -> anyhow::Result<()> {
             refresh_rate,
             is_preferred,
         } = mode;
-        let refresh = refresh_rate as f64 / 1000.;
+        let refresh = f64::from(refresh_rate) / 1000.;
 
         // This is technically the current mode, but the println below already specifies that.
         let qualifier = print_qualifier(is_preferred, false, is_custom_mode);
@@ -622,7 +622,7 @@ fn print_output(output: Output) -> anyhow::Result<()> {
             refresh_rate,
             is_preferred,
         } = mode;
-        let refresh = refresh_rate as f64 / 1000.;
+        let refresh = f64::from(refresh_rate) / 1000.;
 
         let is_current = Some(idx) == current_mode;
         let qualifier = print_qualifier(is_preferred, is_current, is_custom_mode);

@@ -513,7 +513,7 @@ impl State {
                 let res = state
                     .niri
                     .event_loop
-                    .insert_source(source, move |_, _, state| {
+                    .insert_source(source, move |(), _, state| {
                         let display_handle = state.niri.display_handle.clone();
                         state
                             .client_compositor_state(&client)

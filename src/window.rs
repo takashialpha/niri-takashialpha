@@ -122,6 +122,7 @@ pub struct ResolvedWindowRules {
 }
 
 impl<'a> WindowRef<'a> {
+    #[must_use]
     pub fn toplevel(self) -> &'a ToplevelSurface {
         match self {
             WindowRef::Unmapped(unmapped) => unmapped.toplevel(),
@@ -129,28 +130,32 @@ impl<'a> WindowRef<'a> {
         }
     }
 
-    pub fn is_focused(self) -> bool {
+    #[must_use]
+    pub const fn is_focused(self) -> bool {
         match self {
             WindowRef::Unmapped(_) => false,
             WindowRef::Mapped(mapped) => mapped.is_focused(),
         }
     }
 
-    pub fn is_urgent(self) -> bool {
+    #[must_use]
+    pub const fn is_urgent(self) -> bool {
         match self {
             WindowRef::Unmapped(_) => false,
             WindowRef::Mapped(mapped) => mapped.is_urgent(),
         }
     }
 
-    pub fn is_active_in_column(self) -> bool {
+    #[must_use]
+    pub const fn is_active_in_column(self) -> bool {
         match self {
             WindowRef::Unmapped(_) => true,
             WindowRef::Mapped(mapped) => mapped.is_active_in_column(),
         }
     }
 
-    pub fn is_floating(self) -> bool {
+    #[must_use]
+    pub const fn is_floating(self) -> bool {
         match self {
             // FIXME: This means you cannot set initial configure rules based on is-floating. I'm
             // not sure there's a good way to support it, since this matcher makes a cycle with the
@@ -165,7 +170,8 @@ impl<'a> WindowRef<'a> {
         }
     }
 
-    pub fn is_window_cast_target(self) -> bool {
+    #[must_use]
+    pub const fn is_window_cast_target(self) -> bool {
         match self {
             WindowRef::Unmapped(_) => false,
             WindowRef::Mapped(mapped) => mapped.is_window_cast_target(),
@@ -174,13 +180,14 @@ impl<'a> WindowRef<'a> {
 }
 
 impl ResolvedWindowRules {
+    #[must_use]
     pub fn compute(rules: &[WindowRule], window: WindowRef, is_at_startup: bool) -> Self {
-        let mut resolved = ResolvedWindowRules::default();
+        let mut resolved = Self::default();
 
         with_toplevel_role(window.toplevel(), |role| {
             // Ensure server_pending like in Smithay's with_pending_state().
             if role.server_pending.is_none() {
-                role.server_pending = Some(role.current_server_state().clone());
+                role.server_pending = Some(role.current_server_state());
             }
 
             let mut open_on_output = None;
@@ -295,13 +302,14 @@ impl ResolvedWindowRules {
                 resolved.popups.merge_with(&rule.popups);
             }
 
-            resolved.open_on_output = open_on_output.map(|x| x.to_owned());
-            resolved.open_on_workspace = open_on_workspace.map(|x| x.to_owned());
+            resolved.open_on_output = open_on_output.map(std::borrow::ToOwned::to_owned);
+            resolved.open_on_workspace = open_on_workspace.map(std::borrow::ToOwned::to_owned);
         });
 
         resolved
     }
 
+    #[must_use]
     pub fn apply_min_size(&self, min_size: Size<i32, Logical>) -> Size<i32, Logical> {
         let mut size = min_size;
 
@@ -315,6 +323,7 @@ impl ResolvedWindowRules {
         size
     }
 
+    #[must_use]
     pub fn apply_max_size(&self, max_size: Size<i32, Logical>) -> Size<i32, Logical> {
         let mut size = max_size;
 
@@ -336,6 +345,7 @@ impl ResolvedWindowRules {
         size
     }
 
+    #[must_use]
     pub fn apply_min_max_size(
         &self,
         min_size: Size<i32, Logical>,
@@ -346,6 +356,7 @@ impl ResolvedWindowRules {
         (min_size, max_size)
     }
 
+    #[must_use]
     pub fn compute_open_floating(&self, toplevel: &ToplevelSurface) -> bool {
         if let Some(res) = self.open_floating {
             return res;

@@ -126,7 +126,7 @@ impl ConfigErrorNotification {
         }
     }
 
-    pub fn are_animations_ongoing(&self) -> bool {
+    pub const fn are_animations_ongoing(&self) -> bool {
         !matches!(self.state, State::Hidden)
     }
 
@@ -150,12 +150,12 @@ impl ConfigErrorNotification {
         let buffer = buffer.clone()?;
 
         let size = buffer.logical_size();
-        let y_range = size.h + f64::from(PADDING) * 2.;
+        let y_range = f64::from(PADDING).mul_add(2., size.h);
 
         let x = (output_size.w - size.w).max(0.) / 2.;
         let y = match &self.state {
             State::Hidden => unreachable!(),
-            State::Showing(anim) | State::Hiding(anim) => -size.h + anim.value() * y_range,
+            State::Showing(anim) | State::Hiding(anim) => anim.value().mul_add(y_range, -size.h),
             State::Shown(_) => f64::from(PADDING) * 2.,
         };
 
@@ -189,7 +189,7 @@ fn render(
              <span face='monospace' bgcolor='#000000'>{path:?}</span>",
         );
         border_color = (0.5, 1., 0.5);
-    };
+    }
 
     let mut font = FontDescription::from_string(FONT);
     font.set_absolute_size(to_physical_precise_round(scale, font.size()));
@@ -245,6 +245,7 @@ fn render(
     Ok(buffer)
 }
 
+#[must_use]
 pub fn error_text(markup: bool) -> String {
     let command = if markup {
         "<span face='monospace' bgcolor='#000000'>niri validate</span>"

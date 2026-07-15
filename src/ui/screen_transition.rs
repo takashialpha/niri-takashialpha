@@ -23,6 +23,7 @@ pub struct ScreenTransition {
 }
 
 impl ScreenTransition {
+    #[must_use]
     pub fn new(
         from_texture: [TextureBuffer<GlesTexture>; 2],
         delay: Duration,
@@ -35,6 +36,7 @@ impl ScreenTransition {
         }
     }
 
+    #[must_use]
     pub fn is_done(&self) -> bool {
         self.start_at + DURATION <= self.clock.now_unadjusted()
     }
@@ -47,6 +49,7 @@ impl ScreenTransition {
         }
     }
 
+    #[must_use]
     pub fn render(&self, target: RenderTarget) -> PrimaryGpuTextureRenderElement {
         // Screen transition ignores animation slowdown.
         let now = self.clock.now_unadjusted();
@@ -54,7 +57,7 @@ impl ScreenTransition {
         let alpha = if self.start_at + DURATION <= now {
             0.
         } else if self.start_at <= now {
-            1. - (now - self.start_at).as_secs_f32() / DURATION.as_secs_f32()
+            1. - now.checked_sub(self.start_at).unwrap().as_secs_f32() / DURATION.as_secs_f32()
         } else {
             1.
         };

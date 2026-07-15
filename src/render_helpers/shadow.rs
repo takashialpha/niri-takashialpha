@@ -40,6 +40,7 @@ struct Parameters {
 
 impl ShadowRenderElement {
     #[allow(clippy::too_many_arguments)]
+    #[must_use]
     pub fn new(
         size: Size<f64, Logical>,
         geometry: Rectangle<f64, Logical>,
@@ -70,20 +71,21 @@ impl ShadowRenderElement {
         rv
     }
 
+    #[must_use]
     pub fn empty() -> Self {
         let inner = ShaderRenderElement::empty(ProgramType::Shadow, Kind::Unspecified);
         Self {
             inner,
             params: Parameters {
-                size: Default::default(),
-                geometry: Default::default(),
-                color: Default::default(),
+                size: Size::default(),
+                geometry: Rectangle::default(),
+                color: Color::default(),
                 sigma: 0.,
-                corner_radius: Default::default(),
+                corner_radius: CornerRadius::default(),
                 scale: 1.,
                 alpha: 1.,
-                window_geometry: Default::default(),
-                window_corner_radius: Default::default(),
+                window_geometry: Rectangle::default(),
+                window_corner_radius: CornerRadius::default(),
             },
         }
     }
@@ -110,9 +112,9 @@ impl ShadowRenderElement {
             geometry,
             color,
             sigma,
-            alpha,
             corner_radius,
             scale,
+            alpha,
             window_geometry,
             window_corner_radius,
         };
@@ -174,11 +176,13 @@ impl ShadowRenderElement {
         );
     }
 
+    #[must_use]
     pub fn with_location(mut self, location: Point<f64, Logical>) -> Self {
         self.inner = self.inner.with_location(location);
         self
     }
 
+    #[must_use]
     pub fn with_alpha(mut self, alpha: f32) -> Self {
         self.inner = self.inner.with_alpha(alpha);
         self
@@ -268,6 +272,11 @@ impl RenderElement<GlesRenderer> for ShadowRenderElement {
 }
 
 impl<'render> RenderElement<TtyRenderer<'render>> for ShadowRenderElement {
+    // `frame`'s GLES-frame guard is used on the very next line and the function returns
+    // right after; there is no later code it could be held across, so an explicit early
+    // `drop()` would fire at the same point as the implicit end-of-scope drop already
+    // does.
+    #[allow(clippy::significant_drop_tightening)]
     fn draw(
         &self,
         frame: &mut TtyFrame<'_, '_, '_>,

@@ -48,6 +48,7 @@ struct Parameters {
 
 impl BorderRenderElement {
     #[allow(clippy::too_many_arguments)]
+    #[must_use]
     pub fn new(
         size: Size<f64, Logical>,
         gradient_area: Rectangle<f64, Logical>,
@@ -82,20 +83,21 @@ impl BorderRenderElement {
         rv
     }
 
+    #[must_use]
     pub fn empty() -> Self {
         let inner = ShaderRenderElement::empty(ProgramType::Border, Kind::Unspecified);
         Self {
             inner,
             params: Parameters {
-                size: Default::default(),
-                gradient_area: Default::default(),
+                size: Size::default(),
+                gradient_area: Rectangle::default(),
                 gradient_format: GradientInterpolation::default(),
-                color_from: Default::default(),
-                color_to: Default::default(),
+                color_from: Color::default(),
+                color_to: Color::default(),
                 angle: 0.,
-                geometry: Default::default(),
+                geometry: Rectangle::default(),
                 border_width: 0.,
-                corner_radius: Default::default(),
+                corner_radius: CornerRadius::default(),
                 scale: 1.,
                 alpha: 1.,
             },
@@ -218,6 +220,7 @@ impl BorderRenderElement {
         );
     }
 
+    #[must_use]
     pub fn with_location(mut self, location: Point<f64, Logical>) -> Self {
         self.inner = self.inner.with_location(location);
         self
@@ -307,6 +310,11 @@ impl RenderElement<GlesRenderer> for BorderRenderElement {
 }
 
 impl<'render> RenderElement<TtyRenderer<'render>> for BorderRenderElement {
+    // `frame`'s GLES-frame guard is used on the very next line and the function returns
+    // right after; there is no later code it could be held across, so an explicit early
+    // `drop()` would fire at the same point as the implicit end-of-scope drop already
+    // does.
+    #[allow(clippy::significant_drop_tightening)]
     fn draw(
         &self,
         frame: &mut TtyFrame<'_, '_, '_>,

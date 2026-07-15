@@ -1,4 +1,5 @@
 use core::f64;
+use std::cell::OnceCell;
 use std::rc::Rc;
 
 use niri_config::utils::MergeWith as _;
@@ -204,7 +205,7 @@ impl<W: LayoutElement> Tile<W> {
             alpha_animation: None,
             interactive_move_offset: Point::from((0., 0.)),
             unmap_snapshot: None,
-            rounded_corner_damage: Default::default(),
+            rounded_corner_damage: RoundedCornerDamage::default(),
             view_size,
             scale,
             clock,
@@ -256,6 +257,18 @@ impl<W: LayoutElement> Tile<W> {
         self.shadow.update_shaders();
     }
 
+    // Single coherent state-transition function driven by the window's sizing-mode change; the
+    // sub-steps (snapshot handling, tile-size interpolation, fullscreen/expanded sub-animations)
+    // share local state and don't have a low-risk split point.
+    #[allow(clippy::too_many_lines)]
+    // `fullscreen_to`/`expanded_to` are always exactly 0. or 1. (set from an `if`/`else` on a
+    // bool), and this checks whether the animation's start point already equals its target so we
+    // can skip starting a redundant sub-animation; exactness here is the intended behavior, not a
+    // precision bug.
+    #[allow(clippy::float_cmp)]
+    // Logical-pixel window/border geometry is narrowed to f32 for the border/GL shader; screen
+    // dimensions never approach f32's precision limits.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn update_window(&mut self) {
         let prev_sizing_mode = self.sizing_mode;
         self.sizing_mode = self.window.sizing_mode();
@@ -270,8 +283,8 @@ impl<W: LayoutElement> Tile<W> {
                 let size_from = resize.size_from;
                 let tile_size_from = resize.tile_size_from;
 
-                size.w = size_from.w + (size.w - size_from.w) * val;
-                size.h = size_from.h + (size.h - size_from.h) * val;
+                size.w = (size.w - size_from.w).mul_add(val, size_from.w);
+                size.h = (size.h - size_from.h).mul_add(val, size_from.h);
 
                 let mut tile_size = animate_from.size;
                 if prev_sizing_mode.is_fullscreen() {
@@ -279,26 +292,22 @@ impl<W: LayoutElement> Tile<W> {
                     tile_size.h = f64::max(tile_size.h, self.view_size.h);
                 } else if prev_sizing_mode.is_normal() && !self.border.is_off() {
                     let width = self.border.width();
-                    tile_size.w += width * 2.;
-                    tile_size.h += width * 2.;
+                    tile_size.w = width.mul_add(2., tile_size.w);
+                    tile_size.h = width.mul_add(2., tile_size.h);
                 }
 
-                tile_size.w = tile_size_from.w + (tile_size.w - tile_size_from.w) * val;
-                tile_size.h = tile_size_from.h + (tile_size.h - tile_size_from.h) * val;
+                tile_size.w = (tile_size.w - tile_size_from.w).mul_add(val, tile_size_from.w);
+                tile_size.h = (tile_size.h - tile_size_from.h).mul_add(val, tile_size_from.h);
 
-                let fullscreen_from = resize
-                    .fullscreen_progress
-                    .map(|anim| anim.clamped_value().clamp(0., 1.))
-                    .unwrap_or(if prev_sizing_mode.is_fullscreen() {
-                        1.
-                    } else {
-                        0.
-                    });
+                let fullscreen_from = resize.fullscreen_progress.map_or_else(
+                    || if prev_sizing_mode.is_fullscreen() { 1. } else { 0. },
+                    |anim| anim.clamped_value().clamp(0., 1.),
+                );
 
-                let expanded_from = resize
-                    .expanded_progress
-                    .map(|anim| anim.clamped_value().clamp(0., 1.))
-                    .unwrap_or(if prev_sizing_mode.is_normal() { 0. } else { 1. });
+                let expanded_from = resize.expanded_progress.map_or_else(
+                    || if prev_sizing_mode.is_normal() { 0. } else { 1. },
+                    |anim| anim.clamped_value().clamp(0., 1.),
+                );
 
                 // Also try to reuse the existing offscreen buffer if we have one.
                 (
@@ -318,8 +327,8 @@ impl<W: LayoutElement> Tile<W> {
                     tile_size.h = f64::max(tile_size.h, self.view_size.h);
                 } else if prev_sizing_mode.is_normal() && !self.border.is_off() {
                     let width = self.border.width();
-                    tile_size.w += width * 2.;
-                    tile_size.h += width * 2.;
+                    tile_size.w = width.mul_add(2., tile_size.w);
+                    tile_size.h = width.mul_add(2., tile_size.h);
                 }
 
                 let fullscreen_from = if prev_sizing_mode.is_fullscreen() {
@@ -452,6 +461,9 @@ impl<W: LayoutElement> Tile<W> {
                 .is_some_and(|alpha| !alpha.anim.is_done())
     }
 
+    // Logical-pixel border/corner-radius geometry is narrowed to f32 for the border/GL shader;
+    // screen dimensions never approach f32's precision limits.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn update_render_elements(&mut self, is_active: bool, view_rect: Rectangle<f64, Logical>) {
         let rules = self.window.rules();
         let animated_tile_size = self.animated_tile_size();
@@ -535,7 +547,7 @@ impl<W: LayoutElement> Tile<W> {
         self.fullscreen_backdrop.resize(animated_tile_size);
     }
 
-    pub fn scale(&self) -> f64 {
+    pub const fn scale(&self) -> f64 {
         self.scale
     }
 
@@ -543,10 +555,10 @@ impl<W: LayoutElement> Tile<W> {
         let mut offset = Point::from((0., 0.));
 
         if let Some(move_) = &self.move_x_animation {
-            offset.x += move_.from * move_.anim.value();
+            offset.x = move_.from.mul_add(move_.anim.value(), offset.x);
         }
         if let Some(move_) = &self.move_y_animation {
-            offset.y += move_.from * move_.anim.value();
+            offset.y = move_.from.mul_add(move_.anim.value(), offset.y);
         }
 
         offset += self.interactive_move_offset;
@@ -582,9 +594,7 @@ impl<W: LayoutElement> Tile<W> {
 
         // Preserve the previous config if ongoing.
         let anim = self.move_x_animation.take().map(|move_| move_.anim);
-        let anim = anim
-            .map(|anim| anim.restarted(1., 0., 0.))
-            .unwrap_or_else(|| Animation::new(self.clock.clone(), 1., 0., 0., config));
+        let anim = anim.map_or_else(|| Animation::new(self.clock.clone(), 1., 0., 0., config), |anim| anim.restarted(1., 0., 0.));
 
         self.move_x_animation = Some(MoveAnimation {
             anim,
@@ -601,9 +611,7 @@ impl<W: LayoutElement> Tile<W> {
 
         // Preserve the previous config if ongoing.
         let anim = self.move_y_animation.take().map(|move_| move_.anim);
-        let anim = anim
-            .map(|anim| anim.restarted(1., 0., 0.))
-            .unwrap_or_else(|| Animation::new(self.clock.clone(), 1., 0., 0., config));
+        let anim = anim.map_or_else(|| Animation::new(self.clock.clone(), 1., 0., 0., config), |anim| anim.restarted(1., 0., 0.));
 
         self.move_y_animation = Some(MoveAnimation {
             anim,
@@ -645,30 +653,35 @@ impl<W: LayoutElement> Tile<W> {
     }
 
     pub fn ensure_alpha_animates_to_1(&mut self) {
-        if let Some(alpha) = &self.alpha_animation
-            && alpha.anim.to() != 1.
-        {
+        // Alpha animation targets in this codebase are always set to exactly 0. or 1.; this
+        // checks against that exact endpoint, not a measured/computed value.
+        #[allow(clippy::float_cmp)]
+        let animates_elsewhere = self
+            .alpha_animation
+            .as_ref()
+            .is_some_and(|alpha| alpha.anim.to() != 1.);
+        if animates_elsewhere {
             // Cancel animation instead of starting a new one because the user likely wants to
             // see the tile right away.
             self.alpha_animation = None;
         }
     }
 
-    pub fn hold_alpha_animation_after_done(&mut self) {
+    pub const fn hold_alpha_animation_after_done(&mut self) {
         if let Some(alpha) = &mut self.alpha_animation {
             alpha.hold_after_done = true;
         }
     }
 
-    pub fn window(&self) -> &W {
+    pub const fn window(&self) -> &W {
         &self.window
     }
 
-    pub fn window_mut(&mut self) -> &mut W {
+    pub const fn window_mut(&mut self) -> &mut W {
         &mut self.window
     }
 
-    pub fn sizing_mode(&self) -> SizingMode {
+    pub const fn sizing_mode(&self) -> SizingMode {
         self.sizing_mode
     }
 
@@ -697,7 +710,7 @@ impl<W: LayoutElement> Tile<W> {
     }
 
     /// Returns `None` if the border is hidden and `Some(width)` if it should be shown.
-    pub fn effective_border_width(&self) -> Option<f64> {
+    pub const fn effective_border_width(&self) -> Option<f64> {
         if !self.sizing_mode.is_normal() {
             return None;
         }
@@ -717,7 +730,12 @@ impl<W: LayoutElement> Tile<W> {
         let expanded_progress = self.expanded_progress();
 
         // Only hide the border when fully expanded to avoid jarring border appearance.
-        if expanded_progress == 1. {
+        // `expanded_progress()` reaches exactly 1. at the end of the expand animation (it's
+        // clamped to `[0., 1.]` and the animation's target is exactly 1.), so this checks against
+        // that exact endpoint rather than a measured value.
+        #[allow(clippy::float_cmp)]
+        let fully_expanded = expanded_progress == 1.;
+        if fully_expanded {
             return None;
         }
 
@@ -766,8 +784,8 @@ impl<W: LayoutElement> Tile<W> {
         }
 
         if let Some(width) = self.effective_border_width() {
-            size.w += width * 2.;
-            size.h += width * 2.;
+            size.w = width.mul_add(2., size.w);
+            size.h = width.mul_add(2., size.h);
         }
 
         size
@@ -785,8 +803,8 @@ impl<W: LayoutElement> Tile<W> {
         }
 
         if let Some(width) = self.effective_border_width() {
-            size.w += width * 2.;
-            size.h += width * 2.;
+            size.w = width.mul_add(2., size.w);
+            size.h = width.mul_add(2., size.h);
         }
 
         size
@@ -816,8 +834,8 @@ impl<W: LayoutElement> Tile<W> {
             let val = resize.anim.value();
             let size_from = resize.size_from.to_f64();
 
-            size.w = f64::max(1., size_from.w + (size.w - size_from.w) * val);
-            size.h = f64::max(1., size_from.h + (size.h - size_from.h) * val);
+            size.w = f64::max(1., (size.w - size_from.w).mul_add(val, size_from.w));
+            size.h = f64::max(1., (size.h - size_from.h).mul_add(val, size_from.h));
             size = size
                 .to_physical_precise_round(self.scale)
                 .to_logical(self.scale);
@@ -833,8 +851,8 @@ impl<W: LayoutElement> Tile<W> {
             let val = resize.anim.value();
             let size_from = resize.tile_size_from.to_f64();
 
-            size.w = f64::max(1., size_from.w + (size.w - size_from.w) * val);
-            size.h = f64::max(1., size_from.h + (size.h - size_from.h) * val);
+            size.w = f64::max(1., (size.w - size_from.w).mul_add(val, size_from.w));
+            size.h = f64::max(1., (size.h - size_from.h).mul_add(val, size_from.h));
             size = size
                 .to_physical_precise_round(self.scale)
                 .to_logical(self.scale);
@@ -898,8 +916,8 @@ impl<W: LayoutElement> Tile<W> {
         // Can't go through effective_border_width() because we might be fullscreen.
         if !self.border.is_off() {
             let width = self.border.width();
-            size.w = f64::max(1., size.w - width * 2.);
-            size.h = f64::max(1., size.h - width * 2.);
+            size.w = f64::max(1., width.mul_add(-2., size.w));
+            size.h = f64::max(1., width.mul_add(-2., size.h));
         }
 
         // The size request has to be i32 unfortunately, due to Wayland. We floor here instead of
@@ -913,35 +931,35 @@ impl<W: LayoutElement> Tile<W> {
         );
     }
 
-    pub fn tile_width_for_window_width(&self, size: f64) -> f64 {
+    pub const fn tile_width_for_window_width(&self, size: f64) -> f64 {
         if self.border.is_off() {
             size
         } else {
-            size + self.border.width() * 2.
+            self.border.width().mul_add(2., size)
         }
     }
 
-    pub fn tile_height_for_window_height(&self, size: f64) -> f64 {
+    pub const fn tile_height_for_window_height(&self, size: f64) -> f64 {
         if self.border.is_off() {
             size
         } else {
-            size + self.border.width() * 2.
+            self.border.width().mul_add(2., size)
         }
     }
 
-    pub fn window_width_for_tile_width(&self, size: f64) -> f64 {
+    pub const fn window_width_for_tile_width(&self, size: f64) -> f64 {
         if self.border.is_off() {
             size
         } else {
-            size - self.border.width() * 2.
+            self.border.width().mul_add(-2., size)
         }
     }
 
-    pub fn window_height_for_tile_height(&self, size: f64) -> f64 {
+    pub const fn window_height_for_tile_height(&self, size: f64) -> f64 {
         if self.border.is_off() {
             size
         } else {
-            size - self.border.width() * 2.
+            self.border.width().mul_add(-2., size)
         }
     }
 
@@ -978,8 +996,8 @@ impl<W: LayoutElement> Tile<W> {
             size.w = f64::max(1., size.w);
             size.h = f64::max(1., size.h);
 
-            size.w += width * 2.;
-            size.h += width * 2.;
+            size.w = width.mul_add(2., size.w);
+            size.h = width.mul_add(2., size.h);
         }
 
         size
@@ -993,10 +1011,10 @@ impl<W: LayoutElement> Tile<W> {
             let width = self.border.width();
 
             if size.w > 0. {
-                size.w += width * 2.;
+                size.w = width.mul_add(2., size.w);
             }
             if size.h > 0. {
-                size.h += width * 2.;
+                size.h = width.mul_add(2., size.h);
             }
         }
 
@@ -1013,6 +1031,12 @@ impl<W: LayoutElement> Tile<W> {
         Point::from((0., y))
     }
 
+    // Single coherent render-element assembly (border, shadow, window texture, resize/fullscreen/
+    // alpha animation state) that shares a lot of local state; there's no low-risk split point.
+    #[allow(clippy::too_many_lines)]
+    // Logical-pixel geometry, animation progress and scale are narrowed to f32 for the GL shader;
+    // none of these ever approach f32's precision limits.
+    #[allow(clippy::cast_possible_truncation)]
     fn render_inner<R: NiriRenderer>(
         &self,
         mut ctx: RenderCtx<R>,
@@ -1031,7 +1055,7 @@ impl<W: LayoutElement> Tile<W> {
 
             // Interpolate towards alpha = 1. at fullscreen.
             let p = fullscreen_progress as f32;
-            alpha * (1. - p) + 1. * p
+            1.0f32.mul_add(p, alpha * (1. - p))
         };
 
         // This is here rather than in render_offset() because render_offset() is currently assumed
@@ -1064,7 +1088,7 @@ impl<W: LayoutElement> Tile<W> {
         // Popups go on top, whether it's resize or not.
         self.window
             .render_popups(ctx.r(), window_render_loc, scale, win_alpha, &mut |elem| {
-                push(elem.into())
+                push(elem.into());
             });
 
         // If we're resizing, try to render a shader, or a fallback.
@@ -1164,7 +1188,7 @@ impl<W: LayoutElement> Tile<W> {
                             elem,
                             scale,
                             geo,
-                            shader.clone(),
+                            shader,
                             radius,
                         )
                         .into();
@@ -1210,7 +1234,7 @@ impl<W: LayoutElement> Tile<W> {
 
             self.window
                 .render_normal(ctx.r(), window_render_loc, scale, win_alpha, &mut |elem| {
-                    push(clip(elem))
+                    push(clip(elem));
                 });
         }
 
@@ -1278,6 +1302,9 @@ impl<W: LayoutElement> Tile<W> {
         }
     }
 
+    // Alpha (a fraction in [0., 1.]) is narrowed to f32 for the renderer; this never approaches
+    // f32's precision limits.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn render<R: NiriRenderer>(
         &self,
         mut ctx: RenderCtx<R>,
@@ -1299,7 +1326,7 @@ impl<W: LayoutElement> Tile<W> {
             let mut ctx = ctx.as_gles();
             let mut elements = Vec::new();
             self.render_inner(ctx.r(), Point::new(0., 0.), focus_ring, &mut |elem| {
-                elements.push(elem)
+                elements.push(elem);
             });
             match open.render(
                 ctx.renderer,
@@ -1322,7 +1349,7 @@ impl<W: LayoutElement> Tile<W> {
             let mut ctx = ctx.as_gles();
             let mut elements = Vec::new();
             self.render_inner(ctx.r(), Point::new(0., 0.), focus_ring, &mut |elem| {
-                elements.push(elem)
+                elements.push(elem);
             });
             match alpha.offscreen.render(ctx.renderer, scale, &elements) {
                 Ok((elem, _sync, data)) => {
@@ -1384,25 +1411,25 @@ impl<W: LayoutElement> Tile<W> {
             blocked_out_contents,
             block_out_from: self.window.rules().block_out_from,
             size: self.animated_tile_size(),
-            texture: Default::default(),
-            texture_with_blocked_out_bg: Default::default(),
-            blocked_out_texture: Default::default(),
+            texture: OnceCell::default(),
+            texture_with_blocked_out_bg: OnceCell::default(),
+            blocked_out_texture: OnceCell::default(),
         }
     }
 
-    pub fn take_unmap_snapshot(&mut self) -> Option<TileRenderSnapshot> {
+    pub const fn take_unmap_snapshot(&mut self) -> Option<TileRenderSnapshot> {
         self.unmap_snapshot.take()
     }
 
-    pub fn border(&self) -> &FocusRing {
+    pub const fn border(&self) -> &FocusRing {
         &self.border
     }
 
-    pub fn focus_ring(&self) -> &FocusRing {
+    pub const fn focus_ring(&self) -> &FocusRing {
         &self.focus_ring
     }
 
-    pub fn options(&self) -> &Rc<Options> {
+    pub const fn options(&self) -> &Rc<Options> {
         &self.options
     }
 }

@@ -54,6 +54,15 @@ impl State {
     where
         I::Device: 'static, // Needed for downcasting.
     {
+        use InputEvent::{
+            DeviceAdded, DeviceRemoved, GestureHoldBegin, GestureHoldEnd, GesturePinchBegin,
+            GesturePinchEnd, GesturePinchUpdate, GestureSwipeBegin, GestureSwipeEnd,
+            GestureSwipeUpdate, Keyboard, PointerAxis, PointerButton, PointerMotion,
+            PointerMotionAbsolute, Special, SwitchToggle, TabletToolAxis, TabletToolButton,
+            TabletToolProximity, TabletToolTip, TouchCancel, TouchDown, TouchFrame, TouchMotion,
+            TouchUp,
+        };
+
         // Make sure some logic like workspace clean-up has a chance to run before doing actions.
         self.niri.advance_animations();
 
@@ -83,18 +92,18 @@ impl State {
         let hide_exit_confirm_dialog =
             self.niri.exit_confirm_dialog.is_open() && should_hide_exit_confirm_dialog(&event);
 
-        let mut consumed_by_a11y = false;
-        use InputEvent::*;
+        let consumed_by_a11y = false;
         match event {
-            DeviceAdded { .. } | DeviceRemoved { .. } => (),
-            Keyboard { event } => self.on_keyboard::<I>(event, &mut consumed_by_a11y),
+            Keyboard { event } => self.on_keyboard::<I>(&event, &consumed_by_a11y),
             PointerMotion { event } => self.on_pointer_motion::<I>(event),
             PointerMotionAbsolute { event } => self.on_pointer_motion_absolute::<I>(event),
             PointerButton { event } => self.on_pointer_button::<I>(event),
             PointerAxis { event } => self.on_pointer_axis::<I>(event),
             // Touchpads, touchscreens, drawing tablets, and hardware switches are not supported;
             // ignore their events. Mouse-wheel scrolling is handled via PointerAxis above.
-            GestureSwipeBegin { .. }
+            DeviceAdded { .. }
+            | DeviceRemoved { .. }
+            | GestureSwipeBegin { .. }
             | GestureSwipeUpdate { .. }
             | GestureSwipeEnd { .. }
             | GesturePinchBegin { .. }
@@ -111,8 +120,8 @@ impl State {
             | TabletToolAxis { .. }
             | TabletToolProximity { .. }
             | TabletToolTip { .. }
-            | TabletToolButton { .. } => (),
-            Special(_) => (),
+            | TabletToolButton { .. }
+            | Special(_) => (),
         }
 
         // Don't hide overlays if consumed by a11y, so that you can use the screen reader
@@ -163,20 +172,20 @@ impl State {
                 self.niri
                     .global_space
                     .output_geometry(output)
-                    .map(|geo| acc.map(|acc| acc.merge(geo)).unwrap_or(geo))
+                    .map(|geo| acc.map_or(geo, |acc| acc.merge(geo)))
             },
         )
     }
 
     fn on_keyboard<I: InputBackend>(
         &mut self,
-        event: I::KeyboardKeyEvent,
-        consumed_by_a11y: &mut bool,
+        event: &I::KeyboardKeyEvent,
+        consumed_by_a11y: &bool,
     ) {
         let mod_key = self.backend.mod_key(&self.niri.config.borrow());
 
         let serial = SERIAL_COUNTER.next_serial();
-        let time = Event::time_msec(&event);
+        let time = Event::time_msec(event);
         let pressed = event.state() == KeyState::Pressed;
 
         // Stop bind key repeat on any release. This won't work 100% correctly in cases like:
@@ -239,7 +248,7 @@ impl State {
                     }
                 }
 
-                if let Some(Keysym::space) = raw {
+                if raw == Some(Keysym::space) {
                     this.niri.screenshot_ui.set_space_down(pressed);
                 }
 
@@ -312,7 +321,7 @@ impl State {
         let token = self
             .niri
             .event_loop
-            .insert_source(repeat_timer, move |_, _, state| {
+            .insert_source(repeat_timer, move |_, (), state| {
                 state.handle_bind(bind.clone());
                 TimeoutAction::ToDuration(repeat_duration)
             })
@@ -336,6 +345,10 @@ impl State {
         self.niri.queue_redraw_all();
     }
 
+    /// # Panics
+    ///
+    /// Panics if inserting the bind cooldown timer into the event loop fails, which should
+    /// never happen in practice.
     pub fn handle_bind(&mut self, bind: Bind) {
         let Some(cooldown) = bind.cooldown else {
             self.do_action(bind.action, bind.allow_when_locked);
@@ -355,7 +368,7 @@ impl State {
                 let token = self
                     .niri
                     .event_loop
-                    .insert_source(timer, move |_, _, state| {
+                    .insert_source(timer, move |_, (), state| {
                         if state.niri.bind_cooldown_timers.remove(&bind.key).is_none() {
                             error!("bind cooldown timer entry disappeared");
                         }
@@ -369,6 +382,14 @@ impl State {
         }
     }
 
+    /// # Panics
+    ///
+    /// Panics if compositor-internal invariants that every action branch relies on don't
+    /// hold (e.g. the seat missing a keyboard or pointer), which should never happen.
+    // This is the central dispatch for every `Action` variant (keybinds, IPC actions, etc.).
+    // Splitting it up would scatter the action -> effect mapping across many small functions
+    // without reducing complexity, so a single long match is the clearest structure here.
+    #[allow(clippy::too_many_lines)]
     pub fn do_action(&mut self, action: Action, allow_when_locked: bool) {
         if self.niri.is_locked() && !(allow_when_locked || allowed_when_locked(&action)) {
             return;
@@ -382,7 +403,7 @@ impl State {
                 }
 
                 info!("quitting as requested");
-                self.niri.stop_signal.stop()
+                self.niri.stop_signal.stop();
             }
             Action::ChangeVt(vt) => {
                 self.backend.change_vt(vt);
@@ -549,7 +570,7 @@ impl State {
                 self.niri.queue_redraw_all();
             }
             Action::FocusWindowPrevious => {
-                let current = self.niri.layout.focus().map(|win| win.id());
+                let current = self.niri.layout.focus().map(super::window::mapped::Mapped::id);
                 if let Some(window) = self
                     .niri
                     .layout
@@ -570,9 +591,9 @@ impl State {
                     LayoutSwitchTarget::Index(layout) => {
                         let num_layouts = state.xkb().lock().unwrap().layouts().count();
                         if usize::from(layout) >= num_layouts {
-                            warn!("requested layout doesn't exist")
+                            warn!("requested layout doesn't exist");
                         } else {
-                            state.set_layout(Layout(layout.into()))
+                            state.set_layout(Layout(layout.into()));
                         }
                     }
                 });
@@ -1869,7 +1890,14 @@ impl State {
                     .active_workspace_mut()
                     .and_then(|ws| ws.active_window_mut());
                 if let Some(window) = active_window
-                    && window.rules().opacity.is_some_and(|o| o != 1.)
+                    && window.rules().opacity.is_some_and(|o| {
+                        // 1.0 is the sentinel "no opacity override" value, not a computed
+                        // float, so exact comparison is intentional here.
+                        #[allow(clippy::float_cmp)]
+                        {
+                            o != 1.
+                        }
+                    })
                 {
                     window.toggle_ignore_opacity_window_rule();
                     // FIXME: granular
@@ -1883,7 +1911,14 @@ impl State {
                     .workspaces_mut()
                     .find_map(|ws| ws.windows_mut().find(|w| w.id().get() == id));
                 if let Some(window) = window
-                    && window.rules().opacity.is_some_and(|o| o != 1.)
+                    && window.rules().opacity.is_some_and(|o| {
+                        // 1.0 is the sentinel "no opacity override" value, not a computed
+                        // float, so exact comparison is intentional here.
+                        #[allow(clippy::float_cmp)]
+                        {
+                            o != 1.
+                        }
+                    })
                 {
                     window.toggle_ignore_opacity_window_rule();
                     // FIXME: granular
@@ -2063,10 +2098,10 @@ impl State {
                 let geom = self.niri.global_space.output_geometry(output).unwrap();
                 new_pos.x = new_pos
                     .x
-                    .clamp(geom.loc.x as f64, (geom.loc.x + geom.size.w - 1) as f64);
+                    .clamp(f64::from(geom.loc.x), f64::from(geom.loc.x + geom.size.w - 1));
                 new_pos.y = new_pos
                     .y
-                    .clamp(geom.loc.y as f64, (geom.loc.y + geom.size.h - 1) as f64);
+                    .clamp(f64::from(geom.loc.y), f64::from(geom.loc.y + geom.size.h - 1));
             } else {
                 // The pointer was not on any output in the first place. Find one for it.
                 // Let's do the simple thing and just put it on the first output.
@@ -2298,9 +2333,9 @@ impl State {
                 })
             {
                 self.niri.suppressed_buttons.insert(button_code);
-                self.handle_bind(bind.clone());
+                self.handle_bind(bind);
                 return;
-            };
+            }
 
             // We received an event for the regular pointer, so show it now.
             self.niri.pointer_visibility = PointerVisibility::Visible;
@@ -2502,7 +2537,7 @@ impl State {
                 // FIXME: granular.
                 self.niri.queue_redraw_all();
             }
-        };
+        }
 
         self.update_pointer_contents();
 
@@ -2756,10 +2791,9 @@ impl State {
                 }
 
                 return;
-            } else {
-                self.niri.horizontal_wheel_tracker.reset();
-                self.niri.vertical_wheel_tracker.reset();
             }
+            self.niri.horizontal_wheel_tracker.reset();
+            self.niri.vertical_wheel_tracker.reset();
         }
 
         let horizontal_amount = event.amount(Axis::Horizontal);
@@ -2785,8 +2819,7 @@ impl State {
 
         // Determine final scroll factors based on configuration
         let (horizontal_factor, vertical_factor) = device_scroll_factor
-            .map(|x| x.h_v_factors())
-            .unwrap_or((1.0, 1.0));
+            .map_or((1.0, 1.0), |x| x.h_v_factors());
         let (horizontal_factor, vertical_factor) = (
             horizontal_factor * window_scroll_factor,
             vertical_factor * window_scroll_factor,
@@ -2851,7 +2884,7 @@ impl State {
             || grab.is::<DnDGrab<Self, WlSurface, WlSurface>>()
     }
 
-    fn grab_can_be_cancelled_with_esc(grab: &(dyn PointerGrab<State> + 'static)) -> bool {
+    fn grab_can_be_cancelled_with_esc(grab: &(dyn PointerGrab<Self> + 'static)) -> bool {
         let grab = grab.as_any();
 
         grab.is::<PickWindowGrab>() || grab.is::<PickColorGrab>() || Self::is_dnd_grab(grab)
@@ -2942,7 +2975,7 @@ fn find_bind<'a>(
     mods: ModifiersState,
     disable_power_key_handling: bool,
 ) -> Option<Bind> {
-    use keysyms::*;
+    use keysyms::{KEY_XF86Switch_VT_1, KEY_XF86Switch_VT_12, KEY_XF86PowerOff};
 
     // Handle hardcoded binds.
     #[allow(non_upper_case_globals)] // wat
@@ -3079,14 +3112,14 @@ fn should_hide_exit_confirm_dialog<I: InputBackend>(event: &InputEvent<I>) -> bo
     }
 }
 
-fn should_notify_activity<I: InputBackend>(event: &InputEvent<I>) -> bool {
+const fn should_notify_activity<I: InputBackend>(event: &InputEvent<I>) -> bool {
     !matches!(
         event,
         InputEvent::DeviceAdded { .. } | InputEvent::DeviceRemoved { .. }
     )
 }
 
-fn should_reset_pointer_inactivity_timer<I: InputBackend>(event: &InputEvent<I>) -> bool {
+const fn should_reset_pointer_inactivity_timer<I: InputBackend>(event: &InputEvent<I>) -> bool {
     matches!(
         event,
         InputEvent::PointerAxis { .. }
@@ -3096,7 +3129,7 @@ fn should_reset_pointer_inactivity_timer<I: InputBackend>(event: &InputEvent<I>)
     )
 }
 
-fn allowed_when_locked(action: &Action) -> bool {
+const fn allowed_when_locked(action: &Action) -> bool {
     matches!(
         action,
         Action::Quit(_)
@@ -3108,7 +3141,7 @@ fn allowed_when_locked(action: &Action) -> bool {
     )
 }
 
-fn allowed_during_screenshot(action: &Action) -> bool {
+const fn allowed_during_screenshot(action: &Action) -> bool {
     matches!(
         action,
         Action::Quit(_)
@@ -3236,6 +3269,7 @@ pub fn apply_libinput_settings(config: &niri_config::Input, device: &mut input::
     }
 }
 
+#[must_use]
 pub fn mods_with_binds(mod_key: ModKey, binds: &Binds, triggers: &[Trigger]) -> HashSet<Modifiers> {
     let mut rv = HashSet::new();
     for bind in &binds.0 {
@@ -3255,6 +3289,7 @@ pub fn mods_with_binds(mod_key: ModKey, binds: &Binds, triggers: &[Trigger]) -> 
     rv
 }
 
+#[must_use]
 pub fn mods_with_mouse_binds(mod_key: ModKey, binds: &Binds) -> HashSet<Modifiers> {
     mods_with_binds(
         mod_key,
@@ -3269,6 +3304,7 @@ pub fn mods_with_mouse_binds(mod_key: ModKey, binds: &Binds) -> HashSet<Modifier
     )
 }
 
+#[must_use]
 pub fn mods_with_wheel_binds(mod_key: ModKey, binds: &Binds) -> HashSet<Modifiers> {
     mods_with_binds(
         mod_key,

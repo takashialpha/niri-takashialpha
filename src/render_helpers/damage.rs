@@ -12,11 +12,12 @@ pub struct ExtraDamage {
 }
 
 impl ExtraDamage {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             id: Id::new(),
-            commit: Default::default(),
-            geometry: Default::default(),
+            commit: CommitCounter::default(),
+            geometry: Rectangle::default(),
         }
     }
 
@@ -24,6 +25,7 @@ impl ExtraDamage {
         self.commit.increment();
     }
 
+    #[must_use]
     pub fn render(&self, geometry: Rectangle<f64, Logical>) -> Self {
         let mut this = self.clone();
         this.geometry = geometry;

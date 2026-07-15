@@ -17,6 +17,7 @@ pub struct Spring {
 }
 
 impl SpringParams {
+    #[must_use]
     pub fn new(damping_ratio: f64, stiffness: f64, epsilon: f64) -> Self {
         let damping_ratio = damping_ratio.max(0.);
         let stiffness = stiffness.max(0.);
@@ -36,6 +37,7 @@ impl SpringParams {
 }
 
 impl Spring {
+    #[must_use]
     pub fn value_at(&self, t: Duration) -> f64 {
         self.oscillate(t.as_secs_f64())
     }
@@ -45,6 +47,7 @@ impl Spring {
     // which itself is based on (MIT):
     // https://github.com/robb/RBBAnimation/blob/master/RBBAnimation/RBBSpringAnimation.m
     /// Computes and returns the duration until the spring is at rest.
+    #[must_use]
     pub fn duration(&self) -> Duration {
         const DELTA: f64 = 0.001;
 
@@ -107,6 +110,7 @@ impl Spring {
     }
 
     /// Computes and returns the duration until the spring reaches its target position.
+    #[must_use]
     pub fn clamped_duration(&self) -> Option<Duration> {
         let beta = self.params.damping / (2. * self.params.mass);
 
@@ -158,21 +162,21 @@ impl Spring {
         // f32::EPSILON even though it's doubles.
         if (beta - omega0).abs() <= f64::from(f32::EPSILON) {
             // Critically damped.
-            self.to + envelope * (x0 + (beta * x0 + v0) * t)
+            self.to + envelope * (beta * x0 + v0).mul_add(t, x0)
         } else if beta < omega0 {
             // Underdamped.
-            let omega1 = ((omega0 * omega0) - (beta * beta)).sqrt();
+            let omega1 = omega0.mul_add(omega0, -(beta * beta)).sqrt();
 
             self.to
                 + envelope
-                    * (x0 * (omega1 * t).cos() + ((beta * x0 + v0) / omega1) * (omega1 * t).sin())
+                    * ((beta * x0 + v0) / omega1).mul_add((omega1 * t).sin(), x0 * (omega1 * t).cos())
         } else {
             // Overdamped.
-            let omega2 = ((beta * beta) - (omega0 * omega0)).sqrt();
+            let omega2 = omega0.mul_add(-omega0, beta * beta).sqrt();
 
             self.to
                 + envelope
-                    * (x0 * (omega2 * t).cosh() + ((beta * x0 + v0) / omega2) * (omega2 * t).sinh())
+                    * ((beta * x0 + v0) / omega2).mul_add((omega2 * t).sinh(), x0 * (omega2 * t).cosh())
         }
     }
 }

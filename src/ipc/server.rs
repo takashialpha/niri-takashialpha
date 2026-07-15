@@ -144,9 +144,7 @@ impl Drop for IpcServer {
 
 fn socket_dir() -> PathBuf {
     BaseDirectories::new()
-        .get_runtime_directory()
-        .map(|x| x.to_owned())
-        .unwrap_or_else(|_| env::temp_dir())
+        .get_runtime_directory().map_or_else(|_| env::temp_dir(), std::borrow::ToOwned::to_owned)
 }
 
 fn on_new_ipc_client(state: &mut State, stream: UnixStream) {
@@ -421,7 +419,7 @@ async fn process(ctx: &ClientCtx, request: Request) -> Reply {
                     .niri
                     .layout
                     .active_output()
-                    .map(|output| output.name());
+                    .map(smithay::output::Output::name);
 
                 let output = active_output.and_then(|active_output| {
                     state
@@ -512,7 +510,7 @@ fn make_ipc_window(
         title: role.title.clone(),
         app_id: role.app_id.clone(),
         pid: mapped.credentials().map(|c| c.pid),
-        workspace_id: workspace_id.map(|id| id.get()),
+        workspace_id: workspace_id.map(super::super::layout::workspace::WorkspaceId::get),
         is_focused: mapped.is_focused(),
         is_floating: mapped.is_floating(),
         is_urgent: mapped.is_urgent(),
@@ -602,7 +600,7 @@ impl State {
             };
 
             // Check for any changes that we can't signal as individual events.
-            let output_name = mon.map(|mon| mon.output_name());
+            let output_name = mon.map(super::super::layout::monitor::Monitor::output_name);
             if ipc_ws.idx != u8::try_from(ws_idx + 1).unwrap_or(u8::MAX)
                 || ipc_ws.name.as_ref() != ws.name()
                 || ipc_ws.output.as_ref() != output_name
@@ -703,7 +701,7 @@ impl State {
                 return;
             };
 
-            let workspace_id = ws_id.map(|id| id.get());
+            let workspace_id = ws_id.map(super::super::layout::workspace::WorkspaceId::get);
             let mut changed =
                 ipc_win.workspace_id != workspace_id || ipc_win.is_floating != mapped.is_floating();
 
@@ -735,7 +733,7 @@ impl State {
 
             let urgent = mapped.is_urgent();
             if urgent != ipc_win.is_urgent {
-                events.push(Event::WindowUrgencyChanged { id, urgent })
+                events.push(Event::WindowUrgencyChanged { id, urgent });
             }
         });
 

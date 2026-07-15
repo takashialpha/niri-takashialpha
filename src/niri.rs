@@ -142,6 +142,18 @@ const CLEAR_COLOR_LOCKED: [f32; 4] = [0.3, 0.1, 0.1, 1.];
 // should be ~1.995 seconds.
 const FRAME_CALLBACK_THROTTLE: Option<Duration> = Some(Duration::from_millis(995));
 
+// Wayland input/presentation event timestamps are u32 milliseconds since an unspecified
+// epoch by protocol definition (e.g. wl_pointer.motion's `time` argument): clients are
+// expected to only use them for computing relative deltas, and wrapping every ~49.7 days is
+// normal, protocol-mandated behavior rather than a bug, so the truncation here is intentional.
+#[allow(clippy::cast_possible_truncation)]
+fn wayland_time_now() -> u32 {
+    get_monotonic_time().as_millis() as u32
+}
+
+// Bundling these into bitflags would touch every field access across the whole compositor;
+// each bool tracks an independently-toggled piece of state, not a combinable flag set.
+#[allow(clippy::struct_excessive_bools)]
 pub struct Niri {
     pub config: Rc<RefCell<Config>>,
 
@@ -260,7 +272,7 @@ pub struct Niri {
     ///
     /// This is primarily useful for emitting pointer motion events for surfaces that move
     /// underneath the cursor on their own (i.e. when the tiling layout moves). In this case, not
-    /// taking grabs into account is expected, because we pass the information to pointer.motion()
+    /// taking grabs into account is expected, because we pass the information to `pointer.motion()`
     /// which passes it down through grabs, which decide what to do with it as they see fit.
     pub pointer_contents: PointContents,
     pub pointer_visibility: PointerVisibility,
@@ -312,7 +324,8 @@ pub enum PointerVisibility {
 }
 
 impl PointerVisibility {
-    pub fn is_visible(&self) -> bool {
+    #[must_use]
+    pub const fn is_visible(&self) -> bool {
         matches!(self, Self::Visible)
     }
 }
@@ -335,18 +348,18 @@ pub struct OutputState {
     /// We want to send frame callbacks for each surface at most once per monitor refresh cycle.
     ///
     /// Even if a surface commit resulted in empty damage to the monitor, we want to delay the next
-    /// frame callback until roughly when a VBlank would occur, had the monitor been damaged. This
+    /// frame callback until roughly when a `VBlank` would occur, had the monitor been damaged. This
     /// is necessary to prevent clients busy-looping with frame callbacks that result in empty
     /// damage.
     ///
     /// This counter wrapping-increments by 1 every time we move into the next refresh cycle, as
     /// far as frame callback throttling is concerned. Specifically, it happens:
     ///
-    /// 1. Upon a successful DRM frame submission. Notably, we don't wait for the VBlank here,
+    /// 1. Upon a successful DRM frame submission. Notably, we don't wait for the `VBlank` here,
     ///    because the client buffers are already "latched" at the point of submission. Even if a
-    ///    client submits a new buffer right away, we will wait for a VBlank to draw it, which
+    ///    client submits a new buffer right away, we will wait for a `VBlank` to draw it, which
     ///    means that busy looping is avoided.
-    /// 2. If a frame resulted in empty damage, a timer is queued to fire roughly when a VBlank
+    /// 2. If a frame resulted in empty damage, a timer is queued to fire roughly when a `VBlank`
     ///    would occur, based on the last presentation time and output refresh interval. Sequence
     ///    is incremented in that timer, before attempting a redraw or sending frame callbacks.
     pub frame_callback_sequence: u32,
@@ -368,7 +381,7 @@ pub enum RedrawState {
     Queued,
     /// We submitted a frame to the KMS and waiting for it to be presented.
     WaitingForVBlank { redraw_needed: bool },
-    /// We did not submit anything to KMS and made a timer to fire at the estimated VBlank.
+    /// We did not submit anything to KMS and made a timer to fire at the estimated `VBlank`.
     WaitingForEstimatedVBlank(RegistrationToken),
     /// A redraw is queued on top of the above.
     WaitingForEstimatedVBlankAndQueued(RegistrationToken),
@@ -439,6 +452,7 @@ struct SurfaceFrameThrottlingState {
     last_sent_at: RefCell<Option<(Output, u32)>>,
 }
 
+#[derive(Clone, Copy)]
 pub enum CenterCoords {
     Separately,
     Both,
@@ -447,20 +461,20 @@ pub enum CenterCoords {
 }
 
 impl RedrawState {
-    fn queue_redraw(self) -> Self {
+    const fn queue_redraw(self) -> Self {
         match self {
-            RedrawState::Idle => RedrawState::Queued,
-            RedrawState::WaitingForEstimatedVBlank(token) => {
-                RedrawState::WaitingForEstimatedVBlankAndQueued(token)
+            Self::Idle => Self::Queued,
+            Self::WaitingForEstimatedVBlank(token) => {
+                Self::WaitingForEstimatedVBlankAndQueued(token)
             }
 
             // A redraw is already queued.
-            value @ (RedrawState::Queued | RedrawState::WaitingForEstimatedVBlankAndQueued(_)) => {
+            value @ (Self::Queued | Self::WaitingForEstimatedVBlankAndQueued(_)) => {
                 value
             }
 
             // We're waiting for VBlank, request a redraw afterwards.
-            RedrawState::WaitingForVBlank { .. } => RedrawState::WaitingForVBlank {
+            Self::WaitingForVBlank { .. } => Self::WaitingForVBlank {
                 redraw_needed: true,
             },
         }
@@ -476,34 +490,32 @@ impl Default for SurfaceFrameThrottlingState {
 }
 
 impl KeyboardFocus {
-    pub fn surface(&self) -> Option<&WlSurface> {
+    #[must_use]
+    pub const fn surface(&self) -> Option<&WlSurface> {
         match self {
-            KeyboardFocus::Layout { surface } => surface.as_ref(),
-            KeyboardFocus::LayerShell { surface } => Some(surface),
-            KeyboardFocus::LockScreen { surface } => surface.as_ref(),
-            KeyboardFocus::ScreenshotUi => None,
-            KeyboardFocus::ExitConfirmDialog => None,
-            KeyboardFocus::Overview => None,
+            Self::Layout { surface } | Self::LockScreen { surface } => surface.as_ref(),
+            Self::LayerShell { surface } => Some(surface),
+            Self::ScreenshotUi | Self::ExitConfirmDialog | Self::Overview => None,
         }
     }
 
+    #[must_use]
     pub fn into_surface(self) -> Option<WlSurface> {
         match self {
-            KeyboardFocus::Layout { surface } => surface,
-            KeyboardFocus::LayerShell { surface } => Some(surface),
-            KeyboardFocus::LockScreen { surface } => surface,
-            KeyboardFocus::ScreenshotUi => None,
-            KeyboardFocus::ExitConfirmDialog => None,
-            KeyboardFocus::Overview => None,
+            Self::Layout { surface } | Self::LockScreen { surface } => surface,
+            Self::LayerShell { surface } => Some(surface),
+            Self::ScreenshotUi | Self::ExitConfirmDialog | Self::Overview => None,
         }
     }
 
-    pub fn is_layout(&self) -> bool {
-        matches!(self, KeyboardFocus::Layout { .. })
+    #[must_use]
+    pub const fn is_layout(&self) -> bool {
+        matches!(self, Self::Layout { .. })
     }
 
-    pub fn is_overview(&self) -> bool {
-        matches!(self, KeyboardFocus::Overview)
+    #[must_use]
+    pub const fn is_overview(&self) -> bool {
+        matches!(self, Self::Overview)
     }
 }
 
@@ -513,11 +525,14 @@ pub struct State {
 }
 
 impl State {
+    /// # Errors
+    ///
+    /// Errors if initializing the TTY backend fails (not applicable when `headless` is `true`).
     pub fn new(
         config: Config,
-        event_loop: LoopHandle<'static, State>,
+        event_loop: LoopHandle<'static, Self>,
         stop_signal: LoopSignal,
-        display: Display<State>,
+        display: Display<Self>,
         headless: bool,
         create_wayland_socket: bool,
     ) -> Result<Self, Box<dyn std::error::Error>> {
@@ -533,7 +548,7 @@ impl State {
         };
 
         let mut niri = Niri::new(
-            config.clone(),
+            config,
             event_loop,
             stop_signal,
             display,
@@ -554,6 +569,9 @@ impl State {
         Ok(state)
     }
 
+    /// # Panics
+    ///
+    /// Panics if flushing the Wayland display's clients fails.
     pub fn refresh_and_flush_clients(&mut self) {
         self.refresh();
 
@@ -614,6 +632,9 @@ impl State {
         }
     }
 
+    /// # Panics
+    ///
+    /// Panics if the seat has no pointer capability (niri always attaches one at startup).
     pub fn move_cursor(&mut self, location: Point<f64, Logical>) {
         let mut under = match self.niri.pointer_visibility {
             PointerVisibility::Disabled => PointContents::default(),
@@ -639,7 +660,7 @@ impl State {
             &MotionEvent {
                 location,
                 serial: SERIAL_COUNTER.next_serial(),
-                time: get_monotonic_time().as_millis() as u32,
+                time: wayland_time_now(),
             },
         );
         pointer.frame(self);
@@ -677,10 +698,9 @@ impl State {
             CenterCoords::Both => {
                 if x_in_bound && y_in_bound {
                     return false;
-                } else {
-                    // adjust x and y
-                    center_f64(rect)
                 }
+                // adjust x and y
+                center_f64(rect)
             }
             CenterCoords::BothAlways => center_f64(rect),
         };
@@ -689,6 +709,11 @@ impl State {
         true
     }
 
+    /// # Panics
+    ///
+    /// Panics if:
+    /// - The output has no known geometry in the global space
+    /// - `output` has no associated monitor in the layout
     pub fn move_cursor_to_focused_tile(&mut self, mode: CenterCoords) -> bool {
         if !self.niri.keyboard_focus.is_layout() {
             return false;
@@ -737,18 +762,20 @@ impl State {
 
     /// Focus a specific window, taking care of a potential active output change and cursor
     /// warp.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the layout reports a new active output but that output cannot be moved to.
     pub fn focus_window(&mut self, window: &Window) {
         let active_output = self.niri.layout.active_output().cloned();
 
         self.niri.layout.activate_window(window);
 
         let new_active = self.niri.layout.active_output().cloned();
-        if new_active != active_output {
-            if !self.maybe_warp_cursor_to_focus_centered() {
-                self.move_cursor_to_output(&new_active.unwrap());
-            }
-        } else {
+        if new_active == active_output {
             self.maybe_warp_cursor_to_focus();
+        } else if !self.maybe_warp_cursor_to_focus_centered() {
+            self.move_cursor_to_output(&new_active.unwrap());
         }
 
         // FIXME: granular
@@ -771,14 +798,18 @@ impl State {
         let focused = match self.niri.config.borrow().input.warp_mouse_to_focus {
             None => return false,
             Some(inner) => match inner.mode {
-                None => CenterCoords::Both,
-                Some(WarpMouseToFocusMode::CenterXy) => CenterCoords::Both,
+                None | Some(WarpMouseToFocusMode::CenterXy) => CenterCoords::Both,
                 Some(WarpMouseToFocusMode::CenterXyAlways) => CenterCoords::BothAlways,
             },
         };
         self.move_cursor_to_focused_tile(focused)
     }
 
+    /// # Panics
+    ///
+    /// Panics if:
+    /// - The seat has no pointer capability (niri always attaches one at startup)
+    /// - `output` has no associated monitor in the layout
     pub fn refresh_pointer_contents(&mut self) {
         let pointer = &self.niri.seat.get_pointer().unwrap();
         let location = pointer.current_location();
@@ -809,6 +840,9 @@ impl State {
         self.niri.queue_redraw_all();
     }
 
+    /// # Panics
+    ///
+    /// Panics if the seat has no pointer capability (niri always attaches one at startup).
     pub fn update_pointer_contents(&mut self) -> bool {
         let pointer = &self.niri.seat.get_pointer().unwrap();
         let location = pointer.current_location();
@@ -844,7 +878,7 @@ impl State {
             &MotionEvent {
                 location,
                 serial: SERIAL_COUNTER.next_serial(),
-                time: get_monotonic_time().as_millis() as u32,
+                time: wayland_time_now(),
             },
         );
 
@@ -853,6 +887,9 @@ impl State {
         true
     }
 
+    /// # Panics
+    ///
+    /// Panics if the output has no known geometry in the global space.
     pub fn move_cursor_to_output(&mut self, output: &Output) {
         let geo = self.niri.global_space.output_geometry(output).unwrap();
         self.move_cursor(center(geo).to_f64());
@@ -866,6 +903,19 @@ impl State {
         }
     }
 
+    /// # Panics
+    ///
+    /// Panics if:
+    /// - The seat has no pointer capability (niri always attaches one at startup)
+    /// - The seat has no keyboard capability (niri always attaches one at startup)
+    /// - `output` has no associated monitor in the layout
+    /// - An internal mutex is poisoned
+    // This computes a single `focus` value through one sequential if/else-if chain over
+    // exit-confirm/lock-screen/screenshot-ui/layer-shell/layout precedence, with several
+    // closures capturing `self`, `layers`, and `layer_grab` by reference; splitting it would
+    // mean threading all of those borrows through extra function parameters for no gain in
+    // clarity, since each branch is only meaningful in the context of the ones before it.
+    #[allow(clippy::too_many_lines)]
     pub fn update_keyboard_focus(&mut self) {
         // Clean up on-demand layer surface focus if necessary.
         if let Some(surface) = &self.niri.layer_shell_on_demand_focus {
@@ -1039,7 +1089,7 @@ impl State {
                 self.niri.seat.get_pointer().unwrap().unset_grab(
                     self,
                     SERIAL_COUNTER.next_serial(),
-                    get_monotonic_time().as_millis() as u32,
+                    wayland_time_now(),
                 );
                 self.niri.popup_grab = None;
             }
@@ -1122,6 +1172,9 @@ impl State {
         }
     }
 
+    /// # Panics
+    ///
+    /// Panics if the seat has no keyboard capability (niri always attaches one at startup).
     pub fn set_xkb_config(&mut self, xkb: XkbConfig) {
         let keyboard = self.niri.seat.get_keyboard().unwrap();
         let num_lock = keyboard.modifier_state().num_lock;
@@ -1138,15 +1191,23 @@ impl State {
         }
     }
 
+    /// # Panics
+    ///
+    /// Panics if:
+    /// - The seat has no keyboard capability (niri always attaches one at startup)
+    /// - An internal lock is poisoned
+    // This applies a new config to ~15 independent subsystems (workspaces, layout, layer
+    // surfaces, keyboard, cursor, outputs, animations, ...) in a specific sequence where later
+    // steps depend on earlier ones having already run (see e.g. the keyboard-focus-order
+    // comments below); extracting helpers per subsystem would require passing config and
+    // several `&mut self` fields around and risks silently changing that ordering.
+    #[allow(clippy::too_many_lines)]
     pub fn reload_config(&mut self, config: Result<Config, ()>) {
-        let mut config = match config {
-            Ok(config) => config,
-            Err(()) => {
-                self.niri.config_error_notification.show();
-                self.niri.queue_redraw_all();
+        let Ok(mut config) = config else {
+            self.niri.config_error_notification.show();
+            self.niri.queue_redraw_all();
 
-                return;
-            }
+            return;
         };
 
         self.niri.config_error_notification.hide();
@@ -1218,15 +1279,15 @@ impl State {
             libinput_config_changed = true;
         }
 
-        if config.outputs != self.niri.config_file_output_config {
+        if config.outputs == self.niri.config_file_output_config {
+            // Output config did not change from the last disk load, so we need to preserve the
+            // transient changes.
+            preserved_output_config = Some(mem::take(&mut old_config.outputs));
+        } else {
             output_config_changed = true;
             self.niri
                 .config_file_output_config
                 .clone_from(&config.outputs);
-        } else {
-            // Output config did not change from the last disk load, so we need to preserve the
-            // transient changes.
-            preserved_output_config = Some(mem::take(&mut old_config.outputs));
         }
 
         let binds_changed = config.binds != old_config.binds;
@@ -1363,6 +1424,11 @@ impl State {
         self.niri.queue_redraw_all();
     }
 
+    /// # Panics
+    ///
+    /// Panics if:
+    /// - `output` has no `OutputName` in its user data, which niri always attaches when creating an output
+    /// - `output` has no current mode set
     pub fn reload_output_config(&mut self) {
         let mut resized_outputs = vec![];
         let mut recolored_outputs = vec![];
@@ -1373,21 +1439,23 @@ impl State {
             let config = full_config.outputs.find(name);
 
             let scale = config
-                .and_then(|c| c.scale)
-                .map(|s| s.0)
-                .unwrap_or_else(|| {
+                .and_then(|c| c.scale).map_or_else(|| {
                     let size_mm = output.physical_properties().size;
                     let resolution = output.current_mode().unwrap().size;
                     guess_monitor_scale(size_mm, resolution)
-                });
+                }, |s| s.0);
             let scale = closest_representable_scale(scale.clamp(0.1, 10.));
 
             let transform = panel_orientation(output)
                 + config
-                    .map(|c| ipc_transform_to_smithay(c.transform))
-                    .unwrap_or(Transform::Normal);
+                    .map_or(Transform::Normal, |c| ipc_transform_to_smithay(c.transform));
 
-            if output.current_scale().fractional_scale() != scale
+            // Both sides are passed through closest_representable_scale(), which snaps to a
+            // deterministic, canonical value, so an exact comparison correctly detects "no
+            // change" and avoids an unnecessary change_current_state() call below.
+            #[allow(clippy::float_cmp)]
+            let scale_changed = output.current_scale().fractional_scale() != scale;
+            if scale_changed
                 || output.current_transform() != transform
             {
                 output.change_current_state(
@@ -1448,6 +1516,9 @@ impl State {
         self.niri.reposition_outputs(None);
     }
 
+    /// # Panics
+    ///
+    /// Panics if `output` has no `OutputName` in its user data, which niri always attaches when creating an output.
     pub fn modify_output_config<F>(&mut self, name: &str, fun: F)
     where
         F: FnOnce(&mut niri_config::Output),
@@ -1535,7 +1606,7 @@ impl State {
                     vtotal,
                     hsync_polarity,
                     vsync_polarity,
-                })
+                });
             }
             niri_ipc::OutputAction::Scale { scale } => {
                 config.scale = match scale {
@@ -1559,6 +1630,9 @@ impl State {
         self.reload_output_config();
     }
 
+    /// # Panics
+    ///
+    /// Panics if an internal mutex is poisoned.
     pub fn refresh_ipc_outputs(&mut self) {
         if !self.niri.ipc_outputs_changed {
             return;
@@ -1576,6 +1650,9 @@ impl State {
         }
     }
 
+    /// # Panics
+    ///
+    /// Panics if the seat has no pointer capability (niri always attaches one at startup).
     pub fn open_screenshot_ui(&mut self, show_pointer: bool, path: Option<String>) {
         if self.niri.is_locked() || self.niri.screenshot_ui.is_open() {
             return;
@@ -1602,7 +1679,7 @@ impl State {
         self.niri.seat.get_pointer().unwrap().unset_grab(
             self,
             SERIAL_COUNTER.next_serial(),
-            get_monotonic_time().as_millis() as u32,
+            wayland_time_now(),
         );
 
         self.backend.with_primary_renderer(|renderer| {
@@ -1617,6 +1694,9 @@ impl State {
         self.niri.queue_redraw_all();
     }
 
+    /// # Panics
+    ///
+    /// Panics if the seat has no pointer capability (niri always attaches one at startup).
     pub fn handle_pick_color(&mut self, tx: async_channel::Sender<Option<niri_ipc::PickedColor>>) {
         let pointer = self.niri.seat.get_pointer().unwrap();
         let start_data = PointerGrabStartData {
@@ -1667,6 +1747,17 @@ impl State {
 }
 
 impl Niri {
+    /// # Panics
+    ///
+    /// Panics if creating the async executor fails, which should not happen during normal startup.
+    //
+    // This constructor sequentially initializes ~30 compositor subsystems (event loop sources,
+    // Wayland globals, seat/input, layout, IPC server, cursor manager, ...) and binds most of
+    // them into the single `Niri` struct returned at the end; splitting it into helpers would
+    // mean either returning partially-built state between calls or passing a long list of
+    // already-constructed subsystems by value, neither of which reads more clearly than the
+    // current linear build-up.
+    #[allow(clippy::too_many_lines)]
     pub fn new(
         config: Rc<RefCell<Config>>,
         event_loop: LoopHandle<'static, State>,
@@ -1676,7 +1767,7 @@ impl Niri {
         create_wayland_socket: bool,
     ) -> Self {
         let (executor, scheduler) = calloop::futures::executor().unwrap();
-        event_loop.insert_source(executor, |_, _, _| ()).unwrap();
+        event_loop.insert_source(executor, |(), (), _| ()).unwrap();
 
         let display_handle = display.handle();
         let config_ = config.borrow();
@@ -1758,13 +1849,13 @@ impl Niri {
             config_.input.keyboard.repeat_rate.into(),
         ) {
             Err(err) => {
-                if let smithay::input::keyboard::Error::BadKeymap = err {
+                if matches!(err, smithay::input::keyboard::Error::BadKeymap) {
                     warn!("error loading the configured xkb keymap, trying default");
                 } else {
                     warn!("error adding keyboard: {err:?}");
                 }
                 seat.add_keyboard(
-                    Default::default(),
+                    XkbConfig::default(),
                     config_.input.keyboard.repeat_delay.into(),
                     config_.input.keyboard.repeat_rate.into(),
                 )
@@ -1801,7 +1892,7 @@ impl Niri {
         event_loop
             .insert_source(
                 Timer::from_duration(Duration::from_secs(1)),
-                |_, _, state| {
+                |_, (), state| {
                     state.niri.send_frame_callbacks_on_fallback_timer();
                     TimeoutAction::ToDuration(Duration::from_secs(1))
                 },
@@ -1812,7 +1903,7 @@ impl Niri {
             let socket_source = ListeningSocketSource::new_auto().unwrap();
             let socket_name = socket_source.socket_name().to_os_string();
             event_loop
-                .insert_source(socket_source, move |client, _, state| {
+                .insert_source(socket_source, move |client, (), state| {
                     state.niri.insert_client(NewClient {
                         client,
                         restricted: false,
@@ -1844,8 +1935,8 @@ impl Niri {
 
         event_loop
             .insert_source(
-                Timer::from_duration(Duration::from_secs(60)),
-                |_, _, state| {
+                Timer::from_duration(Duration::from_mins(1)),
+                |_, (), state| {
                     state.niri.is_at_startup = false;
                     state.niri.recompute_window_rules();
                     state.niri.recompute_layer_rules();
@@ -1914,7 +2005,7 @@ impl Niri {
             layer_shell_on_demand_focus: None,
             xkb_from_locale1: None,
             cursor_manager,
-            cursor_texture_cache: Default::default(),
+            cursor_texture_cache: CursorTextureCache::default(),
             cursor_shape_manager_state,
             dnd_icon: None,
             pointer_contents: PointContents::default(),
@@ -1969,6 +2060,12 @@ impl Niri {
     }
 
     /// Repositions all outputs, optionally adding a new output.
+    ///
+    /// # Panics
+    ///
+    /// Panics if:
+    /// - `output` has no `OutputName` in its user data, which niri always attaches when creating an output
+    /// - The output has no known geometry in the global space
     pub fn reposition_outputs(&mut self, new_output: Option<&Output>) {
         #[derive(Debug)]
         struct Data {
@@ -2019,7 +2116,7 @@ impl Niri {
             .map(|Data { output, .. }| output.clone())
             .collect();
 
-        for data in outputs.into_iter() {
+        for data in outputs {
             let Data {
                 output,
                 name,
@@ -2090,6 +2187,17 @@ impl Niri {
         }
     }
 
+    /// # Panics
+    ///
+    /// Panics if:
+    /// - `output` has no `OutputName` in its user data, which niri always attaches when creating an output
+    /// - `output` has no current mode set
+    //
+    // Taking `output` by value here (even though the body only ever clones or borrows it)
+    // matches its two call sites in src/backend/headless.rs and src/backend/tty.rs, one of
+    // which already owns the `Output` outright; switching to `&Output` would only move the
+    // clone from inside this function to the tty.rs call site instead of removing it.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn add_output(&mut self, output: Output, refresh_interval: Option<Duration>) {
         let global = output.create_global::<State>(&self.display_handle);
 
@@ -2097,16 +2205,15 @@ impl Niri {
 
         let config = self.config.borrow();
         let c = config.outputs.find(name);
-        let scale = c.and_then(|c| c.scale).map(|s| s.0).unwrap_or_else(|| {
+        let scale = c.and_then(|c| c.scale).map_or_else(|| {
             let size_mm = output.physical_properties().size;
             let resolution = output.current_mode().unwrap().size;
             guess_monitor_scale(size_mm, resolution)
-        });
+        }, |s| s.0);
         let scale = closest_representable_scale(scale.clamp(0.1, 10.));
 
         let transform = panel_orientation(&output)
-            + c.map(|c| ipc_transform_to_smithay(c.transform))
-                .unwrap_or(Transform::Normal);
+            + c.map_or(Transform::Normal, |c| ipc_transform_to_smithay(c.transform));
 
         let mut backdrop_color = c
             .and_then(|c| c.backdrop_color)
@@ -2175,6 +2282,9 @@ impl Niri {
         Output::from_resource(wl_output).filter(|output| self.output_exists(output))
     }
 
+    /// # Panics
+    ///
+    /// Panics if `output` is not present in `output_state`.
     pub fn remove_output(&mut self, output: &Output) {
         for layer in layer_map_for_output(output).layers() {
             layer.layer_surface().send_close();
@@ -2201,7 +2311,7 @@ impl Niri {
         self.event_loop
             .insert_source(
                 Timer::from_duration(Duration::from_secs(10)),
-                move |_, _, state| {
+                move |_, (), state| {
                     state
                         .niri
                         .display_handle
@@ -2241,6 +2351,9 @@ impl Niri {
         }
     }
 
+    /// # Panics
+    ///
+    /// Panics if `output` has no current mode set.
     pub fn output_resized(&mut self, output: &Output) {
         let output_size = output_size(output);
         let scale = output.current_scale();
@@ -2311,6 +2424,9 @@ impl Niri {
         self.queue_redraw_all();
     }
 
+    /// # Panics
+    ///
+    /// Panics if an internal invariant is violated.
     pub fn output_under(&self, pos: Point<f64, Logical>) -> Option<(&Output, Point<f64, Logical>)> {
         let output = self.global_space.output_under(pos).next()?;
         let pos_within_output = pos
@@ -2367,6 +2483,11 @@ impl Niri {
         false
     }
 
+    /// # Panics
+    ///
+    /// Panics if:
+    /// - `output` has no associated monitor in the layout
+    /// - The layer surface has no computed geometry yet
     pub fn is_sticky_obscured_under(
         &self,
         output: &Output,
@@ -2421,6 +2542,9 @@ impl Niri {
         false
     }
 
+    /// # Panics
+    ///
+    /// Panics if the layer surface has no computed geometry yet.
     pub fn is_layout_obscured_under(
         &self,
         output: &Output,
@@ -2493,6 +2617,9 @@ impl Niri {
         Some((output.clone(), ws))
     }
 
+    /// # Panics
+    ///
+    /// Panics if the seat has no pointer capability (niri always attaches one at startup).
     pub fn workspace_under_cursor(
         &self,
         extended_bounds: bool,
@@ -2535,6 +2662,10 @@ impl Niri {
     ///
     /// The cursor may be inside the window's activation region, but not within the window's input
     /// region.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the seat has no pointer capability (niri always attaches one at startup).
     pub fn window_under_cursor(&self) -> Option<&Mapped> {
         let pos = self.seat.get_pointer().unwrap().current_location();
         self.window_under(pos)
@@ -2546,6 +2677,18 @@ impl Niri {
     /// locations to global space according to where they are rendered.
     ///
     /// This function does not take pointer or touch grabs into account.
+    ///
+    /// # Panics
+    ///
+    /// Panics if:
+    /// - The output has no known geometry in the global space
+    /// - `output` has no associated monitor in the layout
+    /// - The layer surface has no computed geometry yet
+    // The function's own comment below states this ordering must stay consistent with
+    // render()'s z-order (exit-confirm dialog, lock screen, layer-shell layers, layout,
+    // ...); splitting it into helper functions would make it easy for that ordering to drift
+    // out of sync between the two functions without either compiling error surfacing it.
+    #[allow(clippy::too_many_lines)]
     pub fn contents_under(&self, pos: Point<f64, Logical>) -> PointContents {
         let mut rv = PointContents::default();
 
@@ -2723,11 +2866,17 @@ impl Niri {
         rv
     }
 
+    /// # Panics
+    ///
+    /// Panics if the seat has no pointer capability (niri always attaches one at startup).
     pub fn output_under_cursor(&self) -> Option<Output> {
         let pos = self.seat.get_pointer().unwrap().current_location();
         self.global_space.output_under(pos).next().cloned()
     }
 
+    /// # Panics
+    ///
+    /// Panics if the output has no known geometry in the global space.
     pub fn output_left_of(&self, current: &Output) -> Option<Output> {
         let current_geo = self.global_space.output_geometry(current)?;
         let extended_geo = Rectangle::new(
@@ -2744,6 +2893,9 @@ impl Niri {
             .cloned()
     }
 
+    /// # Panics
+    ///
+    /// Panics if the output has no known geometry in the global space.
     pub fn output_right_of(&self, current: &Output) -> Option<Output> {
         let current_geo = self.global_space.output_geometry(current)?;
         let extended_geo = Rectangle::new(
@@ -2760,6 +2912,9 @@ impl Niri {
             .cloned()
     }
 
+    /// # Panics
+    ///
+    /// Panics if the output has no known geometry in the global space.
     pub fn output_up_of(&self, current: &Output) -> Option<Output> {
         let current_geo = self.global_space.output_geometry(current)?;
         let extended_geo = Rectangle::new(
@@ -2776,6 +2931,9 @@ impl Niri {
             .cloned()
     }
 
+    /// # Panics
+    ///
+    /// Panics if the output has no known geometry in the global space.
     pub fn output_down_of(&self, current: &Output) -> Option<Output> {
         let current_geo = self.global_space.output_geometry(current)?;
         let extended_geo = Rectangle::new(
@@ -2893,7 +3051,7 @@ impl Niri {
             .or_else(|| self.global_space.outputs().next())?;
 
         let state = self.output_state.get(output)?;
-        state.lock_surface.as_ref().map(|s| s.wl_surface()).cloned()
+        state.lock_surface.as_ref().map(smithay::wayland::session_lock::LockSurface::wl_surface).cloned()
     }
 
     /// Schedules an immediate redraw on all outputs if one is not already scheduled.
@@ -2904,6 +3062,10 @@ impl Niri {
     }
 
     /// Schedules an immediate redraw if one is not already scheduled.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `output` is not present in `output_state`.
     pub fn queue_redraw(&mut self, output: &Output) {
         let state = self.output_state.get_mut(output).unwrap();
         state.redraw_state = mem::take(&mut state.redraw_state).queue_redraw();
@@ -2922,6 +3084,11 @@ impl Niri {
         }
     }
 
+    /// # Panics
+    ///
+    /// Panics if:
+    /// - The seat has no pointer capability (niri always attaches one at startup)
+    /// - The output has no known geometry in the global space
     pub fn render_pointer<R: NiriRenderer>(
         &self,
         renderer: &mut R,
@@ -2961,7 +3128,12 @@ impl Niri {
                 scale,
                 cursor,
             } => {
-                let (idx, frame) = cursor.frame(self.start_time.elapsed().as_millis() as u32);
+                // XCursor::frame() only uses this to pick an animation frame index modulo the
+                // cursor theme's frame durations (typically well under a second each), so
+                // wrapping after ~49.7 days of continuous uptime has no visible effect.
+                #[allow(clippy::cast_possible_truncation)]
+                let elapsed_ms = self.start_time.elapsed().as_millis() as u32;
+                let (idx, frame) = cursor.frame(elapsed_ms);
                 let hotspot = XCursor::hotspot(frame).to_logical(scale);
                 let pointer_pos =
                     (pointer_pos - hotspot.to_f64()).to_physical_precise_round(output_scale);
@@ -3003,6 +3175,10 @@ impl Niri {
     ///
     /// Returns `(cursor_global_pos, win_pos)` if the pointer should be included, or `None`
     /// otherwise.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the seat has no pointer capability (niri always attaches one at startup).
     pub fn pointer_pos_for_window_cast(
         &self,
         mapped: &Mapped,
@@ -3047,6 +3223,16 @@ impl Niri {
         None
     }
 
+    /// # Panics
+    ///
+    /// Panics if:
+    /// - The seat has no pointer capability (niri always attaches one at startup)
+    /// - The output has no known geometry in the global space
+    // The two match arms each loop over every output while accumulating several mutable
+    // locals (cursor_scale/cursor_transform, dnd_scale/dnd_transform) that are only sent via
+    // with_states()/send_scale_transform() once after the loop; pulling either arm's body out
+    // into a helper would mean returning 4+ accumulators just to keep the single post-loop send.
+    #[allow(clippy::too_many_lines)]
     pub fn refresh_pointer_outputs(&mut self) {
         if !self.pointer_visibility.is_visible() {
             return;
@@ -3119,7 +3305,7 @@ impl Niri {
                         data,
                         output::Scale::Fractional(cursor_scale),
                         cursor_transform,
-                    )
+                    );
                 });
                 if let Some((surface, _)) = dnd {
                     with_states(surface, |data| {
@@ -3215,6 +3401,9 @@ impl Niri {
         drop(config);
     }
 
+    /// # Panics
+    ///
+    /// Panics if no X11 support.
     pub fn refresh_window_rules(&mut self) {
         let config = self.config.borrow();
         let window_rules = &config.window_rules;
@@ -3266,7 +3455,7 @@ impl Niri {
     pub fn update_render_elements(&mut self, output: Option<&Output>) {
         self.layout.update_render_elements(output);
 
-        for (out, state) in self.output_state.iter_mut() {
+        for (out, state) in &mut self.output_state {
             if output.is_none_or(|output| out == output) {
                 let scale = Scale::from(out.current_scale().fractional_scale());
                 let transform = out.current_transform();
@@ -3306,7 +3495,7 @@ impl Niri {
     ) -> Vec<OutputRenderElements<R>> {
         let mut elements = Vec::new();
         self.render(ctx, output, include_pointer, &mut |elem| {
-            elements.push(elem)
+            elements.push(elem);
         });
         elements
     }
@@ -3321,6 +3510,11 @@ impl Niri {
         self.render_inner(ctx, output, include_pointer, push);
     }
 
+    // Each `push(...)` call here appends the next render element from front (pointer) to
+    // back (backdrop) for this output, and contents_under() above must hit-test pointer input
+    // in the same front-to-back order; splitting this into per-layer helpers would scatter
+    // that shared ordering contract across multiple functions instead of one linear sequence.
+    #[allow(clippy::too_many_lines)]
     fn render_inner<R: NiriRenderer>(
         &self,
         mut ctx: RenderCtx<R>,
@@ -3599,7 +3793,7 @@ impl Niri {
                 state.unfinished_animations_remain |= layer_map_for_output(output)
                     .layers()
                     .filter_map(|surface| self.mapped_layer_surfaces.get(surface))
-                    .any(|mapped| mapped.are_animations_ongoing());
+                    .any(super::layer::mapped::MappedLayer::are_animations_ongoing);
             }
 
             // Render.
@@ -3673,6 +3867,9 @@ impl Niri {
         self.send_frame_callbacks(output);
     }
 
+    /// # Panics
+    ///
+    /// Panics if an internal mutex is poisoned.
     pub fn update_primary_scanout_output(
         &self,
         output: &Output,
@@ -3684,12 +3881,12 @@ impl Niri {
         //
         // While we only have cursors and DnD icons crossing output boundaries though, it doesn't
         // matter all that much.
-        if let CursorImageStatus::Surface(surface) = &self.cursor_manager.cursor_image() {
+        let update_surface = |surface: &WlSurface| {
             with_surface_tree_downward(
                 surface,
                 (),
-                |_, _, _| TraversalAction::DoChildren(()),
-                |surface, states, _| {
+                |_, _, ()| TraversalAction::DoChildren(()),
+                |surface, states, ()| {
                     update_surface_primary_scanout_output(
                         surface,
                         output,
@@ -3699,27 +3896,16 @@ impl Niri {
                         default_primary_scanout_output_compare,
                     );
                 },
-                |_, _, _| true,
+                |_, _, ()| true,
             );
+        };
+
+        if let CursorImageStatus::Surface(surface) = &self.cursor_manager.cursor_image() {
+            update_surface(surface);
         }
 
         if let Some(surface) = self.dnd_icon.as_ref().map(|icon| &icon.surface) {
-            with_surface_tree_downward(
-                surface,
-                (),
-                |_, _, _| TraversalAction::DoChildren(()),
-                |surface, states, _| {
-                    update_surface_primary_scanout_output(
-                        surface,
-                        output,
-                        states,
-                        None,
-                        render_element_states,
-                        default_primary_scanout_output_compare,
-                    );
-                },
-                |_, _, _| true,
-            );
+            update_surface(surface);
         }
 
         // We're only updating the current output's windows and layer surfaces. This should be fine
@@ -3817,8 +4003,8 @@ impl Niri {
             with_surface_tree_downward(
                 surface.wl_surface(),
                 (),
-                |_, _, _| TraversalAction::DoChildren(()),
-                |surface, states, _| {
+                |_, _, ()| TraversalAction::DoChildren(()),
+                |surface, states, ()| {
                     update_surface_primary_scanout_output(
                         surface,
                         output,
@@ -3828,7 +4014,7 @@ impl Niri {
                         default_primary_scanout_output_compare,
                     );
                 },
-                |_, _, _| true,
+                |_, _, ()| true,
             );
         }
     }
@@ -3921,6 +4107,9 @@ impl Niri {
         }
     }
 
+    /// # Panics
+    ///
+    /// Panics if `output` is not present in `output_state`.
     pub fn send_frame_callbacks(&mut self, output: &Output) {
         let state = self.output_state.get(output).unwrap();
         let sequence = state.frame_callback_sequence;
@@ -4035,7 +4224,7 @@ impl Niri {
             );
         });
 
-        for (output, state) in self.output_state.iter() {
+        for (output, state) in &self.output_state {
             for surface in layer_map_for_output(output).layers() {
                 surface.send_frame(
                     output,
@@ -4125,7 +4314,7 @@ impl Niri {
                         render_element_states,
                     )
                 },
-            )
+            );
         }
 
         for surface in layer_map_for_output(output).layers() {
@@ -4160,6 +4349,9 @@ impl Niri {
         feedback
     }
 
+    /// # Panics
+    ///
+    /// Panics if `output` has no current mode set.
     pub fn capture_screenshots<'a>(
         &'a self,
         renderer: &'a mut GlesRenderer,
@@ -4224,7 +4416,7 @@ impl Niri {
                 })
             });
 
-            if screenshot.iter().any(|res| res.is_none()) {
+            if screenshot.iter().any(std::option::Option::is_none) {
                 return None;
             }
 
@@ -4233,6 +4425,9 @@ impl Niri {
         })
     }
 
+    /// # Panics
+    ///
+    /// Panics if `output` has no current mode set.
     pub fn screenshot(
         &mut self,
         renderer: &mut GlesRenderer,
@@ -4329,6 +4524,9 @@ impl Niri {
             .context("error saving screenshot")
     }
 
+    /// # Panics
+    ///
+    /// Panics if an internal invariant is violated.
     pub fn save_screenshot(
         &self,
         size: Size<i32, Physical>,
@@ -4355,13 +4553,13 @@ impl Niri {
         // main thread.
         let (tx, rx) = calloop::channel::sync_channel::<Arc<[u8]>>(1);
         self.event_loop
-            .insert_source(rx, move |event, _, state| match event {
+            .insert_source(rx, move |event, (), state| match event {
                 calloop::channel::Event::Msg(buf) => {
                     set_data_device_selection(
                         &state.niri.display_handle,
                         &state.niri.seat,
                         vec![String::from("image/png")],
-                        buf.clone(),
+                        buf,
                     );
                 }
                 calloop::channel::Event::Closed => (),
@@ -4371,7 +4569,7 @@ impl Niri {
         // Prepare to send screenshot completion event back to main thread.
         let (event_tx, event_rx) = calloop::channel::sync_channel::<Option<String>>(1);
         self.event_loop
-            .insert_source(event_rx, move |event, _, state| match event {
+            .insert_source(event_rx, move |event, (), state| match event {
                 calloop::channel::Event::Msg(path) => {
                     state.ipc_screenshot_taken(path);
                 }
@@ -4384,7 +4582,12 @@ impl Niri {
             let mut buf = vec![];
 
             let w = std::io::Cursor::new(&mut buf);
-            if let Err(err) = write_png_rgba8(w, size.w as u32, size.h as u32, &pixels) {
+            // `size` is the dimensions of an already-captured framebuffer region, which is
+            // always non-negative (a negative width/height would mean the capture itself was
+            // already broken, long before we get here), so this cannot actually lose a sign.
+            #[allow(clippy::cast_sign_loss)]
+            let (w_px, h_px) = (size.w as u32, size.h as u32);
+            if let Err(err) = write_png_rgba8(w, w_px, h_px, &pixels) {
                 warn!("error encoding screenshot image: {err:?}");
                 return;
             }
@@ -4421,20 +4624,23 @@ impl Niri {
             let path_string = image_path
                 .as_ref()
                 .and_then(|p| p.to_str())
-                .map(|s| s.to_owned());
+                .map(std::borrow::ToOwned::to_owned);
             let _ = event_tx.send(path_string);
         });
 
         Ok(())
     }
 
-    pub fn is_locked(&self) -> bool {
+    pub const fn is_locked(&self) -> bool {
         match self.lock_state {
             LockState::Unlocked | LockState::WaitingForSurfaces { .. } => false,
             LockState::Locking(_) | LockState::Locked(_) => true,
         }
     }
 
+    /// # Panics
+    ///
+    /// Panics if an internal invariant is violated.
     pub fn lock(&mut self, confirmation: SessionLocker) {
         // Check if another client is in the process of locking.
         if matches!(
@@ -4480,10 +4686,10 @@ impl Niri {
             // let's wait for the lock surfaces.
             //
             // Give them a second; swaylock can take its time to paint a big enough image.
-            let timer = Timer::from_duration(Duration::from_millis(1000));
+            let timer = Timer::from_duration(Duration::from_secs(1));
             let deadline_token = self
                 .event_loop
-                .insert_source(timer, |_, _, state| {
+                .insert_source(timer, |_, (), state| {
                     trace!("lock deadline expired, continuing");
                     state.niri.continue_to_locking();
                     TimeoutAction::Drop
@@ -4591,6 +4797,10 @@ impl Niri {
     /// Activates the pointer constraint if necessary according to the current pointer contents.
     ///
     /// Make sure the pointer location and contents are up to date before calling this.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the seat has no pointer capability (niri always attaches one at startup).
     pub fn maybe_activate_pointer_constraint(&self) {
         let Some((surface, surface_loc)) = &self.pointer_contents.surface else {
             return;
@@ -4661,6 +4871,9 @@ impl Niri {
         root.clone()
     }
 
+    /// # Panics
+    ///
+    /// Panics if the seat has no pointer capability (niri always attaches one at startup).
     pub fn handle_focus_follows_mouse(&mut self, new_focus: &PointContents) {
         let Some(ffm) = self.config.borrow().input.focus_follows_mouse else {
             return;
@@ -4717,6 +4930,11 @@ impl Niri {
         }
     }
 
+    /// # Panics
+    ///
+    /// Panics if:
+    /// - `output` has no current mode set
+    /// - `output` is not present in `output_state`
     pub fn do_screen_transition(&mut self, renderer: &mut GlesRenderer, delay_ms: Option<u16>) {
         self.update_render_elements(None);
 
@@ -4751,7 +4969,7 @@ impl Niri {
                     res
                 });
 
-                if textures.iter().any(|res| res.is_err()) {
+                if textures.iter().any(std::result::Result::is_err) {
                     return None;
                 }
 
@@ -4841,6 +5059,9 @@ impl Niri {
         }
     }
 
+    /// # Panics
+    ///
+    /// Panics if an internal invariant is violated.
     pub fn reset_pointer_inactivity_timer(&mut self) {
         if self.pointer_inactivity_timer_got_reset {
             return;
@@ -4854,11 +5075,11 @@ impl Niri {
             return;
         };
 
-        let duration = Duration::from_millis(timeout_ms as u64);
+        let duration = Duration::from_millis(u64::from(timeout_ms));
         let timer = Timer::from_duration(duration);
         let token = self
             .event_loop
-            .insert_source(timer, move |_, _, state| {
+            .insert_source(timer, move |_, (), state| {
                 state.niri.pointer_inactivity_timer = None;
 
                 // If the pointer is already invisible, don't reset it back to Hidden causing one
@@ -4876,7 +5097,7 @@ impl Niri {
         self.pointer_inactivity_timer_got_reset = true;
     }
 
-    pub fn notify_activity(&mut self) {
+    pub const fn notify_activity(&mut self) {
         if self.notified_activity_this_iteration {
             return;
         }
@@ -4891,6 +5112,13 @@ pub struct NewClient {
     pub credentials_unknown: bool,
 }
 
+// can_view_decoration_globals, primary_selection_disabled, restricted, and
+// credentials_unknown are four independent per-client Wayland protocol permission
+// checks read individually at unrelated call sites (global filters, selection
+// handlers, security-context checks); combining them into one flags value would
+// not simplify any of those call sites and would just add a bitflags dependency
+// to this one struct.
+#[allow(clippy::struct_excessive_bools)]
 pub struct ClientState {
     pub compositor_state: CompositorClientState,
     pub can_view_decoration_globals: bool,

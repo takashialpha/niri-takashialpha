@@ -12,6 +12,7 @@ pub struct InsertHintElement {
 pub type InsertHintRenderElement = FocusRingRenderElement;
 
 impl InsertHintElement {
+    #[must_use]
     pub fn new(config: niri_config::InsertHint) -> Self {
         Self {
             inner: FocusRing::new(niri_config::FocusRing {
@@ -27,7 +28,7 @@ impl InsertHintElement {
         }
     }
 
-    pub fn update_config(&mut self, config: niri_config::InsertHint) {
+    pub const fn update_config(&mut self, config: niri_config::InsertHint) {
         self.inner.update_config(niri_config::FocusRing {
             off: config.off,
             width: 0.,
@@ -61,6 +62,6 @@ impl InsertHintElement {
         location: Point<f64, Logical>,
         push: &mut dyn FnMut(FocusRingRenderElement),
     ) {
-        self.inner.render(renderer, location, push)
+        self.inner.render(renderer, location, push);
     }
 }

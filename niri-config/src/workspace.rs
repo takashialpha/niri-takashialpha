@@ -62,36 +62,31 @@ impl<S: knus::traits::ErrorSpan> knus::DecodeScalar<S> for WorkspaceName {
     fn raw_decode(
         val: &knus::span::Spanned<knus::ast::Literal, S>,
         ctx: &mut knus::decode::Context<S>,
-    ) -> Result<WorkspaceName, DecodeError<S>> {
+    ) -> Result<Self, DecodeError<S>> {
         #[derive(Debug)]
         struct WorkspaceNameSet(Vec<String>);
-        match &**val {
-            knus::ast::Literal::String(s) => {
-                let mut name_set: Vec<String> = match ctx.get::<WorkspaceNameSet>() {
-                    Some(h) => h.0.clone(),
-                    None => Vec::new(),
-                };
+        if let knus::ast::Literal::String(s) = &**val {
+            let mut name_set: Vec<String> =
+                ctx.get::<WorkspaceNameSet>().map_or_else(Vec::new, |h| h.0.clone());
 
-                if name_set.iter().any(|name| name.eq_ignore_ascii_case(s)) {
-                    ctx.emit_error(DecodeError::unexpected(
-                        val,
-                        "named workspace",
-                        format!("duplicate named workspace: {s}"),
-                    ));
-                    return Ok(Self(String::new()));
-                }
-
-                name_set.push(s.to_string());
-                ctx.set(WorkspaceNameSet(name_set));
-                Ok(Self(s.clone().into()))
-            }
-            _ => {
-                ctx.emit_error(DecodeError::unsupported(
+            if name_set.iter().any(|name| name.eq_ignore_ascii_case(s)) {
+                ctx.emit_error(DecodeError::unexpected(
                     val,
-                    "workspace names must be strings",
+                    "named workspace",
+                    format!("duplicate named workspace: {s}"),
                 ));
-                Ok(Self(String::new()))
+                return Ok(Self(String::new()));
             }
+
+            name_set.push(s.to_string());
+            ctx.set(WorkspaceNameSet(name_set));
+            Ok(Self(s.clone().into()))
+        } else {
+            ctx.emit_error(DecodeError::unsupported(
+                val,
+                "workspace names must be strings",
+            ));
+            Ok(Self(String::new()))
         }
     }
 }

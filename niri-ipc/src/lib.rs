@@ -1023,7 +1023,7 @@ pub enum ScaleToSet {
 }
 
 /// Output position to set.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, clap::Subcommand)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, clap::Subcommand)]
 #[command(subcommand_value_name = "POSITION")]
 #[command(subcommand_help_heading = "Position Values")]
 pub enum PositionToSet {
@@ -1036,7 +1036,7 @@ pub enum PositionToSet {
 }
 
 /// Output position as set in the config file.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, clap::Args)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, clap::Args)]
 pub struct ConfiguredPosition {
     /// Logical X position.
     pub x: i32,
@@ -1063,7 +1063,7 @@ pub struct Output {
     ///
     /// `None` if the output is disabled.
     pub current_mode: Option<usize>,
-    /// Whether the current_mode is a custom mode.
+    /// Whether the `current_mode` is a custom mode.
     pub is_custom_mode: bool,
     /// Logical output information.
     ///
@@ -1074,7 +1074,7 @@ pub struct Output {
 }
 
 /// Output mode.
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct Mode {
     /// Width in physical pixels.
     pub width: u16,
@@ -1472,7 +1472,7 @@ pub enum Event {
 
 impl From<Duration> for Timestamp {
     fn from(value: Duration) -> Self {
-        Timestamp {
+        Self {
             secs: value.as_secs(),
             nanos: value.subsec_nanos(),
         }
@@ -1481,7 +1481,7 @@ impl From<Duration> for Timestamp {
 
 impl From<Timestamp> for Duration {
     fn from(value: Timestamp) -> Self {
-        Duration::new(value.secs, value.nanos)
+        Self::new(value.secs, value.nanos)
     }
 }
 
@@ -1507,37 +1507,34 @@ impl FromStr for SizeChange {
     type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.split_once('%') {
-            Some((value, empty)) => {
-                if !empty.is_empty() {
-                    return Err("trailing characters after '%' are not allowed");
-                }
-
-                match value.bytes().next() {
-                    Some(b'-' | b'+') => {
-                        let value = value.parse().map_err(|_| "error parsing value")?;
-                        Ok(Self::AdjustProportion(value))
-                    }
-                    Some(_) => {
-                        let value = value.parse().map_err(|_| "error parsing value")?;
-                        Ok(Self::SetProportion(value))
-                    }
-                    None => Err("value is missing"),
-                }
+        if let Some((value, empty)) = s.split_once('%') {
+            if !empty.is_empty() {
+                return Err("trailing characters after '%' are not allowed");
             }
-            None => {
-                let value = s;
-                match value.bytes().next() {
-                    Some(b'-' | b'+') => {
-                        let value = value.parse().map_err(|_| "error parsing value")?;
-                        Ok(Self::AdjustFixed(value))
-                    }
-                    Some(_) => {
-                        let value = value.parse().map_err(|_| "error parsing value")?;
-                        Ok(Self::SetFixed(value))
-                    }
-                    None => Err("value is missing"),
+
+            match value.bytes().next() {
+                Some(b'-' | b'+') => {
+                    let value = value.parse().map_err(|_| "error parsing value")?;
+                    Ok(Self::AdjustProportion(value))
                 }
+                Some(_) => {
+                    let value = value.parse().map_err(|_| "error parsing value")?;
+                    Ok(Self::SetProportion(value))
+                }
+                None => Err("value is missing"),
+            }
+        } else {
+            let value = s;
+            match value.bytes().next() {
+                Some(b'-' | b'+') => {
+                    let value = value.parse().map_err(|_| "error parsing value")?;
+                    Ok(Self::AdjustFixed(value))
+                }
+                Some(_) => {
+                    let value = value.parse().map_err(|_| "error parsing value")?;
+                    Ok(Self::SetFixed(value))
+                }
+                None => Err("value is missing"),
             }
         }
     }
@@ -1547,37 +1544,34 @@ impl FromStr for PositionChange {
     type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.split_once('%') {
-            Some((value, empty)) => {
-                if !empty.is_empty() {
-                    return Err("trailing characters after '%' are not allowed");
-                }
-
-                match value.bytes().next() {
-                    Some(b'-' | b'+') => {
-                        let value = value.parse().map_err(|_| "error parsing value")?;
-                        Ok(Self::AdjustProportion(value))
-                    }
-                    Some(_) => {
-                        let value = value.parse().map_err(|_| "error parsing value")?;
-                        Ok(Self::SetProportion(value))
-                    }
-                    None => Err("value is missing"),
-                }
+        if let Some((value, empty)) = s.split_once('%') {
+            if !empty.is_empty() {
+                return Err("trailing characters after '%' are not allowed");
             }
-            None => {
-                let value = s;
-                match value.bytes().next() {
-                    Some(b'-' | b'+') => {
-                        let value = value.parse().map_err(|_| "error parsing value")?;
-                        Ok(Self::AdjustFixed(value))
-                    }
-                    Some(_) => {
-                        let value = value.parse().map_err(|_| "error parsing value")?;
-                        Ok(Self::SetFixed(value))
-                    }
-                    None => Err("value is missing"),
+
+            match value.bytes().next() {
+                Some(b'-' | b'+') => {
+                    let value = value.parse().map_err(|_| "error parsing value")?;
+                    Ok(Self::AdjustProportion(value))
                 }
+                Some(_) => {
+                    let value = value.parse().map_err(|_| "error parsing value")?;
+                    Ok(Self::SetProportion(value))
+                }
+                None => Err("value is missing"),
+            }
+        } else {
+            let value = s;
+            match value.bytes().next() {
+                Some(b'-' | b'+') => {
+                    let value = value.parse().map_err(|_| "error parsing value")?;
+                    Ok(Self::AdjustFixed(value))
+                }
+                Some(_) => {
+                    let value = value.parse().map_err(|_| "error parsing value")?;
+                    Ok(Self::SetFixed(value))
+                }
+                None => Err("value is missing"),
             }
         }
     }
@@ -1590,10 +1584,10 @@ impl FromStr for LayoutSwitchTarget {
         match s {
             "next" => Ok(Self::Next),
             "prev" => Ok(Self::Prev),
-            other => match other.parse() {
-                Ok(layout) => Ok(Self::Index(layout)),
-                _ => Err(r#"invalid layout action, can be "next", "prev" or a layout index"#),
-            },
+            other => other.parse().map_or(
+                Err(r#"invalid layout action, can be "next", "prev" or a layout index"#),
+                |layout| Ok(Self::Index(layout)),
+            ),
         }
     }
 }
@@ -1636,12 +1630,12 @@ impl TryFrom<u8> for MaxBpc {
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
-            6 => Ok(MaxBpc::_6),
-            8 => Ok(MaxBpc::_8),
-            10 => Ok(MaxBpc::_10),
-            12 => Ok(MaxBpc::_12),
-            14 => Ok(MaxBpc::_14),
-            16 => Ok(MaxBpc::_16),
+            6 => Ok(Self::_6),
+            8 => Ok(Self::_8),
+            10 => Ok(Self::_10),
+            12 => Ok(Self::_12),
+            14 => Ok(Self::_14),
+            16 => Ok(Self::_16),
             _ => Err("invalid max-bpc, can be 6, 8, 10, 12, 14, 16"),
         }
     }
@@ -1757,9 +1751,14 @@ macro_rules! ensure {
 
 impl OutputAction {
     /// Validates some required constraints on the modeline and custom mode.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error describing the violated constraint if the modeline or custom mode
+    /// values are not internally consistent (e.g. sync end before sync start).
     pub fn validate(&self) -> Result<(), String> {
         match self {
-            OutputAction::Modeline {
+            Self::Modeline {
                 hdisplay,
                 hsync_start,
                 hsync_end,
@@ -1810,7 +1809,7 @@ impl OutputAction {
                 ensure!(0 < *vtotal, "vtotal {} must be > 0", vtotal);
                 Ok(())
             }
-            OutputAction::CustomMode {
+            Self::CustomMode {
                 mode: ConfiguredMode { refresh, .. },
             } => {
                 if refresh.is_none() {

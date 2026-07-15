@@ -1,6 +1,7 @@
 pub trait MergeWith<T> {
     fn merge_with(&mut self, part: &T);
 
+    #[must_use]
     fn merged_with(mut self, part: &T) -> Self
     where
         Self: Sized,

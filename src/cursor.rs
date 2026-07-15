@@ -28,6 +28,7 @@ pub struct CursorManager {
 }
 
 impl CursorManager {
+    #[must_use]
     pub fn new(theme: &str, size: u8) -> Self {
         Self::ensure_env(theme, size);
 
@@ -37,7 +38,7 @@ impl CursorManager {
             theme,
             size,
             current_cursor: CursorImageStatus::default_named(),
-            named_cursor_cache: Default::default(),
+            named_cursor_cache: RefCell::default(),
         }
     }
 
@@ -49,7 +50,7 @@ impl CursorManager {
         self.named_cursor_cache.get_mut().clear();
     }
 
-    /// Checks if the cursor WlSurface is alive, and if not, cleans it up.
+    /// Checks if the cursor `WlSurface` is alive, and if not, cleans it up.
     pub fn check_cursor_image_surface_alive(&mut self) {
         if let CursorImageStatus::Surface(surface) = &self.current_cursor
             && !surface.alive()
@@ -59,6 +60,11 @@ impl CursorManager {
     }
 
     /// Get the current rendering cursor.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the current cursor is a surface that is missing its
+    /// [`CursorImageSurfaceData`], or if that data's mutex is poisoned.
     pub fn get_render_cursor(&self, scale: i32) -> RenderCursor {
         match self.current_cursor.clone() {
             CursorImageStatus::Hidden => RenderCursor::Hidden,
@@ -80,23 +86,23 @@ impl CursorManager {
     }
 
     fn get_render_cursor_named(&self, icon: CursorIcon, scale: i32) -> RenderCursor {
-        self.get_cursor_with_name(icon, scale)
-            .map(|cursor| RenderCursor::Named {
+        self.get_cursor_with_name(icon, scale).map_or_else(
+            || RenderCursor::Named {
+                icon: CursorIcon::default(),
+                scale,
+                cursor: self.get_default_cursor(scale),
+            },
+            |cursor| RenderCursor::Named {
                 icon,
                 scale,
                 cursor,
-            })
-            .unwrap_or_else(|| RenderCursor::Named {
-                icon: Default::default(),
-                scale,
-                cursor: self.get_default_cursor(scale),
-            })
+            },
+        )
     }
 
     pub fn is_current_cursor_animated(&self, scale: i32) -> bool {
         match &self.current_cursor {
-            CursorImageStatus::Hidden => false,
-            CursorImageStatus::Surface(_) => false,
+            CursorImageStatus::Hidden | CursorImageStatus::Surface(_) => false,
             CursorImageStatus::Named(icon) => self
                 .get_cursor_with_name(*icon, scale)
                 .unwrap_or_else(|| self.get_default_cursor(scale))
@@ -110,7 +116,7 @@ impl CursorManager {
             .borrow_mut()
             .entry((icon, scale))
             .or_insert_with_key(|(icon, scale)| {
-                let size = self.size as i32 * scale;
+                let size = i32::from(self.size) * scale;
                 let mut cursor = Self::load_xcursor(&self.theme, icon.name(), size);
 
                 // Check alternative names to account for non-compliant themes.
@@ -138,14 +144,18 @@ impl CursorManager {
     }
 
     /// Get default cursor.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the default cursor has no fallback, which should never happen.
     pub fn get_default_cursor(&self, scale: i32) -> Rc<XCursor> {
         // The default cursor always has a fallback.
         self.get_cursor_with_name(CursorIcon::Default, scale)
             .unwrap()
     }
 
-    /// Currently used cursor_image as a cursor provider.
-    pub fn cursor_image(&self) -> &CursorImageStatus {
+    /// Currently used `cursor_image` as a cursor provider.
+    pub const fn cursor_image(&self) -> &CursorImageStatus {
         &self.current_cursor
     }
 
@@ -170,7 +180,12 @@ impl CursorManager {
 
         let (width, height) = images
             .iter()
-            .min_by_key(|image| (size - image.size as i32).abs())
+            // Cursor image sizes are tiny (well within i32 range), so this never wraps.
+            .min_by_key(|image| {
+                #[allow(clippy::cast_possible_wrap)]
+                let image_size = image.size as i32;
+                (size - image_size).abs()
+            })
             .map(|image| (image.width, image.height))
             .unwrap();
 
@@ -253,6 +268,8 @@ impl CursorTextureCache {
                     .frames()
                     .iter()
                     .map(|frame| {
+                        // Cursor image dimensions are tiny (well within i32 range).
+                        #[allow(clippy::cast_possible_wrap)]
                         MemoryRenderBuffer::from_slice(
                             &frame.pixels_rgba,
                             Fourcc::Argb8888,
@@ -283,6 +300,7 @@ impl XCursor {
     ///
     /// Time will wrap, so if for instance the cursor has an animation lasting 100ms,
     /// then calling this function with 5ms and 105ms as input gives the same output.
+    #[must_use]
     pub fn frame(&self, mut millis: u32) -> (usize, &Image) {
         if self.animation_duration == 0 {
             return (0, &self.images[0]);
@@ -303,17 +321,22 @@ impl XCursor {
     }
 
     /// Get the frames for the given `XCursor`.
+    #[must_use]
     pub fn frames(&self) -> &[Image] {
         &self.images
     }
 
     /// Check whether the cursor is animated.
-    pub fn is_animated_cursor(&self) -> bool {
+    #[must_use]
+    pub const fn is_animated_cursor(&self) -> bool {
         self.images.len() > 1
     }
 
     /// Get hotspot for the given `image`.
+    #[must_use]
     pub fn hotspot(image: &Image) -> Point<i32, Physical> {
+        // Cursor hotspot coordinates are tiny (well within i32 range).
+        #[allow(clippy::cast_possible_wrap)]
         (image.xhot as i32, image.yhot as i32).into()
     }
 }

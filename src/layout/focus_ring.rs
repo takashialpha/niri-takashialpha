@@ -30,13 +30,14 @@ niri_render_elements! {
 }
 
 impl FocusRing {
+    #[must_use]
     pub fn new(config: niri_config::FocusRing) -> Self {
         Self {
             buffers: Default::default(),
             locations: Default::default(),
             sizes: Default::default(),
             borders: Default::default(),
-            full_size: Default::default(),
+            full_size: Size::default(),
             is_border: false,
             use_border_shader: false,
             config,
@@ -44,7 +45,7 @@ impl FocusRing {
         }
     }
 
-    pub fn update_config(&mut self, config: niri_config::FocusRing) {
+    pub const fn update_config(&mut self, config: niri_config::FocusRing) {
         self.config = config;
     }
 
@@ -54,7 +55,16 @@ impl FocusRing {
         }
     }
 
+    // Each parameter is an independent piece of per-frame render state (size, focus/urgency/border
+    // flags, view rect, corner radius, scale, alpha) computed by the caller; bundling them into a
+    // struct would just move the same eight fields one level up without reducing complexity.
     #[allow(clippy::too_many_arguments)]
+    // This is one contiguous geometry computation (edge/corner rects for the border shader) with
+    // no low-risk split point; breaking it up would scatter shared local state across helpers.
+    #[allow(clippy::too_many_lines)]
+    // Logical-pixel geometry is narrowed to f32 for the border/GL shader; screen dimensions never
+    // approach f32 precision limits.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn update_render_elements(
         &mut self,
         win_size: Size<f64, Logical>,
@@ -140,20 +150,20 @@ impl FocusRing {
             );
 
             // Top edge.
-            self.sizes[0] = Size::from((win_size.w + width * 2. - top_left - top_right, width));
+            self.sizes[0] = Size::from((width.mul_add(2., win_size.w) - top_left - top_right, width));
             self.locations[0] = Point::from((-width + top_left, -width));
 
             // Bottom edge.
             self.sizes[1] =
-                Size::from((win_size.w + width * 2. - bottom_left - bottom_right, width));
+                Size::from((width.mul_add(2., win_size.w) - bottom_left - bottom_right, width));
             self.locations[1] = Point::from((-width + bottom_left, win_size.h));
 
             // Left edge.
-            self.sizes[2] = Size::from((width, win_size.h + width * 2. - top_left - bottom_left));
+            self.sizes[2] = Size::from((width, width.mul_add(2., win_size.h) - top_left - bottom_left));
             self.locations[2] = Point::from((-width, -width + top_left));
 
             // Right edge.
-            self.sizes[3] = Size::from((width, win_size.h + width * 2. - top_right - bottom_right));
+            self.sizes[3] = Size::from((width, width.mul_add(2., win_size.h) - top_right - bottom_right));
             self.locations[3] = Point::from((win_size.w, -width + top_right));
 
             // Top-left corner.
@@ -186,7 +196,7 @@ impl FocusRing {
                     gradient.in_,
                     gradient.from,
                     gradient.to,
-                    ((gradient.angle as f32) - 90.).to_radians(),
+                    (f32::from(gradient.angle) - 90.).to_radians(),
                     Rectangle::new(full_rect.loc - loc, full_rect.size),
                     rounded_corner_border_width,
                     radius,
@@ -205,7 +215,7 @@ impl FocusRing {
                 gradient.in_,
                 gradient.from,
                 gradient.to,
-                ((gradient.angle as f32) - 90.).to_radians(),
+                (f32::from(gradient.angle) - 90.).to_radians(),
                 Rectangle::new(full_rect.loc - self.locations[0], full_rect.size),
                 rounded_corner_border_width,
                 radius,
@@ -258,15 +268,18 @@ impl FocusRing {
         }
     }
 
-    pub fn width(&self) -> f64 {
+    #[must_use]
+    pub const fn width(&self) -> f64 {
         self.config.width
     }
 
-    pub fn is_off(&self) -> bool {
+    #[must_use]
+    pub const fn is_off(&self) -> bool {
         self.config.off
     }
 
-    pub fn config(&self) -> &niri_config::FocusRing {
+    #[must_use]
+    pub const fn config(&self) -> &niri_config::FocusRing {
         &self.config
     }
 }

@@ -21,14 +21,17 @@ pub struct Color {
 }
 
 impl Color {
+    #[must_use]
     pub const fn new_unpremul(r: f32, g: f32, b: f32, a: f32) -> Self {
         Self { r, g, b, a }
     }
 
+    #[must_use]
     pub fn from_rgba8_unpremul(r: u8, g: u8, b: u8, a: u8) -> Self {
-        Self::from_array_unpremul([r, g, b, a].map(|x| x as f32 / 255.))
+        Self::from_array_unpremul([r, g, b, a].map(|x| f32::from(x) / 255.))
     }
 
+    #[must_use]
     pub fn from_array_premul([r, g, b, a]: [f32; 4]) -> Self {
         let a = a.clamp(0., 1.);
 
@@ -44,18 +47,22 @@ impl Color {
         }
     }
 
+    #[must_use]
     pub const fn from_array_unpremul([r, g, b, a]: [f32; 4]) -> Self {
         Self { r, g, b, a }
     }
 
+    #[must_use]
     pub fn from_color32f(color: Color32F) -> Self {
         Self::from_array_premul(color.components())
     }
 
-    pub fn to_array_unpremul(self) -> [f32; 4] {
+    #[must_use]
+    pub const fn to_array_unpremul(self) -> [f32; 4] {
         [self.r, self.g, self.b, self.a]
     }
 
+    #[must_use]
     pub fn to_array_premul(self) -> [f32; 4] {
         let [r, g, b, a] = [self.r, self.g, self.b, self.a];
         [r * a, g * a, b * a, a]
@@ -79,7 +86,7 @@ impl MulAssign<f32> for Color {
 
 impl From<Color> for Color32F {
     fn from(value: Color) -> Self {
-        Color32F::from(value.to_array_premul())
+        Self::from(value.to_array_premul())
     }
 }
 
@@ -116,7 +123,7 @@ pub enum GradientRelativeTo {
     WorkspaceView,
 }
 
-#[derive(Default, Debug, Clone, Copy, PartialEq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GradientInterpolation {
     pub color_space: GradientColorSpace,
     pub hue_interpolation: HueInterpolation,
@@ -171,6 +178,7 @@ impl From<f32> for CornerRadius {
 }
 
 impl CornerRadius {
+    #[must_use]
     pub fn fit_to(self, width: f32, height: f32) -> Self {
         // Like in CSS: https://drafts.csswg.org/css-backgrounds/#corner-overlap
         let reduction = f32::min(
@@ -193,6 +201,7 @@ impl CornerRadius {
         }
     }
 
+    #[must_use]
     pub fn expanded_by(mut self, width: f32) -> Self {
         // Radius = 0 is preserved, so that square corners remain square.
         if self.top_left > 0. {
@@ -218,6 +227,7 @@ impl CornerRadius {
         self
     }
 
+    #[must_use]
     pub fn scaled_by(self, scale: f32) -> Self {
         Self {
             top_left: self.top_left * scale,
@@ -334,7 +344,7 @@ impl MergeWith<BorderRule> for FocusRing {
     fn merge_with(&mut self, part: &BorderRule) {
         let mut x = Border::from(*self);
         x.merge_with(part);
-        *self = FocusRing::from(x);
+        *self = Self::from(x);
     }
 }
 
@@ -568,7 +578,7 @@ pub struct TabIndicatorLength {
     pub total_proportion: Option<f64>,
 }
 
-#[derive(knus::DecodeScalar, Debug, Clone, Copy, PartialEq)]
+#[derive(knus::DecodeScalar, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TabIndicatorPosition {
     Left,
     Right,
@@ -757,18 +767,17 @@ impl FromStr for GradientInterpolation {
                 ));
             } else if iter.next().is_some() {
                 return Err(miette!("unexpected text after hue interpolation"));
-            } else {
-                match in_part2 {
-                    "shorter" => HueInterpolation::Shorter,
-                    "longer" => HueInterpolation::Longer,
-                    "increasing" => HueInterpolation::Increasing,
-                    "decreasing" => HueInterpolation::Decreasing,
-                    x => {
-                        return Err(miette!(
-                            "invalid hue interpolation {x}; \
-                             can be shorter, longer, increasing, decreasing"
-                        ));
-                    }
+            }
+            match in_part2 {
+                "shorter" => HueInterpolation::Shorter,
+                "longer" => HueInterpolation::Longer,
+                "increasing" => HueInterpolation::Increasing,
+                "decreasing" => HueInterpolation::Decreasing,
+                x => {
+                    return Err(miette!(
+                        "invalid hue interpolation {x}; \
+                         can be shorter, longer, increasing, decreasing"
+                    ));
                 }
             }
         } else {
@@ -809,7 +818,7 @@ struct ColorRgba {
 impl From<ColorRgba> for Color {
     fn from(value: ColorRgba) -> Self {
         let ColorRgba { r, g, b, a } = value;
-        Self::from_array_unpremul([r, g, b, a].map(|x| x as f32 / 255.))
+        Self::from_array_unpremul([r, g, b, a].map(|x| f32::from(x) / 255.))
     }
 }
 
@@ -851,10 +860,10 @@ where
         let rv = match *val.literal {
             // If it's a string, use FromStr.
             knus::ast::Literal::String(ref s) => {
-                Color::from_str(s).map_err(|e| DecodeError::conversion(&val.literal, e))
+                Self::from_str(s).map_err(|e| DecodeError::conversion(&val.literal, e))
             }
             // Otherwise, fall back to the 4-argument RGBA form.
-            _ => return ColorRgba::decode_node(node, ctx).map(Color::from),
+            _ => return ColorRgba::decode_node(node, ctx).map(Self::from),
         }?;
 
         // Check for unexpected following arguments.
@@ -874,7 +883,7 @@ where
                 format!("unexpected property `{}`", name.escape_default()),
             ));
         }
-        for child in node.children.as_ref().map(|lst| &lst[..]).unwrap_or(&[]) {
+        for child in node.children.as_ref().map_or(&[][..], |lst| &lst[..]) {
             ctx.emit_error(DecodeError::unexpected(
                 child,
                 "node",
@@ -954,7 +963,7 @@ where
 
         let top_left = decode_radius(ctx, val);
 
-        let mut rv = CornerRadius {
+        let mut rv = Self {
             top_left,
             top_right: top_left,
             bottom_right: top_left,
@@ -992,7 +1001,7 @@ where
                 format!("unexpected property `{}`", name.escape_default()),
             ));
         }
-        for child in node.children.as_ref().map(|lst| &lst[..]).unwrap_or(&[]) {
+        for child in node.children.as_ref().map_or(&[][..], |lst| &lst[..]) {
             ctx.emit_error(DecodeError::unexpected(
                 child,
                 "node",

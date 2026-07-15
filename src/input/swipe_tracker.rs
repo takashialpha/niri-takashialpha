@@ -18,7 +18,8 @@ struct Event {
 
 impl SwipeTracker {
     #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self {
             history: VecDeque::new(),
             pos: 0.,
@@ -46,17 +47,24 @@ impl SwipeTracker {
     }
 
     /// Returns the current gesture position.
-    pub fn pos(&self) -> f64 {
+    #[must_use]
+    pub const fn pos(&self) -> f64 {
         self.pos
     }
 
     /// Computes the current gesture velocity.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the last recorded event's timestamp precedes the first one's, which
+    /// should not happen since events are pushed in chronological order.
+    #[must_use]
     pub fn velocity(&self) -> f64 {
         let (Some(first), Some(last)) = (self.history.front(), self.history.back()) else {
             return 0.;
         };
 
-        let total_time = (last.timestamp - first.timestamp).as_secs_f64();
+        let total_time = last.timestamp.checked_sub(first.timestamp).unwrap().as_secs_f64();
         if total_time == 0. {
             return 0.;
         }
@@ -66,6 +74,7 @@ impl SwipeTracker {
     }
 
     /// Computes the gesture end position after decelerating to a halt.
+    #[must_use]
     pub fn projected_end_pos(&self) -> f64 {
         let vel = self.velocity();
         self.pos - vel / (1000. * DECELERATION.ln())

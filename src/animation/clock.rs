@@ -30,6 +30,7 @@ struct AdjustableClock {
 
 impl Clock {
     /// Creates a new clock with the given time.
+    #[must_use]
     pub fn with_time(time: Duration) -> Self {
         let clock = AdjustableClock::new(LazyClock::with_time(time));
         Self {
@@ -38,11 +39,13 @@ impl Clock {
     }
 
     /// Returns the current time.
+    #[must_use]
     pub fn now(&self) -> Duration {
         self.inner.borrow_mut().now()
     }
 
     /// Returns the underlying time not adjusted for rate change.
+    #[must_use]
     pub fn now_unadjusted(&self) -> Duration {
         self.inner.borrow_mut().inner.now()
     }
@@ -58,6 +61,7 @@ impl Clock {
     }
 
     /// Gets the clock rate.
+    #[must_use]
     pub fn rate(&self) -> f64 {
         self.inner.borrow().rate()
     }
@@ -68,6 +72,7 @@ impl Clock {
     }
 
     /// Returns whether animations should complete instantly.
+    #[must_use]
     pub fn should_complete_instantly(&self) -> bool {
         self.inner.borrow().should_complete_instantly()
     }
@@ -87,15 +92,15 @@ impl PartialEq for Clock {
 impl Eq for Clock {}
 
 impl LazyClock {
-    pub fn with_time(time: Duration) -> Self {
+    pub const fn with_time(time: Duration) -> Self {
         Self { time: Some(time) }
     }
 
-    pub fn clear(&mut self) {
+    pub const fn clear(&mut self) {
         self.time = None;
     }
 
-    pub fn set(&mut self, time: Duration) {
+    pub const fn set(&mut self, time: Duration) {
         self.time = Some(time);
     }
 
@@ -116,19 +121,19 @@ impl AdjustableClock {
         }
     }
 
-    pub fn rate(&self) -> f64 {
+    pub const fn rate(&self) -> f64 {
         self.rate
     }
 
-    pub fn set_rate(&mut self, rate: f64) {
+    pub const fn set_rate(&mut self, rate: f64) {
         self.rate = rate.clamp(0., 1000.);
     }
 
-    pub fn should_complete_instantly(&self) -> bool {
+    pub const fn should_complete_instantly(&self) -> bool {
         self.complete_instantly
     }
 
-    pub fn set_complete_instantly(&mut self, value: bool) {
+    pub const fn set_complete_instantly(&mut self, value: bool) {
         self.complete_instantly = value;
     }
 
@@ -140,11 +145,11 @@ impl AdjustableClock {
         }
 
         if self.last_seen_time < time {
-            let delta = time - self.last_seen_time;
+            let delta = time.checked_sub(self.last_seen_time).unwrap();
             let delta = delta.mul_f64(self.rate);
             self.current_time = self.current_time.saturating_add(delta);
         } else {
-            let delta = self.last_seen_time - time;
+            let delta = self.last_seen_time.checked_sub(time).unwrap();
             let delta = delta.mul_f64(self.rate);
             self.current_time = self.current_time.saturating_sub(delta);
         }

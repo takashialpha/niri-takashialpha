@@ -25,7 +25,7 @@ pub struct LayerRule {
     pub popups: PopupsRule,
 }
 
-#[derive(knus::Decode, Debug, Default, Clone, PartialEq)]
+#[derive(knus::Decode, Debug, Default, Clone, PartialEq, Eq)]
 pub struct Match {
     #[knus(property, str)]
     pub namespace: Option<RegexEq>,

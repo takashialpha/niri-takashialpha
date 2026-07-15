@@ -159,6 +159,10 @@ unsafe fn compile_program(
 }
 
 impl ShaderProgram {
+    /// # Errors
+    ///
+    /// Returns an error if the GLSL shader source fails to compile or link, or if the EGL
+    /// context could not be made current.
     pub fn compile(
         renderer: &mut GlesRenderer,
         src: &str,
@@ -170,6 +174,10 @@ impl ShaderProgram {
         })?
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the EGL context could not be made current to delete the GL
+    /// program objects.
     pub fn destroy(self, renderer: &mut GlesRenderer) -> Result<(), GlesError> {
         renderer.with_context(move |gl| unsafe {
             gl.DeleteProgram(self.0.normal.program);
@@ -180,6 +188,7 @@ impl ShaderProgram {
 
 impl ShaderRenderElement {
     #[allow(clippy::too_many_arguments)]
+    #[must_use]
     pub fn new(
         program: ProgramType,
         size: Size<f64, Logical>,
@@ -205,6 +214,7 @@ impl ShaderRenderElement {
         }
     }
 
+    #[must_use]
     pub fn empty(program: ProgramType, kind: Kind) -> Self {
         Self {
             program,
@@ -243,12 +253,14 @@ impl ShaderRenderElement {
         self.commit_counter.increment();
     }
 
-    pub fn with_location(mut self, location: Point<f64, Logical>) -> Self {
+    #[must_use]
+    pub const fn with_location(mut self, location: Point<f64, Logical>) -> Self {
         self.area.loc = location;
         self
     }
 
-    pub fn with_alpha(mut self, alpha: f32) -> Self {
+    #[must_use]
+    pub const fn with_alpha(mut self, alpha: f32) -> Self {
         self.alpha = alpha;
         self
     }
@@ -288,6 +300,13 @@ impl Element for ShaderRenderElement {
 }
 
 impl RenderElement<GlesRenderer> for ShaderRenderElement {
+    // This function is one contiguous, order-dependent sequence of raw GL FFI calls
+    // (bind buffer -> upload data -> set attrib pointer -> draw -> unbind, all against
+    // implicit global GL state). Splitting it into helper functions would not shorten
+    // any single logical step and would make the required call ordering harder to see,
+    // while adding function-boundary risk to unsafe FFI code with no compile-time
+    // ordering checks.
+    #[allow(clippy::too_many_lines)]
     fn draw(
         &self,
         frame: &mut GlesFrame<'_, '_>,
@@ -430,14 +449,14 @@ impl RenderElement<GlesRenderer> for ShaderRenderElement {
                 }
 
                 for uniform in &*self.additional_uniforms {
-                    let desc =
+                    let uniform_desc =
                         program
                             .additional_uniforms
                             .get(&*uniform.name)
                             .ok_or_else(|| {
                                 GlesError::UnknownUniform(uniform.name.clone().into_owned())
                             })?;
-                    uniform.value.set(gl, desc)?;
+                    uniform.value.set(gl, uniform_desc)?;
                 }
 
                 gl.EnableVertexAttribArray(program.attrib_vert as u32);
@@ -458,7 +477,7 @@ impl RenderElement<GlesRenderer> for ShaderRenderElement {
                     ffi::ARRAY_BUFFER,
                     (std::mem::size_of::<ffi::types::GLfloat>() * resources.vertices.len())
                         as isize,
-                    resources.vertices.as_ptr() as *const _,
+                    resources.vertices.as_ptr().cast(),
                     ffi::STREAM_DRAW,
                 );
 
@@ -521,6 +540,11 @@ impl RenderElement<GlesRenderer> for ShaderRenderElement {
 }
 
 impl<'render> RenderElement<TtyRenderer<'render>> for ShaderRenderElement {
+    // `frame`'s GLES-frame guard is used on the very next line and the function returns
+    // right after; there is no later code it could be held across, so an explicit early
+    // `drop()` would fire at the same point as the implicit end-of-scope drop already
+    // does.
+    #[allow(clippy::significant_drop_tightening)]
     fn draw(
         &self,
         frame: &mut TtyFrame<'_, '_, '_>,

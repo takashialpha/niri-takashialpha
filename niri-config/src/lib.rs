@@ -127,6 +127,8 @@ impl<S> knus::DecodeChildren<S> for ConfigPart
 where
     S: knus::traits::ErrorSpan,
 {
+    // Sequential KDL field parsing; splitting it up would not reduce complexity.
+    #[allow(clippy::too_many_lines)]
     fn decode_children(
         nodes: &[knus::ast::SpannedNode<S>],
         ctx: &mut knus::decode::Context<S>,
@@ -217,7 +219,7 @@ where
                 }
 
                 "prefer-no-csd" => {
-                    config.borrow_mut().prefer_no_csd = Flag::decode_node(node, ctx)?.0
+                    config.borrow_mut().prefer_no_csd = Flag::decode_node(node, ctx)?.0;
                 }
 
                 "screenshot-path" => {
@@ -315,7 +317,7 @@ where
                         let Some(home) = std::env::home_dir() else {
                             ctx.emit_error(DecodeError::missing(
                                 node,
-                                format!("error retrieving home directory to expand {path:?}"),
+                                format!("error retrieving home directory to expand {}", path.display()),
                             ));
                             continue;
                         };
@@ -350,7 +352,7 @@ where
 
                     // Check for recursive include for a nicer error message.
                     let mut include_stack = ctx.get::<IncludeStack>().unwrap().0.clone();
-                    if !include_stack.insert(path.to_path_buf()) {
+                    if !include_stack.insert(path.clone()) {
                         ctx.emit_error(DecodeError::missing(
                             node,
                             "recursive include (file includes itself)",
@@ -359,7 +361,7 @@ where
                     }
 
                     // Store even if the include fails to read or parse, so it gets watched.
-                    includes.borrow_mut().0.push(path.to_path_buf());
+                    includes.borrow_mut().0.push(path.clone());
 
                     match fs::read_to_string(&path) {
                         Ok(text) => {
@@ -370,7 +372,7 @@ where
                             let relative_path = path.strip_prefix(root_base).ok().unwrap_or(&path);
                             let filename = relative_path.to_str().unwrap_or(filename);
 
-                            let part = knus::parse_with_context::<ConfigPart, knus::span::Span, _>(
+                            let part = knus::parse_with_context::<Self, knus::span::Span, _>(
                                 filename,
                                 &text,
                                 |ctx| {
@@ -404,7 +406,7 @@ where
                                 // Report all other errors normally
                                 ctx.emit_error(DecodeError::missing(
                                     node,
-                                    format!("failed to read included config from {path:?}: {err}"),
+                                    format!("failed to read included config from {}: {err}", path.display()),
                                 ));
                             }
                         }
@@ -426,8 +428,13 @@ where
 }
 
 impl Config {
+    /// # Panics
+    ///
+    /// Panics if the bundled default config contains `include` directives, since those
+    /// cannot be resolved without a filesystem path to resolve them relative to.
+    #[must_use]
     pub fn load_default() -> Self {
-        let res = Config::parse(
+        let res = Self::parse(
             Path::new("default-config.kdl"),
             include_str!("../../resources/default-config.kdl"),
         );
@@ -441,12 +448,13 @@ impl Config {
         res.config.unwrap()
     }
 
+    #[must_use]
     pub fn load(path: &Path) -> ConfigParseResult<Self, miette::Report> {
         let contents = match fs::read_to_string(path) {
             Ok(x) => x,
             Err(err) => {
                 return ConfigParseResult::from_err(
-                    miette!(err).context(format!("error reading {path:?}")),
+                    miette!(err).context(format!("error reading {}", path.display())),
                 );
             }
         };
@@ -465,7 +473,7 @@ impl Config {
             .and_then(OsStr::to_str)
             .unwrap_or("config.kdl");
 
-        let config = Rc::new(RefCell::new(Config::default()));
+        let config = Rc::new(RefCell::new(Self::default()));
         let includes = Rc::new(RefCell::new(Includes(Vec::new())));
         let include_errors = Rc::new(RefCell::new(IncludeErrors(Vec::new())));
         let include_stack = HashSet::from([path.to_path_buf()]);
@@ -493,6 +501,9 @@ impl Config {
         ConfigParseResult { config, includes }
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if `text`, or any config it `include`s, fails to parse.
     pub fn parse_mem(text: &str) -> Result<Self, ConfigIncludeError> {
         Self::parse(Path::new("config.kdl"), text).config
     }
@@ -500,6 +511,7 @@ impl Config {
 
 impl ConfigPath {
     /// Loads the config, returns an error if it doesn't exist.
+    #[must_use]
     pub fn load(&self) -> ConfigParseResult<Config, miette::Report> {
         self.load_inner(|user_path, system_path| {
             Err(miette!(
@@ -515,6 +527,7 @@ impl ConfigPath {
     ///
     /// If the config was created, but for some reason could not be read afterwards,
     /// this may return `(Some(_), Err(_))`.
+    #[must_use]
     pub fn load_or_create(&self) -> (Option<&Path>, ConfigParseResult<Config, miette::Report>) {
         let mut created_at = None;
 
@@ -522,7 +535,7 @@ impl ConfigPath {
             .load_inner(|user_path, _| {
                 Self::create(user_path, &mut created_at)
                     .map(|()| user_path)
-                    .with_context(|| format!("error creating config at {user_path:?}"))
+                    .with_context(|| format!("error creating config at {}", user_path.display()))
             })
             .map_config_res(|res| res.context("error loading config"));
 
@@ -534,8 +547,8 @@ impl ConfigPath {
         maybe_create: impl FnOnce(&'a Path, &'a Path) -> miette::Result<&'a Path>,
     ) -> ConfigParseResult<Config, miette::Report> {
         let path = match self {
-            ConfigPath::Explicit(path) => path.as_path(),
-            ConfigPath::Regular {
+            Self::Explicit(path) => path.as_path(),
+            Self::Regular {
                 user_path,
                 system_path,
             } => {
@@ -558,7 +571,7 @@ impl ConfigPath {
         if let Some(default_parent) = path.parent() {
             fs::create_dir_all(default_parent)
                 .into_diagnostic()
-                .with_context(|| format!("error creating config directory {default_parent:?}"))?;
+                .with_context(|| format!("error creating config directory {}", default_parent.display()))?;
         }
 
         // Create the config and fill it with the default config if it doesn't exist.
@@ -572,7 +585,7 @@ impl ConfigPath {
             res => res,
         }
         .into_diagnostic()
-        .with_context(|| format!("error opening config file at {path:?}"))?;
+        .with_context(|| format!("error opening config file at {}", path.display()))?;
 
         *created_at = Some(path);
 
@@ -581,7 +594,7 @@ impl ConfigPath {
         new_file
             .write_all(default)
             .into_diagnostic()
-            .with_context(|| format!("error writing default config to {path:?}"))?;
+            .with_context(|| format!("error writing default config to {}", path.display()))?;
 
         Ok(())
     }

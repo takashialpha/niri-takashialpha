@@ -14,7 +14,7 @@ pub struct SpawnShAtStartup {
     pub command: String,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Cursor {
     pub xcursor_theme: String,
     pub xcursor_size: u8,
@@ -33,7 +33,7 @@ impl Default for Cursor {
     }
 }
 
-#[derive(knus::Decode, Debug, PartialEq)]
+#[derive(knus::Decode, Debug, PartialEq, Eq)]
 pub struct CursorPart {
     #[knus(child, unwrap(argument))]
     pub xcursor_theme: Option<String>,
@@ -53,7 +53,7 @@ impl MergeWith<CursorPart> for Cursor {
     }
 }
 
-#[derive(knus::Decode, Debug, Clone, PartialEq)]
+#[derive(knus::Decode, Debug, Clone, PartialEq, Eq)]
 pub struct ScreenshotPath(#[knus(argument)] pub Option<String>);
 
 impl Default for ScreenshotPath {

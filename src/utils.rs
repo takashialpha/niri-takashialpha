@@ -52,7 +52,8 @@ impl CastSessionId {
         Self(COUNTER.next())
     }
 
-    pub fn get(self) -> u64 {
+    #[must_use]
+    pub const fn get(self) -> u64 {
         self.0
     }
 }
@@ -73,7 +74,8 @@ impl CastStreamId {
         Self(COUNTER.next())
     }
 
-    pub fn get(self) -> u64 {
+    #[must_use]
+    pub const fn get(self) -> u64 {
         self.0
     }
 }
@@ -103,6 +105,10 @@ bitflags! {
     }
 }
 
+// Infallible in practice: every discriminant of the generated `xdg_toplevel::ResizeEdge`
+// enum (None, Top, Bottom, Left, Right, and the four corner combinations) is one of this
+// bitflags type's known values, so `from_bits` can never return `None` here.
+#[allow(clippy::fallible_impl_from)]
 impl From<xdg_toplevel::ResizeEdge> for ResizeEdge {
     #[inline]
     fn from(x: xdg_toplevel::ResizeEdge) -> Self {
@@ -111,7 +117,8 @@ impl From<xdg_toplevel::ResizeEdge> for ResizeEdge {
 }
 
 impl ResizeEdge {
-    pub fn cursor_icon(self) -> CursorIcon {
+    #[must_use]
+    pub const fn cursor_icon(self) -> CursorIcon {
         match self {
             Self::LEFT => CursorIcon::WResize,
             Self::RIGHT => CursorIcon::EResize,
@@ -127,21 +134,28 @@ impl ResizeEdge {
 }
 
 /// Build identifier: just the commit hash. There is no semantic version.
+#[must_use]
 pub fn version() -> String {
     option_env!("NIRI_BUILD_COMMIT")
         .unwrap_or(git_version!(fallback = "unknown commit"))
         .to_string()
 }
 
+// CLOCK_MONOTONIC always yields tv_sec >= 0 and 0 <= tv_nsec < 1_000_000_000 per POSIX, so
+// these casts cannot lose sign or truncate.
+#[must_use]
+#[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
 pub fn get_monotonic_time() -> Duration {
     let ts = clock_gettime(ClockId::Monotonic);
     Duration::new(ts.tv_sec as u64, ts.tv_nsec as u32)
 }
 
+#[must_use]
 pub fn center(rect: Rectangle<i32, Logical>) -> Point<i32, Logical> {
     rect.loc + rect.size.downscale(2).to_point()
 }
 
+#[must_use]
 pub fn center_f64(rect: Rectangle<f64, Logical>) -> Point<f64, Logical> {
     rect.loc + rect.size.downscale(2.0).to_point()
 }
@@ -151,10 +165,12 @@ pub fn to_physical_precise_round<N: Coordinate>(scale: f64, logical: impl Coordi
     N::from_f64((logical.to_f64() * scale).round())
 }
 
+#[must_use]
 pub fn round_logical_in_physical(scale: f64, logical: f64) -> f64 {
     (logical * scale).round() / scale
 }
 
+#[must_use]
 pub fn round_logical_in_physical_max1(scale: f64, logical: f64) -> f64 {
     if logical == 0. {
         return 0.;
@@ -163,6 +179,7 @@ pub fn round_logical_in_physical_max1(scale: f64, logical: f64) -> f64 {
     (logical * scale).max(1.).round() / scale
 }
 
+#[must_use]
 pub fn floor_logical_in_physical_max1(scale: f64, logical: f64) -> f64 {
     if logical == 0. {
         return 0.;
@@ -171,6 +188,11 @@ pub fn floor_logical_in_physical_max1(scale: f64, logical: f64) -> f64 {
     (logical * scale).max(1.).floor() / scale
 }
 
+/// # Panics
+///
+/// Panics if `output` has no current mode set, which should not happen for any output
+/// managed by niri.
+#[must_use]
 pub fn output_size(output: &Output) -> Size<f64, Logical> {
     let output_scale = output.current_scale().fractional_scale();
     let output_transform = output.current_transform();
@@ -179,6 +201,7 @@ pub fn output_size(output: &Output) -> Size<f64, Logical> {
     output_transform.transform_size(logical_size)
 }
 
+#[must_use]
 pub fn logical_output(output: &Output) -> niri_ipc::LogicalOutput {
     let loc = output.current_location();
     let size = output_size(output);
@@ -192,6 +215,8 @@ pub fn logical_output(output: &Output) -> niri_ipc::LogicalOutput {
         Transform::Flipped180 => niri_ipc::Transform::Flipped180,
         Transform::Flipped270 => niri_ipc::Transform::Flipped270,
     };
+    // Output dimensions are always positive and far below u32::MAX for any real display.
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
     niri_ipc::LogicalOutput {
         x: loc.x,
         y: loc.y,
@@ -203,15 +228,16 @@ pub fn logical_output(output: &Output) -> niri_ipc::LogicalOutput {
 }
 
 pub struct PanelOrientation(pub Transform);
+#[must_use]
 pub fn panel_orientation(output: &Output) -> Transform {
     output
         .user_data()
         .get::<PanelOrientation>()
-        .map(|x| x.0)
-        .unwrap_or(Transform::Normal)
+        .map_or(Transform::Normal, |x| x.0)
 }
 
-pub fn ipc_transform_to_smithay(transform: niri_ipc::Transform) -> Transform {
+#[must_use]
+pub const fn ipc_transform_to_smithay(transform: niri_ipc::Transform) -> Transform {
     match transform {
         niri_ipc::Transform::Normal => Transform::Normal,
         niri_ipc::Transform::_90 => Transform::_90,
@@ -224,6 +250,7 @@ pub fn ipc_transform_to_smithay(transform: niri_ipc::Transform) -> Transform {
     }
 }
 
+#[must_use]
 pub fn is_mapped(surface: &WlSurface) -> bool {
     // None if the surface hadn't committed yet.
     with_renderer_surface_state(surface, |state| state.buffer().is_some()).unwrap_or(false)
@@ -241,6 +268,9 @@ pub fn send_scale_transform(
     });
 }
 
+/// # Errors
+///
+/// Returns an error if `path` starts with `~` but the home directory cannot be determined.
 pub fn expand_home(path: &Path) -> anyhow::Result<Option<PathBuf>> {
     if let Ok(rest) = path.strip_prefix("~") {
         let home = std::env::home_dir().context("error retrieving home directory")?;
@@ -250,6 +280,10 @@ pub fn expand_home(path: &Path) -> anyhow::Result<Option<PathBuf>> {
     }
 }
 
+/// # Errors
+///
+/// Returns an error if the configured path contains a NUL byte, if the current time cannot
+/// be read or formatted, or if expanding a leading `~` fails.
 pub fn make_screenshot_path(config: &Config) -> anyhow::Result<Option<PathBuf>> {
     let Some(path) = &config.screenshot_path.0 else {
         return Ok(None);
@@ -263,7 +297,7 @@ pub fn make_screenshot_path(config: &Config) -> anyhow::Result<Option<PathBuf>> 
         let time = libc::time(null_mut());
         ensure!(time != -1, "error in time()");
 
-        let tm = libc::localtime(&time);
+        let tm = libc::localtime(&raw const time);
         ensure!(!tm.is_null(), "error in localtime()");
 
         let rv = libc::strftime(buf.as_mut_ptr().cast(), buf.len(), format.as_ptr(), tm);
@@ -279,6 +313,9 @@ pub fn make_screenshot_path(config: &Config) -> anyhow::Result<Option<PathBuf>> 
     Ok(Some(path))
 }
 
+/// # Errors
+///
+/// Returns an error if writing the PNG header or image data fails.
 pub fn write_png_rgba8(
     w: impl Write,
     width: u32,
@@ -293,11 +330,20 @@ pub fn write_png_rgba8(
     writer.write_image_data(pixels)
 }
 
+/// # Panics
+///
+/// Panics if `output` has no [`OutputName`] set, which should not happen for any output
+/// managed by niri.
+#[must_use]
 pub fn output_matches_name(output: &Output, target: &str) -> bool {
     let name = output.user_data().get::<OutputName>().unwrap();
     name.matches(target)
 }
 
+/// # Panics
+///
+/// Panics if `toplevel`'s surface has no [`XdgToplevelSurfaceData`], which should not
+/// happen for any surface with the xdg-toplevel role.
 pub fn with_toplevel_role<T>(
     toplevel: &ToplevelSurface,
     f: impl FnOnce(&mut XdgToplevelSurfaceRoleAttributes) -> T,
@@ -314,6 +360,10 @@ pub fn with_toplevel_role<T>(
     })
 }
 
+/// # Panics
+///
+/// Panics if `toplevel`'s surface has no [`XdgToplevelSurfaceData`], which should not
+/// happen for any surface with the xdg-toplevel role.
 pub fn with_toplevel_role_and_current<T>(
     toplevel: &ToplevelSurface,
     f: impl FnOnce(&mut XdgToplevelSurfaceRoleAttributes, Option<&ToplevelState>) -> T,
@@ -326,6 +376,9 @@ pub fn with_toplevel_role_and_current<T>(
             .lock()
             .unwrap();
 
+        // `current` borrows out of `guard`, and `f` needs it live, so `guard` cannot be
+        // dropped before the call to `f` below.
+        #[allow(clippy::significant_drop_tightening)]
         let mut guard = states.cached_state.get::<ToplevelCachedState>();
         let current = guard.current().last_acked.as_ref().map(|c| &c.state);
 
@@ -333,6 +386,10 @@ pub fn with_toplevel_role_and_current<T>(
     })
 }
 
+/// # Panics
+///
+/// Panics if `toplevel`'s surface has no [`XdgToplevelSurfaceData`], which should not
+/// happen for any surface with the xdg-toplevel role.
 pub fn with_toplevel_last_uncommitted_configure<T>(
     toplevel: &ToplevelSurface,
     f: impl FnOnce(Option<&ToplevelConfigure>) -> T,
@@ -349,20 +406,23 @@ pub fn with_toplevel_last_uncommitted_configure<T>(
 
         if let Some(last_pending) = role.pending_configures().last() {
             // Configure not yet acked by the client.
+            drop(guard);
             f(Some(last_pending))
         } else if let Some(last_acked) = &role.last_acked {
-            let mut configure = Some(last_acked);
+            let already_committed = guard
+                .current()
+                .last_acked
+                .as_ref()
+                .is_some_and(|committed| committed.serial.is_no_older_than(&last_acked.serial));
+            drop(guard);
 
-            if let Some(committed) = &guard.current().last_acked
-                && committed.serial.is_no_older_than(&last_acked.serial)
-            {
-                // Already committed to this configure.
-                configure = None;
-            }
+            // Already committed to this configure.
+            let configure = if already_committed { None } else { Some(last_acked) };
 
             f(configure)
         } else {
             // Surface hadn't been configured yet.
+            drop(guard);
             f(None)
         }
     })
@@ -378,6 +438,9 @@ pub fn update_tiled_state(
     //
     // If the user prefers no CSD, it's a reasonable assumption that they would prefer to get
     // rid of the various client-side rounded corners also by using the tiled state.
+    // The map_or_else rewrite clippy suggests nests this whole three-way, heavily-commented
+    // branch inside a closure, which reads worse than the plain if/else-if/else chain.
+    #[allow(clippy::option_if_let_else)]
     let should_tile = || {
         // Figure out if the client bound any decoration globals for this window. In this case,
         // the pending decoration mode will be set to something (we always set it upon binding the
@@ -431,6 +494,7 @@ pub fn update_tiled_state(
     });
 }
 
+#[must_use]
 pub fn get_credentials_for_surface(surface: &WlSurface) -> Option<Credentials> {
     let handle = surface.handle().upgrade()?;
     let dh = DisplayHandle::from(handle);
@@ -439,6 +503,11 @@ pub fn get_credentials_for_surface(surface: &WlSurface) -> Option<Credentials> {
     get_credentials_for_client(&dh, &client)
 }
 
+#[must_use]
+/// # Panics
+///
+/// Panics if `client` has no [`ClientState`] data, which should not happen for any client
+/// connected through niri's display handle.
 pub fn get_credentials_for_client(dh: &DisplayHandle, client: &Client) -> Option<Credentials> {
     let data = client.get_data::<ClientState>().unwrap();
     if data.credentials_unknown {
@@ -448,6 +517,7 @@ pub fn get_credentials_for_client(dh: &DisplayHandle, client: &Client) -> Option
     client.get_credentials(dh).ok()
 }
 
+#[must_use]
 pub fn ensure_min_max_size(mut x: i32, min_size: i32, max_size: i32) -> i32 {
     if max_size > 0 {
         x = min(x, max_size);
@@ -458,6 +528,7 @@ pub fn ensure_min_max_size(mut x: i32, min_size: i32, max_size: i32) -> i32 {
     x
 }
 
+#[must_use]
 pub fn ensure_min_max_size_maybe_zero(x: i32, min_size: i32, max_size: i32) -> i32 {
     if x != 0 {
         ensure_min_max_size(x, min_size, max_size)
@@ -480,6 +551,7 @@ pub fn clamp_preferring_top_left_in_area(
     rect.loc.y = f64::max(rect.loc.y, area.loc.y);
 }
 
+#[must_use]
 pub fn center_preferring_top_left_in_area(
     area: Rectangle<f64, Logical>,
     size: Size<f64, Logical>,
@@ -492,6 +564,7 @@ pub fn center_preferring_top_left_in_area(
     area.loc + offset
 }
 
+#[must_use]
 pub fn baba_is_float_offset(now: Duration, view_height: f64) -> f64 {
     let now = now.as_secs_f64();
     let amplitude = view_height / 96.;

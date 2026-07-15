@@ -121,7 +121,7 @@ impl ExitConfirmDialog {
         true
     }
 
-    pub fn is_open(&self) -> bool {
+    pub const fn is_open(&self) -> bool {
         matches!(self.state, State::Showing(_) | State::Visible)
     }
 
@@ -142,7 +142,7 @@ impl ExitConfirmDialog {
         }
     }
 
-    pub fn are_animations_ongoing(&self) -> bool {
+    pub const fn are_animations_ongoing(&self) -> bool {
         matches!(self.state, State::Showing(_) | State::Hiding(_))
     }
 
@@ -198,7 +198,7 @@ impl ExitConfirmDialog {
         let elem = RescaleRenderElement::from_element(
             elem,
             (location + size.downscale(2.)).to_physical_precise_round(scale),
-            value.max(0.) * 0.2 + 0.8,
+            value.max(0.).mul_add(0.2, 0.8),
         );
         push(ExitConfirmDialogRenderElement::Texture(elem));
 

@@ -35,7 +35,8 @@ enum GestureState {
 }
 
 impl SpatialMovementGrab {
-    pub fn new(
+    #[must_use]
+    pub const fn new(
         start_data: PointerGrabStartData<State>,
         output: Output,
         workspace_id: WorkspaceId,
@@ -60,10 +61,12 @@ impl SpatialMovementGrab {
         }
     }
 
+    #[must_use]
     pub fn view_offset_output(&self) -> Option<&Output> {
         (self.gesture == GestureState::ViewOffset).then_some(&self.output)
     }
 
+    #[must_use]
     pub fn workspace_switch_output(&self) -> Option<&Output> {
         (self.gesture == GestureState::WorkspaceSwitch).then_some(&self.output)
     }
@@ -85,7 +88,7 @@ impl SpatialMovementGrab {
                 let c = self.new_location - self.start_data.location;
 
                 // Check if the gesture moved far enough to decide. Threshold copied from GTK 4.
-                if c.x * c.x + c.y * c.y >= 8. * 8. {
+                if c.y.mul_add(c.y, c.x * c.x) >= 8. * 8. {
                     if c.x.abs() > c.y.abs() {
                         self.gesture = GestureState::ViewOffset;
                         if let Some((ws_idx, ws)) = layout.find_workspace_by_id(self.workspace_id) {
@@ -123,7 +126,7 @@ impl SpatialMovementGrab {
         }
     }
 
-    fn on_ungrab(&mut self, state: &mut State) {
+    fn on_ungrab(&self, state: &mut State) {
         let layout = &mut state.niri.layout;
         let res = match self.gesture {
             GestureState::Recognizing => None,
@@ -207,7 +210,12 @@ impl PointerGrab<State> for SpatialMovementGrab {
                 self,
                 data,
                 SERIAL_COUNTER.next_serial(),
-                get_monotonic_time().as_millis() as u32,
+                // Wayland event timestamps are 32-bit milliseconds by protocol design and
+                // are expected to wrap; clients compare them modularly, not absolutely.
+                #[allow(clippy::cast_possible_truncation)]
+                {
+                    get_monotonic_time().as_millis() as u32
+                },
                 true,
             );
         }

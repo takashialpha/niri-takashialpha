@@ -16,11 +16,12 @@ pub struct ResizeGrab {
 }
 
 impl ResizeGrab {
-    pub fn new(start_data: PointerGrabStartData<State>, window: Window) -> Self {
+    #[must_use]
+    pub const fn new(start_data: PointerGrabStartData<State>, window: Window) -> Self {
         Self { start_data, window }
     }
 
-    fn on_ungrab(&mut self, state: &mut State) {
+    fn on_ungrab(&self, state: &mut State) {
         state.niri.layout.interactive_resize_end(&self.window);
         state
             .niri

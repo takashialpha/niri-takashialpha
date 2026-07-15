@@ -22,6 +22,7 @@ pub struct GradientFadeTextureRenderElement {
 pub struct GradientFadeShader(GlesTexProgram);
 
 impl GradientFadeTextureRenderElement {
+    #[must_use]
     pub fn new(texture: TextureRenderElement<GlesTexture>, program: GradientFadeShader) -> Self {
         let logical_w = texture.buffer().logical_size().w;
         let logical_src_w = texture.logical_src().size.w;
@@ -122,6 +123,11 @@ impl RenderElement<GlesRenderer> for GradientFadeTextureRenderElement {
 }
 
 impl<'render> RenderElement<TtyRenderer<'render>> for GradientFadeTextureRenderElement {
+    // `gles_frame`'s guard is used on the next lines and the function returns right
+    // after; there is no later code it could be held across, so an explicit early
+    // `drop()` would fire at the same point as the implicit end-of-scope drop already
+    // does.
+    #[allow(clippy::significant_drop_tightening)]
     fn draw(
         &self,
         frame: &mut TtyFrame<'render, '_, '_>,

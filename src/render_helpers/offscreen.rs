@@ -69,6 +69,9 @@ pub struct OffscreenData {
 }
 
 impl OffscreenBuffer {
+    /// # Errors
+    ///
+    /// Returns an error if rendering `elements` into the offscreen GLES texture fails.
     pub fn render(
         &self,
         renderer: &mut GlesRenderer,
@@ -76,9 +79,12 @@ impl OffscreenBuffer {
         elements: &[impl RenderElement<GlesRenderer>],
     ) -> anyhow::Result<(OffscreenRenderElement, SyncPoint, OffscreenData)> {
         let geo = encompassing_geo(scale, elements.iter());
-        let elements = Vec::from_iter(elements.iter().map(|ele| {
-            RelocateRenderElement::from_element(ele, geo.loc.upscale(-1), Relocate::Relative)
-        }));
+        let elements = elements
+            .iter()
+            .map(|ele| {
+                RelocateRenderElement::from_element(ele, geo.loc.upscale(-1), Relocate::Relative)
+            })
+            .collect::<Vec<_>>();
 
         // Guard against empty elements producing a zero size.
         let mut src_size = geo.size;
@@ -199,7 +205,7 @@ impl OffscreenBuffer {
 
 impl Default for OffscreenBuffer {
     fn default() -> Self {
-        OffscreenBuffer {
+        Self {
             inner: RefCell::new(None),
             id: Id::new(),
         }
@@ -207,24 +213,29 @@ impl Default for OffscreenBuffer {
 }
 
 impl OffscreenRenderElement {
-    pub fn texture(&self) -> &GlesTexture {
+    #[must_use]
+    pub const fn texture(&self) -> &GlesTexture {
         &self.texture
     }
 
-    pub fn offset(&self) -> Point<f64, Logical> {
+    #[must_use]
+    pub const fn offset(&self) -> Point<f64, Logical> {
         self.offset
     }
 
-    pub fn with_alpha(mut self, alpha: f32) -> Self {
+    #[must_use]
+    pub const fn with_alpha(mut self, alpha: f32) -> Self {
         self.alpha = alpha;
         self
     }
 
-    pub fn with_offset(mut self, offset: Point<f64, Logical>) -> Self {
+    #[must_use]
+    pub const fn with_offset(mut self, offset: Point<f64, Logical>) -> Self {
         self.offset = offset;
         self
     }
 
+    #[must_use]
     pub fn logical_size(&self) -> Size<f64, Logical> {
         self.src_size
             .to_f64()
@@ -331,6 +342,11 @@ impl RenderElement<GlesRenderer> for OffscreenRenderElement {
 }
 
 impl<'render> RenderElement<TtyRenderer<'render>> for OffscreenRenderElement {
+    // `gles_frame`'s guard is used on the next lines and the function returns right
+    // after; there is no later code it could be held across, so an explicit early
+    // `drop()` would fire at the same point as the implicit end-of-scope drop already
+    // does.
+    #[allow(clippy::significant_drop_tightening)]
     fn draw(
         &self,
         frame: &mut TtyFrame<'_, '_, '_>,

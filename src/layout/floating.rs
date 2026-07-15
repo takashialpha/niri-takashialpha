@@ -189,7 +189,8 @@ impl Data {
 }
 
 impl<W: LayoutElement> FloatingSpace<W> {
-    pub fn new(
+    #[must_use]
+    pub const fn new(
         view_size: Size<f64, Logical>,
         working_area: Rectangle<f64, Logical>,
         scale: f64,
@@ -389,7 +390,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
         self.tiles.iter().any(|tile| tile.window().id() == id)
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.tiles.is_empty()
     }
 
@@ -404,14 +405,14 @@ impl<W: LayoutElement> FloatingSpace<W> {
         // unfullscreen it.
         let floating_size = tile.floating_window_size;
         let win = tile.window_mut();
-        let mut size = if !win.pending_sizing_mode().is_normal() {
-            // If the window was fullscreen or maximized without a floating size, ask for (0, 0).
-            floating_size.unwrap_or_default()
-        } else {
+        let mut size = if win.pending_sizing_mode().is_normal() {
             // If the window wasn't fullscreen without a floating size (e.g. it was tiled before),
             // ask for the current size. If the current size is unknown (the window was only ever
             // fullscreen until now), fall back to (0, 0).
             floating_size.unwrap_or_else(|| win.expected_size().unwrap_or_default())
+        } else {
+            // If the window was fullscreen or maximized without a floating size, ask for (0, 0).
+            floating_size.unwrap_or_default()
         };
 
         // Apply min/max size window rules. If requesting a concrete size, apply completely; if
@@ -446,6 +447,9 @@ impl<W: LayoutElement> FloatingSpace<W> {
         self.bring_up_descendants_of(idx);
     }
 
+    /// # Panics
+    ///
+    /// Panics if `above` is not the id of a window in this floating space.
     pub fn add_tile_above(&mut self, above: &W::Id, mut tile: Tile<W>, activate: bool) {
         let idx = self.idx_of(above).unwrap();
 
@@ -739,7 +743,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
         let current_window = win.expected_size().unwrap_or_else(|| win.size()).w;
         let current_tile = tile.tile_expected_or_current_size().w;
 
-        const MAX_PX: f64 = 100000.;
+        const MAX_PX: f64 = 100_000.;
         const MAX_F: f64 = 10000.;
 
         let win_width = match change {
@@ -786,7 +790,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
         let current_window = win.expected_size().unwrap_or_else(|| win.size()).h;
         let current_tile = tile.tile_expected_or_current_size().h;
 
-        const MAX_PX: f64 = 100000.;
+        const MAX_PX: f64 = 100_000.;
         const MAX_F: f64 = 10000.;
 
         let win_height = match change {
@@ -916,7 +920,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
         let idx = self.idx_of(active_id).unwrap();
 
         let new_pos = self.data[idx].logical_pos + amount;
-        self.move_to(idx, new_pos, true)
+        self.move_to(idx, new_pos, true);
     }
 
     pub fn move_left(&mut self) {
@@ -959,26 +963,26 @@ impl<W: LayoutElement> FloatingSpace<W> {
             PositionChange::SetFixed(x) => pos.x = x + working_area_loc.x,
             PositionChange::SetProportion(prop) => {
                 let prop = (prop / 100.).clamp(0., MAX_F);
-                pos.x = available_width * prop + working_area_loc.x;
+                pos.x = available_width.mul_add(prop, working_area_loc.x);
             }
             PositionChange::AdjustFixed(x) => pos.x += x,
             PositionChange::AdjustProportion(prop) => {
                 let current_prop = (pos.x - working_area_loc.x) / available_width.max(1.);
                 let prop = (current_prop + prop / 100.).clamp(0., MAX_F);
-                pos.x = available_width * prop + working_area_loc.x;
+                pos.x = available_width.mul_add(prop, working_area_loc.x);
             }
         }
         match y {
             PositionChange::SetFixed(y) => pos.y = y + working_area_loc.y,
             PositionChange::SetProportion(prop) => {
                 let prop = (prop / 100.).clamp(0., MAX_F);
-                pos.y = available_height * prop + working_area_loc.y;
+                pos.y = available_height.mul_add(prop, working_area_loc.y);
             }
             PositionChange::AdjustFixed(y) => pos.y += y,
             PositionChange::AdjustProportion(prop) => {
                 let current_prop = (pos.y - working_area_loc.y) / available_height.max(1.);
                 let prop = (current_prop + prop / 100.).clamp(0., MAX_F);
-                pos.y = available_height * prop + working_area_loc.y;
+                pos.y = available_height.mul_add(prop, working_area_loc.y);
             }
         }
 
@@ -1108,7 +1112,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
             let mut dx = delta.x;
             if edges.contains(ResizeEdge::LEFT) {
                 dx = -dx;
-            };
+            }
 
             let window_width = (original_window_size.w + dx).round() as i32;
             self.set_window_width(Some(window), SizeChange::SetFixed(window_width), false);
@@ -1118,7 +1122,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
             let mut dy = delta.y;
             if edges.contains(ResizeEdge::TOP) {
                 dy = -dy;
-            };
+            }
 
             let window_height = (original_window_size.h + dy).round() as i32;
             self.set_window_height(Some(window), SizeChange::SetFixed(window_height), false);
@@ -1206,7 +1210,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
         let new_pos = data.logical_pos;
 
         let diff = prev_pos - new_pos;
-        if diff.x * diff.x + diff.y * diff.y > ANIMATION_THRESHOLD_SQ {
+        if diff.y.mul_add(diff.y, diff.x * diff.x) > ANIMATION_THRESHOLD_SQ {
             tile.animate_move_from(prev_pos - new_pos);
         }
     }
@@ -1224,7 +1228,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
                 let size = match resolve_preset_size(size, working_area_size) {
                     ResolvedSize::Tile(mut size) => {
                         if !border.off {
-                            size -= border.width * 2.;
+                            size = border.width.mul_add(-2., size);
                         }
                         size
                     }
@@ -1265,10 +1269,10 @@ impl<W: LayoutElement> FloatingSpace<W> {
                     pos.y = area.size.h - size.h - pos.y;
                 }
                 if relative_to == RelativeTo::Top || relative_to == RelativeTo::Bottom {
-                    pos.x += area.size.w / 2.0 - size.w / 2.0
+                    pos.x += area.size.w / 2.0 - size.w / 2.0;
                 }
                 if relative_to == RelativeTo::Left || relative_to == RelativeTo::Right {
-                    pos.y += area.size.h / 2.0 - size.h / 2.0
+                    pos.y += area.size.h / 2.0 - size.h / 2.0;
                 }
 
                 pos + self.working_area.loc
@@ -1276,7 +1280,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
         })
     }
 
-    pub fn working_area(&self) -> Rectangle<f64, Logical> {
+    pub const fn working_area(&self) -> Rectangle<f64, Logical> {
         self.working_area
     }
 }

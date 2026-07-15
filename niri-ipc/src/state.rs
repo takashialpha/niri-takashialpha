@@ -185,8 +185,9 @@ impl EventStreamStatePart for WindowsState {
                 }
             }
             Event::WindowClosed { id } => {
-                let win = self.windows.remove(&id);
-                win.expect("closed window was missing from the map");
+                self.windows
+                    .remove(&id)
+                    .expect("closed window was missing from the map");
             }
             Event::WindowFocusChanged { id } => {
                 for win in self.windows.values_mut() {
@@ -227,11 +228,9 @@ impl EventStreamStatePart for WindowsState {
 
 impl EventStreamStatePart for KeyboardLayoutsState {
     fn replicate(&self) -> Vec<Event> {
-        if let Some(keyboard_layouts) = self.keyboard_layouts.clone() {
+        self.keyboard_layouts.clone().map_or_else(Vec::new, |keyboard_layouts| {
             vec![Event::KeyboardLayoutsChanged { keyboard_layouts }]
-        } else {
-            vec![]
-        }
+        })
     }
 
     fn apply(&mut self, event: Event) -> Option<Event> {

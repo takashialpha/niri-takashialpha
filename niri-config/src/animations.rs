@@ -25,16 +25,16 @@ impl Default for Animations {
         Self {
             off: false,
             slowdown: 1.,
-            workspace_switch: Default::default(),
-            horizontal_view_movement: Default::default(),
-            window_movement: Default::default(),
-            window_open: Default::default(),
-            window_close: Default::default(),
-            window_resize: Default::default(),
-            config_notification_open_close: Default::default(),
-            exit_confirmation_open_close: Default::default(),
-            screenshot_ui_open: Default::default(),
-            overview_open_close: Default::default(),
+            workspace_switch: WorkspaceSwitchAnim::default(),
+            horizontal_view_movement: HorizontalViewMovementAnim::default(),
+            window_movement: WindowMovementAnim::default(),
+            window_open: WindowOpenAnim::default(),
+            window_close: WindowCloseAnim::default(),
+            window_resize: WindowResizeAnim::default(),
+            config_notification_open_close: ConfigNotificationOpenCloseAnim::default(),
+            exit_confirmation_open_close: ExitConfirmationOpenCloseAnim::default(),
+            screenshot_ui_open: ScreenshotUiOpenAnim::default(),
+            overview_open_close: OverviewOpenCloseAnim::default(),
         }
     }
 }
@@ -489,6 +489,8 @@ where
 }
 
 impl Animation {
+    // Sequential KDL field parsing; splitting it up would not reduce complexity.
+    #[allow(clippy::too_many_lines)]
     fn decode_node<S: knus::traits::ErrorSpan>(
         node: &knus::ast::SpannedNode<S>,
         ctx: &mut knus::decode::Context<S>,
@@ -677,6 +679,9 @@ impl Animation {
             }
         }
 
+        // The suggested map_or_else rewrite nests this whole three-way branch inside a
+        // closure, which reads worse than the plain if/else chain.
+        #[allow(clippy::option_if_let_else)]
         let kind = if let Some(spring_params) = spring_params {
             // Configured spring.
             Kind::Spring(spring_params)
@@ -782,7 +787,7 @@ where
             ));
         }
 
-        Ok(SpringParams {
+        Ok(Self {
             damping_ratio,
             stiffness,
             epsilon,

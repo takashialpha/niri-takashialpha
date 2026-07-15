@@ -323,7 +323,7 @@ pub struct Layout<W: LayoutElement> {
     /// Whether the overview is open.
     ///
     /// This is a boolean flag that controls things like where input goes to. The actual animation
-    /// is controlled by overview_progress.
+    /// is controlled by `overview_progress`.
     overview_open: bool,
     /// The overview zoom progress.
     overview_progress: Option<OverviewProgress>,
@@ -411,7 +411,7 @@ pub struct DndData<W: LayoutElement> {
     output: Output,
     /// Current pointer position within output.
     pointer_pos_within_output: Point<f64, Logical>,
-    /// Ongoing DnD hold to activate something.
+    /// Ongoing `DnD` hold to activate something.
     hold: Option<DndHold<W>>,
 }
 
@@ -508,32 +508,32 @@ enum OverviewProgress {
 
 impl SizingMode {
     #[must_use]
-    pub fn is_normal(&self) -> bool {
+    pub const fn is_normal(&self) -> bool {
         matches!(self, Self::Normal)
     }
 
     #[must_use]
-    pub fn is_fullscreen(&self) -> bool {
+    pub const fn is_fullscreen(&self) -> bool {
         matches!(self, Self::Fullscreen)
     }
 
     #[must_use]
-    pub fn is_maximized(&self) -> bool {
+    pub const fn is_maximized(&self) -> bool {
         matches!(self, Self::Maximized)
     }
 }
 
 impl<W: LayoutElement> InteractiveMoveState<W> {
-    fn moving(&self) -> Option<&InteractiveMoveData<W>> {
+    const fn moving(&self) -> Option<&InteractiveMoveData<W>> {
         match self {
-            InteractiveMoveState::Moving(move_) => Some(move_),
+            Self::Moving(move_) => Some(move_),
             _ => None,
         }
     }
 
-    fn moving_mut(&mut self) -> Option<&mut InteractiveMoveData<W>> {
+    const fn moving_mut(&mut self) -> Option<&mut InteractiveMoveData<W>> {
         match self {
-            InteractiveMoveState::Moving(move_) => Some(move_),
+            Self::Moving(move_) => Some(move_),
             _ => None,
         }
     }
@@ -558,18 +558,19 @@ impl<W: LayoutElement> InteractiveMoveData<W> {
 impl ActivateWindow {
     pub fn map_smart(self, f: impl FnOnce() -> bool) -> bool {
         match self {
-            ActivateWindow::Yes => true,
-            ActivateWindow::Smart => f(),
-            ActivateWindow::No => false,
+            Self::Yes => true,
+            Self::Smart => f(),
+            Self::No => false,
         }
     }
 }
 
 impl HitType {
+    #[must_use]
     pub fn offset_win_pos(mut self, offset: Point<f64, Logical>) -> Self {
         match &mut self {
-            HitType::Input { win_pos } => *win_pos += offset,
-            HitType::Activate { .. } => (),
+            Self::Input { win_pos } => *win_pos += offset,
+            Self::Activate { .. } => (),
         }
         self
     }
@@ -584,12 +585,13 @@ impl HitType {
             .map(|hit| (tile.window(), hit.offset_win_pos(tile_pos)))
     }
 
-    pub fn to_activate(self) -> Self {
+    #[must_use]
+    pub const fn to_activate(self) -> Self {
         match self {
-            HitType::Input { .. } => HitType::Activate {
+            Self::Input { .. } => Self::Activate {
                 is_tab_indicator: false,
             },
-            HitType::Activate { .. } => self,
+            Self::Activate { .. } => self,
         }
     }
 }
@@ -620,17 +622,18 @@ impl Options {
 impl OverviewProgress {
     fn value(&self) -> f64 {
         match self {
-            OverviewProgress::Animation(anim) => anim.value(),
-            OverviewProgress::Open => 1.,
+            Self::Animation(anim) => anim.value(),
+            Self::Open => 1.,
         }
     }
 
-    fn is_animation(&self) -> bool {
-        matches!(self, OverviewProgress::Animation(_))
+    const fn is_animation(&self) -> bool {
+        matches!(self, Self::Animation(_))
     }
 }
 
 impl<W: LayoutElement> Layout<W> {
+    #[must_use]
     pub fn new(clock: Clock, config: &Config) -> Self {
         Self::with_options_and_workspaces(clock, config, Options::from_config(config))
     }
@@ -986,9 +989,7 @@ impl<W: LayoutElement> Layout<W> {
                                 } else {
                                     None
                                 }
-                            })
-                            .filter(|move_| next_to == move_.tile.window().id())
-                            .is_some()
+                            }).as_ref().is_some_and(|move_| next_to == move_.tile.window().id())
                         {
                             // The next_to window is being interactively moved. If there are no
                             // other windows, we may have no workspaces at all.
@@ -1560,7 +1561,7 @@ impl<W: LayoutElement> Layout<W> {
             .into_iter();
 
         let mon = monitors.iter().find(|mon| &mon.output == output).unwrap();
-        let mon_windows = mon.workspaces.iter().flat_map(|ws| ws.windows());
+        let mon_windows = mon.workspaces.iter().flat_map(workspace::Workspace::windows);
 
         moving_window.chain(mon_windows)
     }
@@ -1582,7 +1583,7 @@ impl<W: LayoutElement> Layout<W> {
             .iter_mut()
             .find(|mon| &mon.output == output)
             .unwrap();
-        let mon_windows = mon.workspaces.iter_mut().flat_map(|ws| ws.windows_mut());
+        let mon_windows = mon.workspaces.iter_mut().flat_map(workspace::Workspace::windows_mut);
 
         moving_window.chain(mon_windows)
     }
@@ -2285,7 +2286,7 @@ impl<W: LayoutElement> Layout<W> {
     }
 
     pub fn overview_zoom(&self) -> f64 {
-        let progress = self.overview_progress.as_ref().map(|p| p.value());
+        let progress = self.overview_progress.as_ref().map(OverviewProgress::value);
         compute_overview_zoom(&self.options, progress)
     }
 
@@ -2452,7 +2453,7 @@ impl<W: LayoutElement> Layout<W> {
         if self
             .overview_progress
             .as_ref()
-            .is_some_and(|p| p.is_animation())
+            .is_some_and(OverviewProgress::is_animation)
         {
             return true;
         }
@@ -2618,13 +2619,12 @@ impl<W: LayoutElement> Layout<W> {
                 let mon_idx = ws_config
                     .open_on_output
                     .as_deref()
-                    .map(|name| {
+                    .map_or(*active_monitor_idx, |name| {
                         monitors
                             .iter_mut()
                             .position(|monitor| output_matches_name(&monitor.output, name))
                             .unwrap_or(*primary_idx)
-                    })
-                    .unwrap_or(*active_monitor_idx);
+                    });
                 let mon = &mut monitors[mon_idx];
 
                 let ws = Workspace::new_with_config(
@@ -3035,7 +3035,7 @@ impl<W: LayoutElement> Layout<W> {
             let activate = activate.map_smart(|| {
                 window.is_none_or(|win| {
                     mon_idx == *active_monitor_idx
-                        && mon.active_window().map(|win| win.id()) == Some(win)
+                        && mon.active_window().map(LayoutElement::id) == Some(win)
                 })
             });
             let activate = if activate {
@@ -3316,9 +3316,8 @@ impl<W: LayoutElement> Layout<W> {
             if let Some(refresh) = monitor.workspace_switch_gesture_update(delta_y, timestamp) {
                 if refresh {
                     return Some(Some(monitor.output.clone()));
-                } else {
-                    return Some(None);
                 }
+                return Some(None);
             }
         }
 
@@ -3379,9 +3378,8 @@ impl<W: LayoutElement> Layout<W> {
                 if let Some(refresh) = ws.view_offset_gesture_update(delta_x, timestamp) {
                     if refresh {
                         return Some(Some(monitor.output.clone()));
-                    } else {
-                        return Some(None);
                     }
+                    return Some(None);
                 }
             }
         }
@@ -3499,7 +3497,7 @@ impl<W: LayoutElement> Layout<W> {
                 pointer_delta += delta;
 
                 let (cx, cy) = (pointer_delta.x, pointer_delta.y);
-                let sq_dist = cx * cx + cy * cy;
+                let sq_dist = cy.mul_add(cy, cx * cx);
 
                 let factor = RubberBand {
                     stiffness: 1.0,
@@ -4583,7 +4581,7 @@ impl<W: LayoutElement> Layout<W> {
         self.windows().any(|(_, win)| win.id() == window)
     }
 
-    pub fn is_overview_open(&self) -> bool {
+    pub const fn is_overview_open(&self) -> bool {
         self.overview_open
     }
 }
@@ -4599,7 +4597,7 @@ fn compute_overview_zoom(options: &Options, overview_progress: Option<f64>) -> f
     let zoom = options.overview.zoom.clamp(0.0001, 0.75);
 
     if let Some(p) = overview_progress {
-        (1. - p * (1. - zoom)).max(0.0001)
+        p.mul_add(-(1. - zoom), 1.).max(0.0001)
     } else {
         1.
     }

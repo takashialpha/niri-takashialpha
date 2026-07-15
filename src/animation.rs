@@ -50,6 +50,7 @@ pub enum Curve {
 }
 
 impl Animation {
+    #[must_use]
     pub fn new(
         clock: Clock,
         from: f64,
@@ -108,6 +109,7 @@ impl Animation {
     }
 
     /// Restarts the animation using the previous config.
+    #[must_use]
     pub fn restarted(&self, from: f64, to: f64, initial_velocity: f64) -> Self {
         if self.is_off {
             return self.clone();
@@ -150,6 +152,7 @@ impl Animation {
         }
     }
 
+    #[must_use]
     pub fn ease(
         clock: Clock,
         from: f64,
@@ -175,6 +178,7 @@ impl Animation {
         }
     }
 
+    #[must_use]
     pub fn spring(clock: Clock, spring: Spring) -> Self {
         let duration = spring.duration();
         let clamped_duration = spring.clamped_duration().unwrap_or(duration);
@@ -193,6 +197,7 @@ impl Animation {
         }
     }
 
+    #[must_use]
     pub fn decelerate(
         clock: Clock,
         from: f64,
@@ -228,6 +233,7 @@ impl Animation {
         }
     }
 
+    #[must_use]
     pub fn is_done(&self) -> bool {
         if self.clock.should_complete_instantly() {
             return true;
@@ -236,6 +242,7 @@ impl Animation {
         self.clock.now() >= self.start_time + self.duration
     }
 
+    #[must_use]
     pub fn is_clamped_done(&self) -> bool {
         if self.clock.should_complete_instantly() {
             return true;
@@ -244,6 +251,7 @@ impl Animation {
         self.clock.now() >= self.start_time + self.clamped_duration
     }
 
+    #[must_use]
     pub fn value_at(&self, at: Duration) -> f64 {
         if at <= self.start_time {
             // Return from when at == start_time so that when the animations are off, the behavior
@@ -265,7 +273,7 @@ impl Animation {
                 let passed = passed.as_secs_f64();
                 let total = self.duration.as_secs_f64();
                 let x = (passed / total).clamp(0., 1.);
-                curve.y(x) * (self.to - self.from) + self.from
+                curve.y(x).mul_add(self.to - self.from, self.from)
             }
             Kind::Spring(spring) => {
                 let value = spring.value_at(passed);
@@ -286,11 +294,12 @@ impl Animation {
             } => {
                 let passed = passed.as_secs_f64();
                 let coeff = 1000. * deceleration_rate.ln();
-                self.from + (deceleration_rate.powf(1000. * passed) - 1.) / coeff * initial_velocity
+                ((deceleration_rate.powf(1000. * passed) - 1.) / coeff).mul_add(initial_velocity, self.from)
             }
         }
     }
 
+    #[must_use]
     pub fn value(&self) -> f64 {
         self.value_at(self.clock.now())
     }
@@ -298,6 +307,7 @@ impl Animation {
     /// Returns a value that stops at the target value after first reaching it.
     ///
     /// Best effort; not always exactly precise.
+    #[must_use]
     pub fn clamped_value(&self) -> f64 {
         if self.is_clamped_done() {
             return self.to;
@@ -306,19 +316,23 @@ impl Animation {
         self.value()
     }
 
-    pub fn to(&self) -> f64 {
+    #[must_use]
+    pub const fn to(&self) -> f64 {
         self.to
     }
 
-    pub fn from(&self) -> f64 {
+    #[must_use]
+    pub const fn from(&self) -> f64 {
         self.from
     }
 
-    pub fn start_time(&self) -> Duration {
+    #[must_use]
+    pub const fn start_time(&self) -> Duration {
         self.start_time
     }
 
-    pub fn duration(&self) -> Duration {
+    #[must_use]
+    pub const fn duration(&self) -> Duration {
         self.duration
     }
 
@@ -334,13 +348,14 @@ impl Animation {
 }
 
 impl Curve {
+    #[must_use]
     pub fn y(self, x: f64) -> f64 {
         match self {
-            Curve::Linear => x,
-            Curve::EaseOutQuad => EaseOutQuad.y(x),
-            Curve::EaseOutCubic => EaseOutCubic.y(x),
-            Curve::EaseOutExpo => 1. - 2f64.powf(-10. * x),
-            Curve::CubicBezier(b) => b.y(x),
+            Self::Linear => x,
+            Self::EaseOutQuad => EaseOutQuad.y(x),
+            Self::EaseOutCubic => EaseOutCubic.y(x),
+            Self::EaseOutExpo => 1. - (-10. * x).exp2(),
+            Self::CubicBezier(b) => b.y(x),
         }
     }
 }
@@ -348,12 +363,12 @@ impl Curve {
 impl From<niri_config::animations::Curve> for Curve {
     fn from(value: niri_config::animations::Curve) -> Self {
         match value {
-            niri_config::animations::Curve::Linear => Curve::Linear,
-            niri_config::animations::Curve::EaseOutQuad => Curve::EaseOutQuad,
-            niri_config::animations::Curve::EaseOutCubic => Curve::EaseOutCubic,
-            niri_config::animations::Curve::EaseOutExpo => Curve::EaseOutExpo,
+            niri_config::animations::Curve::Linear => Self::Linear,
+            niri_config::animations::Curve::EaseOutQuad => Self::EaseOutQuad,
+            niri_config::animations::Curve::EaseOutCubic => Self::EaseOutCubic,
+            niri_config::animations::Curve::EaseOutExpo => Self::EaseOutExpo,
             niri_config::animations::Curve::CubicBezier(x1, y1, x2, y2) => {
-                Curve::CubicBezier(CubicBezier::new(x1, y1, x2, y2))
+                Self::CubicBezier(CubicBezier::new(x1, y1, x2, y2))
             }
         }
     }

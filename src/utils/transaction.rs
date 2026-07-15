@@ -55,6 +55,7 @@ struct Inner {
 impl Transaction {
     /// Creates a new transaction.
     #[allow(clippy::new_without_default)]
+    #[must_use]
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Inner::new()),
@@ -71,6 +72,10 @@ impl Transaction {
     }
 
     /// Adds a notification for when this transaction completes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the notifications lock is poisoned, i.e. a thread panicked while holding it.
     pub fn add_notification(&self, sender: Sender<Client>, client: Client) {
         if self.is_completed() {
             error!("tried to add notification to a completed transaction");
@@ -82,13 +87,18 @@ impl Transaction {
     }
 
     /// Registers this transaction's deadline timer on an event loop.
+    ///
+    /// # Panics
+    ///
+    /// Panics if inserting the deadline timer or ping source into `event_loop` fails, which
+    /// should not happen under normal operation.
     pub fn register_deadline_timer<T: 'static>(&self, event_loop: &LoopHandle<'static, T>) {
         let mut cell = self.deadline.borrow_mut();
         if let Deadline::NotRegistered(deadline) = *cell {
             let timer = Timer::from_deadline(deadline);
             let inner = Arc::downgrade(&self.inner);
             let token = event_loop
-                .insert_source(timer, move |_, _, _| {
+                .insert_source(timer, move |_, (), _| {
                     let _span = trace_span!("deadline timer", transaction = ?Weak::as_ptr(&inner))
                         .entered();
 
@@ -112,7 +122,7 @@ impl Transaction {
             let (ping, source) = make_ping().unwrap();
             let loop_handle = event_loop.clone();
             event_loop
-                .insert_source(source, move |_, _, _| {
+                .insert_source(source, move |(), (), _| {
                     loop_handle.remove(token);
                 })
                 .unwrap();
@@ -122,11 +132,13 @@ impl Transaction {
     }
 
     /// Returns whether this transaction has already completed.
+    #[must_use]
     pub fn is_completed(&self) -> bool {
         self.inner.is_completed()
     }
 
     /// Returns whether this is the last instance of this transaction.
+    #[must_use]
     pub fn is_last(&self) -> bool {
         Arc::strong_count(&self.inner) == 1
     }
@@ -144,13 +156,14 @@ impl Drop for Transaction {
             // Also remove the timer.
             if let Deadline::Registered { remove } = &*self.deadline.borrow() {
                 remove.ping();
-            };
+            }
         }
     }
 }
 
 impl TransactionBlocker {
-    pub fn completed() -> Self {
+    #[must_use]
+    pub const fn completed() -> Self {
         Self(Weak::new())
     }
 }
@@ -166,7 +179,7 @@ impl Blocker for TransactionBlocker {
 }
 
 impl Inner {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             completed: AtomicBool::new(false),
             notifications: Mutex::new(None),
@@ -185,7 +198,7 @@ impl Inner {
             for client in clients {
                 if let Err(err) = sender.send(client) {
                     warn!("error sending blocker notification: {err:?}");
-                };
+                }
             }
         }
     }

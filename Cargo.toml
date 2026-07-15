@@ -11,6 +11,7 @@ authors = [
 version = "0.0.0"
 license = "GPL-3.0-or-later"
 edition = "2024"
+repository = "https://github.com/takashialpha/niri-takashialpha"
 
 [workspace.dependencies]
 anyhow = "1.0"
@@ -40,9 +41,11 @@ description.workspace = true
 authors.workspace = true
 license.workspace = true
 edition.workspace = true
+repository.workspace = true
 
 readme = "README.md"
 keywords = ["wayland", "compositor", "tiling", "smithay", "wm"]
+categories = ["gui", "os::linux-apis"]
 
 [dependencies]
 anyhow.workspace = true

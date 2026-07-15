@@ -45,10 +45,10 @@ pub struct RenderCtx<'a, R> {
     pub target: RenderTarget,
 }
 
-impl<'a, R> RenderCtx<'a, R> {
+impl<R> RenderCtx<'_, R> {
     /// Reborrows this context with a smaller lifetime.
     #[inline]
-    pub fn r<'b>(&'b mut self) -> RenderCtx<'b, R> {
+    pub const fn r(&mut self) -> RenderCtx<'_, R> {
         RenderCtx {
             renderer: self.renderer,
             target: self.target,
@@ -56,8 +56,8 @@ impl<'a, R> RenderCtx<'a, R> {
     }
 }
 
-impl<'a, R: AsGlesRenderer> RenderCtx<'a, R> {
-    pub fn as_gles<'b>(&'b mut self) -> RenderCtx<'b, GlesRenderer> {
+impl<R: AsGlesRenderer> RenderCtx<'_, R> {
+    pub fn as_gles(&mut self) -> RenderCtx<'_, GlesRenderer> {
         RenderCtx {
             renderer: self.renderer.as_gles_renderer(),
             target: self.target,
@@ -98,10 +98,11 @@ pub trait ToRenderElement {
 impl RenderTarget {
     pub const COUNT: usize = 2;
 
+    #[must_use]
     pub fn should_block_out(self, block_out_from: Option<BlockOutFrom>) -> bool {
         match block_out_from {
             None => false,
-            Some(BlockOutFrom::ScreenCapture) => self != RenderTarget::Output,
+            Some(BlockOutFrom::ScreenCapture) => self != Self::Output,
         }
     }
 }
@@ -121,7 +122,7 @@ impl ToRenderElement for BakedBuffer<TextureBuffer<GlesTexture>> {
             location + self.location,
             alpha,
             self.src,
-            self.dst.map(|dst| dst.to_f64()),
+            self.dst.map(smithay::utils::Size::to_f64),
             kind,
         );
         PrimaryGpuTextureRenderElement(elem)
@@ -148,10 +149,14 @@ pub fn encompassing_geo(
 ) -> Rectangle<i32, Physical> {
     elements
         .map(|ele| ele.geometry(scale))
-        .reduce(|a, b| a.merge(b))
+        .reduce(smithay::utils::Rectangle::merge)
         .unwrap_or_default()
 }
 
+/// # Errors
+///
+/// Returns an error if the renderer fails to allocate a GLES buffer of `size` in
+/// `fourcc` format.
 pub fn create_texture(
     renderer: &mut GlesRenderer,
     size: Size<i32, Physical>,
@@ -161,6 +166,10 @@ pub fn create_texture(
     renderer.create_buffer(fourcc, buffer_size)
 }
 
+/// # Errors
+///
+/// Returns an error if the renderer fails to copy `target`'s framebuffer into a mapping
+/// of `fourcc` format.
 pub fn copy_framebuffer(
     renderer: &mut GlesRenderer,
     target: &GlesTarget,
@@ -169,6 +178,9 @@ pub fn copy_framebuffer(
     renderer.copy_framebuffer(target, Rectangle::from_size(target.size()), fourcc)
 }
 
+/// # Errors
+///
+/// Returns an error if creating the texture or rendering `elements` into it fails.
 pub fn render_to_encompassing_texture(
     renderer: &mut GlesRenderer,
     scale: Scale<f64>,
@@ -187,6 +199,10 @@ pub fn render_to_encompassing_texture(
     Ok((texture, sync_point, geo))
 }
 
+/// # Errors
+///
+/// Returns an error if creating the texture, binding it, or rendering `elements` into
+/// it fails.
 pub fn render_to_texture(
     renderer: &mut GlesRenderer,
     size: Size<i32, Physical>,
@@ -208,6 +224,17 @@ pub fn render_to_texture(
     Ok((texture, sync_point))
 }
 
+/// # Errors
+///
+/// Returns an error if creating the texture, rendering `elements` into it, or copying
+/// the resulting framebuffer fails.
+//
+// `target`'s lock/binding guard is used by reference right up to the tail expression
+// and then implicitly dropped at the very end of the function; there is no later code
+// it could be held across, so binding the tail call's result to an intermediate
+// variable just to `drop(target)` explicitly before returning it would change nothing
+// observable.
+#[allow(clippy::significant_drop_tightening)]
 pub fn render_and_download(
     renderer: &mut GlesRenderer,
     size: Size<i32, Physical>,
@@ -227,6 +254,9 @@ pub fn render_and_download(
     copy_framebuffer(renderer, &target, fourcc).context("error copying framebuffer")
 }
 
+/// # Errors
+///
+/// Returns an error if rendering `elements` or mapping the resulting texture fails.
 pub fn render_to_vec(
     renderer: &mut GlesRenderer,
     size: Size<i32, Physical>,

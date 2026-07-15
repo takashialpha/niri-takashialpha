@@ -1,6 +1,6 @@
 //! We set a signal handler with `calloop::signals::Signals::new`.
 //! This does two things:
-//! 1. It blocks the thread from receiving these signals normally (pthread_sigmask)
+//! 1. It blocks the thread from receiving these signals normally (`pthread_sigmask`)
 //! 2. It creates a signalfd to read them in the event loop.
 //!
 //! When spawning children, calloop already deals with the signalfd.
@@ -42,13 +42,17 @@ mod platform {
 mod platform {
     use std::{io, mem};
 
+    /// # Panics
+    ///
+    /// Panics if creating the signalfd or inserting it into the event loop fails, which
+    /// should not happen under normal operation.
     pub fn listen(handle: &calloop::LoopHandle<crate::niri::State>) {
         use calloop::signals::{Signal, Signals};
 
         handle
             .insert_source(
                 Signals::new(&[Signal::SIGINT, Signal::SIGTERM, Signal::SIGHUP]).unwrap(),
-                |event, _, state| {
+                |event, (), state| {
                     info!("quitting due to receiving signal {:?}", event.signal());
                     state.niri.stop_signal.stop();
                 },
@@ -58,10 +62,16 @@ mod platform {
 
     // We block the signals early, so that they apply to all threads.
     // They are then blocked *again* by the `Signals` source. That's fine.
+    /// # Errors
+    ///
+    /// Returns an error if reading or setting the thread's signal mask fails.
     pub fn block_early() -> io::Result<()> {
         set_sigmask(&preferred_sigset()?)
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if reading or setting the thread's signal mask fails.
     pub fn unblock_all() -> io::Result<()> {
         set_sigmask(&empty_sigset()?)
     }

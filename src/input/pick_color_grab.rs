@@ -20,11 +20,12 @@ pub struct PickColorGrab {
 }
 
 impl PickColorGrab {
-    pub fn new(start_data: PointerGrabStartData<State>) -> Self {
+    #[must_use]
+    pub const fn new(start_data: PointerGrabStartData<State>) -> Self {
         Self { start_data }
     }
 
-    fn on_ungrab(&mut self, state: &mut State) {
+    fn on_ungrab(state: &mut State) {
         if let Some(tx) = state.niri.pick_color.take() {
             let _ = tx.send_blocking(None);
         }
@@ -56,7 +57,7 @@ impl PickColorGrab {
                 };
                 let elements = data.niri.render_to_vec(ctx, &output, false);
 
-                let mapping = match render_and_download(
+                let Ok(mapping) = render_and_download(
                     renderer,
                     size,
                     scale,
@@ -66,13 +67,11 @@ impl PickColorGrab {
                         let offset = pos.upscale(-1);
                         RelocateRenderElement::from_element(elem, offset, Relocate::Relative)
                     }),
-                ) {
-                    Ok(mapping) => mapping,
-                    Err(_) => return None,
+                ) else {
+                    return None;
                 };
-                let pixels = match renderer.map_texture(&mapping) {
-                    Ok(pixels) => pixels,
-                    Err(_) => return None,
+                let Ok(pixels) = renderer.map_texture(&mapping) else {
+                    return None;
                 };
 
                 if pixels.len() == 4 {
@@ -226,6 +225,6 @@ impl PointerGrab<State> for PickColorGrab {
     }
 
     fn unset(&mut self, data: &mut State) {
-        self.on_ungrab(data);
+        Self::on_ungrab(data);
     }
 }

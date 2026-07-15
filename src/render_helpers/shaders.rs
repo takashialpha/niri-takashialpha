@@ -30,59 +30,64 @@ pub enum ProgramType {
     Open,
 }
 
+/// Logs a compile error and returns `None`, or unwraps the compiled program.
+fn compiled_or_warn<T>(result: Result<T, GlesError>, what: &str) -> Option<T> {
+    result
+        .map_err(|err| warn!("error compiling {what} shader: {err:?}"))
+        .ok()
+}
+
 impl Shaders {
     fn compile(renderer: &mut GlesRenderer) -> Self {
-        let border = ShaderProgram::compile(
-            renderer,
-            concat!(
-                include_str!("shaders/border.frag"),
-                include_str!("shaders/rounding_alpha.frag")
+        let border = compiled_or_warn(
+            ShaderProgram::compile(
+                renderer,
+                concat!(
+                    include_str!("shaders/border.frag"),
+                    include_str!("shaders/rounding_alpha.frag")
+                ),
+                &[
+                    UniformName::new("colorspace", UniformType::_1f),
+                    UniformName::new("hue_interpolation", UniformType::_1f),
+                    UniformName::new("color_from", UniformType::_4f),
+                    UniformName::new("color_to", UniformType::_4f),
+                    UniformName::new("grad_offset", UniformType::_2f),
+                    UniformName::new("grad_width", UniformType::_1f),
+                    UniformName::new("grad_vec", UniformType::_2f),
+                    UniformName::new("input_to_geo", UniformType::Matrix3x3),
+                    UniformName::new("geo_size", UniformType::_2f),
+                    UniformName::new("outer_radius", UniformType::_4f),
+                    UniformName::new("border_width", UniformType::_1f),
+                ],
+                &[],
             ),
-            &[
-                UniformName::new("colorspace", UniformType::_1f),
-                UniformName::new("hue_interpolation", UniformType::_1f),
-                UniformName::new("color_from", UniformType::_4f),
-                UniformName::new("color_to", UniformType::_4f),
-                UniformName::new("grad_offset", UniformType::_2f),
-                UniformName::new("grad_width", UniformType::_1f),
-                UniformName::new("grad_vec", UniformType::_2f),
-                UniformName::new("input_to_geo", UniformType::Matrix3x3),
-                UniformName::new("geo_size", UniformType::_2f),
-                UniformName::new("outer_radius", UniformType::_4f),
-                UniformName::new("border_width", UniformType::_1f),
-            ],
-            &[],
-        )
-        .map_err(|err| {
-            warn!("error compiling border shader: {err:?}");
-        })
-        .ok();
+            "border",
+        );
 
-        let shadow = ShaderProgram::compile(
-            renderer,
-            concat!(
-                include_str!("shaders/shadow.frag"),
-                include_str!("shaders/rounding_alpha.frag")
+        let shadow = compiled_or_warn(
+            ShaderProgram::compile(
+                renderer,
+                concat!(
+                    include_str!("shaders/shadow.frag"),
+                    include_str!("shaders/rounding_alpha.frag")
+                ),
+                &[
+                    UniformName::new("shadow_color", UniformType::_4f),
+                    UniformName::new("sigma", UniformType::_1f),
+                    UniformName::new("input_to_geo", UniformType::Matrix3x3),
+                    UniformName::new("geo_size", UniformType::_2f),
+                    UniformName::new("corner_radius", UniformType::_4f),
+                    UniformName::new("window_input_to_geo", UniformType::Matrix3x3),
+                    UniformName::new("window_geo_size", UniformType::_2f),
+                    UniformName::new("window_corner_radius", UniformType::_4f),
+                ],
+                &[],
             ),
-            &[
-                UniformName::new("shadow_color", UniformType::_4f),
-                UniformName::new("sigma", UniformType::_1f),
-                UniformName::new("input_to_geo", UniformType::Matrix3x3),
-                UniformName::new("geo_size", UniformType::_2f),
-                UniformName::new("corner_radius", UniformType::_4f),
-                UniformName::new("window_input_to_geo", UniformType::Matrix3x3),
-                UniformName::new("window_geo_size", UniformType::_2f),
-                UniformName::new("window_corner_radius", UniformType::_4f),
-            ],
-            &[],
-        )
-        .map_err(|err| {
-            warn!("error compiling shadow shader: {err:?}");
-        })
-        .ok();
+            "shadow",
+        );
 
-        let clipped_surface = renderer
-            .compile_custom_texture_shader(
+        let clipped_surface = compiled_or_warn(
+            renderer.compile_custom_texture_shader(
                 concat!(
                     include_str!("shaders/clipped_surface.frag"),
                     include_str!("shaders/rounding_alpha.frag"),
@@ -94,14 +99,12 @@ impl Shaders {
                     UniformName::new("corner_radius", UniformType::_4f),
                     UniformName::new("input_to_geo", UniformType::Matrix3x3),
                 ],
-            )
-            .map_err(|err| {
-                warn!("error compiling clipped surface shader: {err:?}");
-            })
-            .ok();
+            ),
+            "clipped surface",
+        );
 
-        let postprocess_and_clip = renderer
-            .compile_custom_texture_shader(
+        let postprocess_and_clip = compiled_or_warn(
+            renderer.compile_custom_texture_shader(
                 concat!(
                     include_str!("shaders/clipped_surface.frag"),
                     include_str!("shaders/rounding_alpha.frag"),
@@ -116,27 +119,22 @@ impl Shaders {
                     UniformName::new("saturation", UniformType::_1f),
                     UniformName::new("bg_color", UniformType::_4f),
                 ],
-            )
-            .map_err(|err| {
-                warn!("error compiling postprocess_and_clip shader: {err:?}");
-            })
-            .ok();
+            ),
+            "postprocess_and_clip",
+        );
 
-        let resize = compile_resize_program(renderer, include_str!("shaders/resize.frag"))
-            .map_err(|err| {
-                warn!("error compiling resize shader: {err:?}");
-            })
-            .ok();
+        let resize = compiled_or_warn(
+            compile_resize_program(renderer, include_str!("shaders/resize.frag")),
+            "resize",
+        );
 
-        let gradient_fade = renderer
-            .compile_custom_texture_shader(
+        let gradient_fade = compiled_or_warn(
+            renderer.compile_custom_texture_shader(
                 include_str!("shaders/gradient_fade.frag"),
                 &[UniformName::new("cutoff", UniformType::_2f)],
-            )
-            .map_err(|err| {
-                warn!("error compiling gradient fade shader: {err:?}");
-            })
-            .ok();
+            ),
+            "gradient fade",
+        );
 
         Self {
             border,
@@ -151,12 +149,20 @@ impl Shaders {
         }
     }
 
+    /// # Panics
+    ///
+    /// Panics if [`init()`] was not called on this renderer's EGL context before this is
+    /// called.
     pub fn get_from_frame<'a>(frame: &'a mut GlesFrame<'_, '_>) -> &'a Self {
         let data = frame.egl_context().user_data();
         data.get()
             .expect("shaders::init() must be called when creating the renderer")
     }
 
+    /// # Panics
+    ///
+    /// Panics if [`init()`] was not called on this renderer's EGL context before this is
+    /// called.
     pub fn get(renderer: &mut impl NiriRenderer) -> &Self {
         let renderer = renderer.as_gles_renderer();
         let data = renderer.egl_context().user_data();
@@ -342,6 +348,7 @@ pub fn set_custom_open_program(renderer: &mut GlesRenderer, src: Option<&str>) {
     }
 }
 
+#[must_use]
 pub fn mat3_uniform(name: &str, mat: Mat3) -> Uniform<'_> {
     Uniform::new(
         name,

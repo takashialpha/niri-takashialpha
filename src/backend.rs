@@ -17,6 +17,8 @@ pub use tty::Tty;
 pub mod headless;
 pub use headless::Headless;
 
+// Tty is much larger than Headless, but Headless only exists for tests, so boxing
+// it to shrink Backend would just add a needless indirection to the hot (Tty) path.
 #[allow(clippy::large_enum_variant)]
 pub enum Backend {
     Tty(Tty),
@@ -41,11 +43,12 @@ static OUTPUT_ID_COUNTER: IdCounter = IdCounter::new();
 pub struct OutputId(u64);
 
 impl OutputId {
-    fn next() -> OutputId {
-        OutputId(OUTPUT_ID_COUNTER.next())
+    fn next() -> Self {
+        Self(OUTPUT_ID_COUNTER.next())
     }
 
-    pub fn get(self) -> u64 {
+    #[must_use]
+    pub const fn get(self) -> u64 {
         self.0
     }
 }
@@ -53,15 +56,15 @@ impl OutputId {
 impl Backend {
     pub fn init(&mut self, niri: &mut Niri) {
         match self {
-            Backend::Tty(tty) => tty.init(niri),
-            Backend::Headless(headless) => headless.init(niri),
+            Self::Tty(tty) => tty.init(niri),
+            Self::Headless(headless) => headless.init(niri),
         }
     }
 
     pub fn seat_name(&self) -> String {
         match self {
-            Backend::Tty(tty) => tty.seat_name(),
-            Backend::Headless(headless) => headless.seat_name(),
+            Self::Tty(tty) => tty.seat_name(),
+            Self::Headless(headless) => headless.seat_name(),
         }
     }
 
@@ -70,8 +73,8 @@ impl Backend {
         f: impl FnOnce(&mut GlesRenderer) -> T,
     ) -> Option<T> {
         match self {
-            Backend::Tty(tty) => tty.with_primary_renderer(f),
-            Backend::Headless(headless) => headless.with_primary_renderer(f),
+            Self::Tty(tty) => tty.with_primary_renderer(f),
+            Self::Headless(headless) => headless.with_primary_renderer(f),
         }
     }
 
@@ -82,8 +85,8 @@ impl Backend {
         target_presentation_time: Duration,
     ) -> RenderResult {
         match self {
-            Backend::Tty(tty) => tty.render(niri, output, target_presentation_time),
-            Backend::Headless(headless) => headless.render(niri, output),
+            Self::Tty(tty) => tty.render(niri, output, target_presentation_time),
+            Self::Headless(headless) => headless.render(niri, output),
         }
     }
 
@@ -93,54 +96,54 @@ impl Backend {
 
     pub fn change_vt(&mut self, vt: i32) {
         match self {
-            Backend::Tty(tty) => tty.change_vt(vt),
-            Backend::Headless(_) => (),
+            Self::Tty(tty) => tty.change_vt(vt),
+            Self::Headless(_) => (),
         }
     }
 
-    pub fn suspend(&mut self) {
+    pub const fn suspend(&mut self) {
         match self {
-            Backend::Tty(tty) => tty.suspend(),
-            Backend::Headless(_) => (),
+            Self::Tty(tty) => tty.suspend(),
+            Self::Headless(_) => (),
         }
     }
 
     pub fn import_dmabuf(&mut self, dmabuf: &Dmabuf) -> bool {
         match self {
-            Backend::Tty(tty) => tty.import_dmabuf(dmabuf),
-            Backend::Headless(headless) => headless.import_dmabuf(dmabuf),
+            Self::Tty(tty) => tty.import_dmabuf(dmabuf),
+            Self::Headless(headless) => headless.import_dmabuf(dmabuf),
         }
     }
 
     pub fn early_import(&mut self, surface: &WlSurface) {
         match self {
-            Backend::Tty(tty) => tty.early_import(surface),
-            Backend::Headless(_) => (),
+            Self::Tty(tty) => tty.early_import(surface),
+            Self::Headless(_) => (),
         }
     }
 
     pub fn ipc_outputs(&self) -> Arc<Mutex<IpcOutputMap>> {
         match self {
-            Backend::Tty(tty) => tty.ipc_outputs(),
-            Backend::Headless(headless) => headless.ipc_outputs(),
+            Self::Tty(tty) => tty.ipc_outputs(),
+            Self::Headless(headless) => headless.ipc_outputs(),
         }
     }
 
     pub fn set_monitors_active(&mut self, active: bool) {
         match self {
-            Backend::Tty(tty) => tty.set_monitors_active(active),
-            Backend::Headless(_) => (),
+            Self::Tty(tty) => tty.set_monitors_active(active),
+            Self::Headless(_) => (),
         }
     }
 
     pub fn on_output_config_changed(&mut self, niri: &mut Niri) {
         match self {
-            Backend::Tty(tty) => tty.on_output_config_changed(niri),
-            Backend::Headless(_) => (),
+            Self::Tty(tty) => tty.on_output_config_changed(niri),
+            Self::Headless(_) => (),
         }
     }
 
-    pub fn tty_checked(&mut self) -> Option<&mut Tty> {
+    pub const fn tty_checked(&mut self) -> Option<&mut Tty> {
         if let Self::Tty(v) = self {
             Some(v)
         } else {
@@ -148,6 +151,9 @@ impl Backend {
         }
     }
 
+    /// # Panics
+    ///
+    /// Panics if the backend is not [`Self::Tty`].
     pub fn tty(&mut self) -> &mut Tty {
         if let Self::Tty(v) = self {
             v
@@ -156,6 +162,9 @@ impl Backend {
         }
     }
 
+    /// # Panics
+    ///
+    /// Panics if the backend is not [`Self::Headless`].
     pub fn headless(&mut self) -> &mut Headless {
         if let Self::Headless(v) = self {
             v

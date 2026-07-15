@@ -14,7 +14,8 @@ pub struct Shadow {
 }
 
 impl Shadow {
-    pub fn new(config: niri_config::Shadow) -> Self {
+    #[must_use]
+    pub const fn new(config: niri_config::Shadow) -> Self {
         Self {
             shader_rects: Vec::new(),
             shaders: Vec::new(),
@@ -22,7 +23,7 @@ impl Shadow {
         }
     }
 
-    pub fn update_config(&mut self, config: niri_config::Shadow) {
+    pub const fn update_config(&mut self, config: niri_config::Shadow) {
         self.config = config;
     }
 
@@ -32,6 +33,9 @@ impl Shadow {
         }
     }
 
+    // Logical-pixel geometry is narrowed to f32 for the shadow shader; screen dimensions never
+    // approach f32 precision limits.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn update_render_elements(
         &mut self,
         win_size: Size<f64, Logical>,
@@ -87,7 +91,25 @@ impl Shadow {
         // This is actually offset relative to shader_geo, this is handled below.
         let window_geo = Rectangle::new(Point::from((0., 0.)), win_size);
 
-        if !self.config.draw_behind_window {
+        if self.config.draw_behind_window {
+            self.shader_rects.resize_with(1, Default::default);
+            self.shader_rects[0] = shader_geo;
+
+            self.shaders.resize_with(1, Default::default);
+            self.shaders[0].update(
+                shader_geo.size,
+                Rectangle::new(shader_geo.loc.upscale(-1.), box_size),
+                color,
+                sigma as f32,
+                radius,
+                scale as f32,
+                Rectangle::zero(),
+                CornerRadius::default(),
+                alpha,
+            );
+
+            self.shader_rects[0].loc += offset;
+        } else {
             let top_left = ceil(f64::from(win_radius.top_left));
             let top_right = f64::min(win_size.w - top_left, ceil(f64::from(win_radius.top_right)));
             let bottom_left = f64::min(
@@ -141,24 +163,6 @@ impl Shadow {
 
                 rect.loc += offset;
             }
-        } else {
-            self.shader_rects.resize_with(1, Default::default);
-            self.shader_rects[0] = shader_geo;
-
-            self.shaders.resize_with(1, Default::default);
-            self.shaders[0].update(
-                shader_geo.size,
-                Rectangle::new(shader_geo.loc.upscale(-1.), box_size),
-                color,
-                sigma as f32,
-                radius,
-                scale as f32,
-                Rectangle::zero(),
-                Default::default(),
-                alpha,
-            );
-
-            self.shader_rects[0].loc += offset;
         }
     }
 

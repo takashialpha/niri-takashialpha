@@ -167,7 +167,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Run the compositor.
     event_loop
-        .run(None, &mut state, |state| state.refresh_and_flush_clients())
+        .run(None, &mut state, niri::niri::State::refresh_and_flush_clients)
         .unwrap();
 
     Ok(())

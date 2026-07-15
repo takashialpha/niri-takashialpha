@@ -326,6 +326,8 @@ pub enum Action {
 }
 
 impl From<niri_ipc::Action> for Action {
+    // Flat 1:1 variant mapping; splitting it up would not reduce complexity.
+    #[allow(clippy::too_many_lines)]
     fn from(value: niri_ipc::Action) -> Self {
         match value {
             niri_ipc::Action::Quit { skip_confirmation } => Self::Quit(skip_confirmation),
@@ -631,7 +633,7 @@ pub enum WorkspaceReference {
 }
 
 impl From<WorkspaceReferenceArg> for WorkspaceReference {
-    fn from(reference: WorkspaceReferenceArg) -> WorkspaceReference {
+    fn from(reference: WorkspaceReferenceArg) -> Self {
         match reference {
             WorkspaceReferenceArg::Id(id) => Self::Id(id),
             WorkspaceReferenceArg::Index(i) => Self::Index(i),
@@ -657,14 +659,14 @@ impl<S: knus::traits::ErrorSpan> knus::DecodeScalar<S> for WorkspaceReference {
     fn raw_decode(
         val: &knus::span::Spanned<knus::ast::Literal, S>,
         ctx: &mut knus::decode::Context<S>,
-    ) -> Result<WorkspaceReference, DecodeError<S>> {
+    ) -> Result<Self, DecodeError<S>> {
         match &**val {
-            knus::ast::Literal::String(s) => Ok(WorkspaceReference::Name(s.clone().into())),
+            knus::ast::Literal::String(s) => Ok(Self::Name(s.clone().into())),
             knus::ast::Literal::Int(value) => match value.try_into() {
-                Ok(v) => Ok(WorkspaceReference::Index(v)),
+                Ok(v) => Ok(Self::Index(v)),
                 Err(e) => {
                     ctx.emit_error(DecodeError::conversion(val, e));
-                    Ok(WorkspaceReference::Index(0))
+                    Ok(Self::Index(0))
                 }
             },
             _ => {
@@ -672,7 +674,7 @@ impl<S: knus::traits::ErrorSpan> knus::DecodeScalar<S> for WorkspaceReference {
                     val,
                     "Unsupported value, only numbers and strings are recognized",
                 ));
-                Ok(WorkspaceReference::Index(0))
+                Ok(Self::Index(0))
             }
         }
     }
@@ -743,7 +745,7 @@ where
             ));
         }
 
-        for val in node.arguments.iter() {
+        for val in &node.arguments {
             ctx.emit_error(DecodeError::unexpected(
                 &val.literal,
                 "argument",
@@ -858,7 +860,7 @@ impl FromStr for Key {
         for part in split {
             let part = part.trim();
             if part.eq_ignore_ascii_case("mod") {
-                modifiers |= Modifiers::COMPOSITOR
+                modifiers |= Modifiers::COMPOSITOR;
             } else if part.eq_ignore_ascii_case("ctrl") || part.eq_ignore_ascii_case("control") {
                 modifiers |= Modifiers::CTRL;
             } else if part.eq_ignore_ascii_case("shift") {
@@ -933,7 +935,7 @@ impl FromStr for Key {
             Trigger::Keysym(keysym)
         };
 
-        Ok(Key { trigger, modifiers })
+        Ok(Self { trigger, modifiers })
     }
 }
 

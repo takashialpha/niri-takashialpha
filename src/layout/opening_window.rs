@@ -32,6 +32,7 @@ niri_render_elements! {
 }
 
 impl OpenAnimation {
+    #[must_use]
     pub fn new(anim: Animation) -> Self {
         Self {
             anim,
@@ -44,8 +45,15 @@ impl OpenAnimation {
         self.anim.is_done()
     }
 
-    // We can't depend on view_rect here, because the result of window opening can be snapshot and
-    // then rendered elsewhere.
+    /// We can't depend on `view_rect` here, because the result of window opening can be snapshot and
+    /// then rendered elsewhere.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if rendering `elements` to the offscreen buffer fails.
+    // Logical-pixel geometry and texture dimensions are narrowed to f32 for the GL shader;
+    // neither ever approaches f32's precision limits.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
     pub fn render(
         &self,
         renderer: &mut GlesRenderer,

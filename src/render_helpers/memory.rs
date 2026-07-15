@@ -14,6 +14,10 @@ pub struct MemoryBuffer {
 }
 
 impl MemoryBuffer {
+    /// # Panics
+    ///
+    /// Panics if `format`'s bits-per-pixel is unknown, or if `data` is smaller than
+    /// `size.h * stride` bytes.
     pub fn new(
         data: impl Into<Arc<[u8]>>,
         format: Fourcc,
@@ -37,26 +41,32 @@ impl MemoryBuffer {
         }
     }
 
+    #[must_use]
     pub fn data(&self) -> &[u8] {
         &self.data
     }
 
-    pub fn format(&self) -> Fourcc {
+    #[must_use]
+    pub const fn format(&self) -> Fourcc {
         self.format
     }
 
-    pub fn size(&self) -> Size<i32, Buffer> {
+    #[must_use]
+    pub const fn size(&self) -> Size<i32, Buffer> {
         self.size
     }
 
-    pub fn scale(&self) -> Scale<f64> {
+    #[must_use]
+    pub const fn scale(&self) -> Scale<f64> {
         self.scale
     }
 
-    pub fn transform(&self) -> Transform {
+    #[must_use]
+    pub const fn transform(&self) -> Transform {
         self.transform
     }
 
+    #[must_use]
     pub fn logical_size(&self) -> Size<f64, Logical> {
         self.size.to_f64().to_logical(self.scale, self.transform)
     }

@@ -10,6 +10,7 @@ pub struct FrameClock {
 }
 
 impl FrameClock {
+    #[must_use]
     pub fn new(refresh_interval: Option<Duration>) -> Self {
         let refresh_interval_ns = if let Some(interval) = &refresh_interval {
             assert_eq!(interval.as_secs(), 0);
@@ -24,12 +25,13 @@ impl FrameClock {
         }
     }
 
+    #[must_use]
     pub fn refresh_interval(&self) -> Option<Duration> {
         self.refresh_interval_ns
             .map(|r| Duration::from_nanos(r.get()))
     }
 
-    pub fn presented(&mut self, presentation_time: Duration) {
+    pub const fn presented(&mut self, presentation_time: Duration) {
         if presentation_time.is_zero() {
             // Not interested in these.
             return;
@@ -61,13 +63,13 @@ impl FrameClock {
                     now = ?orig_now,
                     ?last_presentation_time,
                     "got a 2+ early VBlank, {:?} until presentation",
-                    last_presentation_time - now,
+                    last_presentation_time.checked_sub(now).unwrap(),
                 );
                 now = last_presentation_time + Duration::from_nanos(refresh_interval_ns);
             }
         }
 
-        let since_last = now - last_presentation_time;
+        let since_last = now.checked_sub(last_presentation_time).unwrap();
         let since_last_ns =
             since_last.as_secs() * 1_000_000_000 + u64::from(since_last.subsec_nanos());
         let to_next_ns = (since_last_ns / refresh_interval_ns + 1) * refresh_interval_ns;

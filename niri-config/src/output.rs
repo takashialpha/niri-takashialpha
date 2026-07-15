@@ -124,6 +124,7 @@ impl FromIterator<Output> for Outputs {
 }
 
 impl Outputs {
+    #[must_use]
     pub fn find(&self, name: &OutputName) -> Option<&Output> {
         self.0.iter().find(|o| name.matches(&o.name))
     }
@@ -134,6 +135,7 @@ impl Outputs {
 }
 
 impl OutputName {
+    #[must_use]
     pub fn from_ipc_output(output: &niri_ipc::Output) -> Self {
         Self {
             connector: output.name.clone(),
@@ -145,14 +147,16 @@ impl OutputName {
 
     /// Returns an output name that will match by make/model/serial or, if they are missing, by
     /// connector.
+    #[must_use]
     pub fn format_make_model_serial_or_connector(&self) -> String {
         if self.make.is_none() && self.model.is_none() && self.serial.is_none() {
-            self.connector.to_string()
+            self.connector.clone()
         } else {
             self.format_make_model_serial()
         }
     }
 
+    #[must_use]
     pub fn format_make_model_serial(&self) -> String {
         let make = self.make.as_deref().unwrap_or("Unknown");
         let model = self.model.as_deref().unwrap_or("Unknown");
@@ -160,6 +164,7 @@ impl OutputName {
         format!("{make} {model} {serial}")
     }
 
+    #[must_use]
     pub fn matches(&self, target: &str) -> bool {
         // Match by connector.
         if target.eq_ignore_ascii_case(&self.connector) {
@@ -211,6 +216,7 @@ impl OutputName {
 
     // Similar in spirit to Ord, but I don't want to derive Eq to avoid mistakes (you should use
     // `Self::match`, not Eq).
+    #[must_use]
     pub fn compare(&self, other: &Self) -> std::cmp::Ordering {
         let self_missing_mms = self.make.is_none() && self.model.is_none() && self.serial.is_none();
         let other_missing_mms =
@@ -248,20 +254,17 @@ impl<S: ErrorSpan> knus::DecodeScalar<S> for MaxBpc {
         value: &knus::span::Spanned<knus::ast::Literal, S>,
         ctx: &mut Context<S>,
     ) -> Result<Self, DecodeError<S>> {
-        match &**value {
-            knus::ast::Literal::Int(val) => match u8::try_from(val) {
-                Ok(v) => niri_ipc::MaxBpc::try_from(v)
-                    .map(MaxBpc)
-                    .map_err(|e| DecodeError::conversion(value, e)),
-                Err(e) => {
-                    ctx.emit_error(DecodeError::conversion(value, e));
-                    Ok(Self::default())
-                }
-            },
-            _ => {
-                ctx.emit_error(DecodeError::scalar_kind(knus::decode::Kind::Int, value));
+        if let knus::ast::Literal::Int(val) = &**value { match u8::try_from(val) {
+            Ok(v) => niri_ipc::MaxBpc::try_from(v)
+                .map(MaxBpc)
+                .map_err(|e| DecodeError::conversion(value, e)),
+            Err(e) => {
+                ctx.emit_error(DecodeError::conversion(value, e));
                 Ok(Self::default())
             }
+        } } else {
+            ctx.emit_error(DecodeError::scalar_kind(knus::decode::Kind::Int, value));
+            Ok(Self::default())
         }
     }
 }
@@ -293,9 +296,9 @@ impl<S: ErrorSpan> knus::Decode<S> for Mode {
                             name,
                             "property",
                             "unexpected duplicate property `custom`",
-                        ))
+                        ));
                     }
-                    custom = Some(knus::traits::DecodeScalar::decode(val, ctx)?)
+                    custom = Some(knus::traits::DecodeScalar::decode(val, ctx)?);
                 }
                 name_str => ctx.emit_error(DecodeError::unexpected(
                     node,
@@ -332,10 +335,10 @@ impl<S: ErrorSpan> knus::Decode<S> for Mode {
                 &surplus.literal,
                 "argument",
                 "unexpected argument",
-            ))
+            ));
         }
 
-        Ok(Mode { custom, mode })
+        Ok(Self { custom, mode })
     }
 }
 
@@ -351,6 +354,8 @@ macro_rules! ensure {
 }
 
 impl<S: ErrorSpan> Decode<S> for Modeline {
+    // Sequential KDL field parsing; splitting it up would not reduce complexity.
+    #[allow(clippy::too_many_lines)]
     fn decode_node(node: &SpannedNode<S>, ctx: &mut Context<S>) -> Result<Self, DecodeError<S>> {
         if let Some(type_name) = &node.type_name {
             ctx.emit_error(DecodeError::unexpected(
@@ -483,10 +488,10 @@ impl<S: ErrorSpan> Decode<S> for Modeline {
                 &extra.literal,
                 "argument",
                 "unexpected argument, all possible arguments were already provided",
-            ))
+            ));
         }
 
-        Ok(Modeline {
+        Ok(Self {
             clock,
             hdisplay,
             hsync_start,
@@ -540,9 +545,9 @@ mod tests {
     ) -> OutputName {
         OutputName {
             connector: connector.to_string(),
-            make: make.map(|x| x.to_string()),
-            model: model.map(|x| x.to_string()),
-            serial: serial.map(|x| x.to_string()),
+            make: make.map(std::string::ToString::to_string),
+            model: model.map(std::string::ToString::to_string),
+            serial: serial.map(std::string::ToString::to_string),
         }
     }
 
