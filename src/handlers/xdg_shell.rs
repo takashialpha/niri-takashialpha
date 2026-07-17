@@ -208,6 +208,10 @@ impl XdgShellHandler for State {
         surface.send_repositioned(token);
     }
 
+    // One linear procedure with heavy mutable-borrow interleaving on `self.niri`
+    // (focus/keyboard-grab state must stay consistent with update_keyboard_focus());
+    // splitting risks subtly reordering that state.
+    #[allow(clippy::too_many_lines)]
     fn grab(&mut self, surface: PopupSurface, _seat: WlSeat, serial: Serial) {
         let popup = PopupKind::Xdg(surface);
         let Ok(root) = find_popup_root_surface(&popup) else {
@@ -276,6 +280,8 @@ impl XdgShellHandler for State {
                     let _ = PopupManager::dismiss_popup(&root, &popup);
                     return;
                 }
+
+                drop(layers);
 
                 let layout_focus = self.niri.layout.focus();
                 if Some(&root) != layout_focus.map(|win| win.toplevel().wl_surface()) {
@@ -959,6 +965,10 @@ impl XdgForeignHandler for State {
 delegate_xdg_foreign!(State);
 
 impl State {
+    // One linear procedure applying window rules to freshly-unmapped window state
+    // with heavy mutable-borrow interleaving on `self.niri`; splitting risks subtly
+    // reordering rule application.
+    #[allow(clippy::too_many_lines)]
     pub fn send_initial_configure(&mut self, toplevel: &ToplevelSurface) {
         let Some(unmapped) = self.niri.unmapped_windows.get_mut(toplevel.wl_surface()) else {
             error!("window must be present in unmapped_windows in send_initial_configure()");
@@ -1176,7 +1186,9 @@ impl State {
         } else if let Some((layer_surface, output)) = self.niri.layout.outputs().find_map(|o| {
             let map = layer_map_for_output(o);
             let layer_surface = map.layer_for_surface(&root, WindowSurfaceType::TOPLEVEL)?;
-            Some((layer_surface.clone(), o))
+            let layer_surface = layer_surface.clone();
+            drop(map);
+            Some((layer_surface, o))
         }) {
             self.unconstrain_layer_shell_popup(popup, &layer_surface, output);
         }
@@ -1188,7 +1200,7 @@ impl State {
         let mut target = self.niri.layout.popup_target_rect(window);
         target.loc -= get_popup_toplevel_coords(popup).to_f64();
 
-        self.position_popup_within_rect(popup, target, true);
+        Self::position_popup_within_rect(popup, target, true);
     }
 
     pub fn unconstrain_layer_shell_popup(
@@ -1205,8 +1217,7 @@ impl State {
 
         // The target geometry for the positioner should be relative to its parent's geometry, so
         // we will compute that here.
-        let mut target = Rectangle::from_size(output_geo.size);
-
+        //
         // Background and bottom layer popups render below the top and the overlay layer, so let's
         // put them into the non-exclusive zone.
         //
@@ -1215,19 +1226,20 @@ impl State {
         //
         // FIXME: related to the above, top layer popups should use the "overlay layer"
         // non-exclusive zone.
-        if matches!(layer_surface.layer(), Layer::Background | Layer::Bottom) {
-            target = map.non_exclusive_zone();
-        }
+        let mut target = if matches!(layer_surface.layer(), Layer::Background | Layer::Bottom) {
+            map.non_exclusive_zone()
+        } else {
+            Rectangle::from_size(output_geo.size)
+        };
 
         target.loc -= layer_geo.loc;
         target.loc -= get_popup_toplevel_coords(popup);
 
         // Don't add padding to layer-shell popups. It's not really needed, and it's unexpected.
-        self.position_popup_within_rect(popup, target.to_f64(), false);
+        Self::position_popup_within_rect(popup, target.to_f64(), false);
     }
 
     fn position_popup_within_rect(
-        &self,
         popup: &PopupKind,
         target: Rectangle<f64, Logical>,
         padding: bool,
@@ -1395,6 +1407,7 @@ pub fn add_mapped_toplevel_pre_commit_hook(toplevel: &ToplevelSurface) -> HookId
                 .lock()
                 .unwrap();
             let serial = role.last_acked.as_ref().map(|c| c.serial);
+            drop(role);
 
             (got_unmapped, dmabuf, serial)
         });
@@ -1424,10 +1437,8 @@ pub fn add_mapped_toplevel_pre_commit_hook(toplevel: &ToplevelSurface) -> HookId
                         // Waiting for some other surface; register a notification and add a
                         // transaction blocker.
                         if let Some(client) = surface.client() {
-                            transaction.add_notification(
-                                state.niri.blocker_cleared_tx.clone(),
-                                client,
-                            );
+                            transaction
+                                .add_notification(state.niri.blocker_cleared_tx.clone(), client);
                             add_blocker(surface, transaction.blocker());
                         }
                     }

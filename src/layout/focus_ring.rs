@@ -150,20 +150,29 @@ impl FocusRing {
             );
 
             // Top edge.
-            self.sizes[0] = Size::from((width.mul_add(2., win_size.w) - top_left - top_right, width));
+            self.sizes[0] =
+                Size::from((width.mul_add(2., win_size.w) - top_left - top_right, width));
             self.locations[0] = Point::from((-width + top_left, -width));
 
             // Bottom edge.
-            self.sizes[1] =
-                Size::from((width.mul_add(2., win_size.w) - bottom_left - bottom_right, width));
+            self.sizes[1] = Size::from((
+                width.mul_add(2., win_size.w) - bottom_left - bottom_right,
+                width,
+            ));
             self.locations[1] = Point::from((-width + bottom_left, win_size.h));
 
             // Left edge.
-            self.sizes[2] = Size::from((width, width.mul_add(2., win_size.h) - top_left - bottom_left));
+            self.sizes[2] = Size::from((
+                width,
+                width.mul_add(2., win_size.h) - top_left - bottom_left,
+            ));
             self.locations[2] = Point::from((-width, -width + top_left));
 
             // Right edge.
-            self.sizes[3] = Size::from((width, width.mul_add(2., win_size.h) - top_right - bottom_right));
+            self.sizes[3] = Size::from((
+                width,
+                width.mul_add(2., win_size.h) - top_right - bottom_right,
+            ));
             self.locations[3] = Point::from((win_size.w, -width + top_right));
 
             // Top-left corner.

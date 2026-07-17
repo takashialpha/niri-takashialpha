@@ -78,6 +78,8 @@ pub fn handle_msg(mut msg: Msg, json: bool) -> anyhow::Result<()> {
     };
 
     // Default SIGPIPE so that our prints don't panic on stdout closing.
+    // SAFETY: `signal` is called with a valid signal number and one of the two
+    // documented sentinel handlers (`SIG_DFL`), no function pointer of our own.
     unsafe {
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
     }
@@ -112,411 +114,463 @@ pub fn handle_msg(mut msg: Msg, json: bool) -> anyhow::Result<()> {
         Msg::RequestError => {
             bail!("unexpected response: expected an error, got {response:?}");
         }
-        Msg::Version => {
-            let Response::Version(compositor_version) = response else {
-                bail!("unexpected response: expected Version, got {response:?}");
-            };
-
-            let cli_version = version();
-
-            if json {
-                println!(
-                    "{}",
-                    json!({
-                        "compositor": compositor_version,
-                        "cli": cli_version,
-                    })
-                );
-                return Ok(());
-            }
-
-            if cli_version != compositor_version {
-                eprintln!("Running niri compositor has a different version from the niri CLI.");
-                eprintln!("Did you forget to restart niri after an update?");
-                eprintln!();
-            }
-
-            println!("Compositor version: {compositor_version}");
-            println!("CLI version:        {cli_version}");
-        }
-        Msg::Outputs => {
-            let Response::Outputs(outputs) = response else {
-                bail!("unexpected response: expected Outputs, got {response:?}");
-            };
-
-            if json {
-                let output =
-                    serde_json::to_string(&outputs).context("error formatting response")?;
-                println!("{output}");
-                return Ok(());
-            }
-
-            let mut outputs = outputs
-                .into_values()
-                .map(|out| (OutputName::from_ipc_output(&out), out))
-                .collect::<Vec<_>>();
-            outputs.sort_unstable_by(|a, b| a.0.compare(&b.0));
-
-            for (_name, output) in outputs {
-                print_output(output)?;
-                println!();
-            }
-        }
-        Msg::FocusedWindow => {
-            let Response::FocusedWindow(window) = response else {
-                bail!("unexpected response: expected FocusedWindow, got {response:?}");
-            };
-
-            if json {
-                let window = serde_json::to_string(&window).context("error formatting response")?;
-                println!("{window}");
-                return Ok(());
-            }
-
-            if let Some(window) = window {
-                print_window(&window);
-            } else {
-                println!("No window is focused.");
-            }
-        }
-        Msg::Windows => {
-            let Response::Windows(mut windows) = response else {
-                bail!("unexpected response: expected Windows, got {response:?}");
-            };
-
-            if json {
-                let windows =
-                    serde_json::to_string(&windows).context("error formatting response")?;
-                println!("{windows}");
-                return Ok(());
-            }
-
-            windows.sort_unstable_by_key(|a| a.id);
-
-            for window in windows {
-                print_window(&window);
-                println!();
-            }
-        }
-        Msg::Layers => {
-            let Response::Layers(mut layers) = response else {
-                bail!("unexpected response: expected Layers, got {response:?}");
-            };
-
-            if json {
-                let layers = serde_json::to_string(&layers).context("error formatting response")?;
-                println!("{layers}");
-                return Ok(());
-            }
-
-            layers.sort_by(|a, b| {
-                Ord::cmp(&a.output, &b.output)
-                    .then_with(|| Ord::cmp(&a.layer, &b.layer))
-                    .then_with(|| Ord::cmp(&a.namespace, &b.namespace))
-            });
-            let mut iter = layers.iter().peekable();
-
-            let print = |surface: &niri_ipc::LayerSurface| {
-                println!("    Surface:");
-                println!("      Namespace: \"{}\"", surface.namespace);
-
-                let interactivity = match surface.keyboard_interactivity {
-                    niri_ipc::LayerSurfaceKeyboardInteractivity::None => "none",
-                    niri_ipc::LayerSurfaceKeyboardInteractivity::Exclusive => "exclusive",
-                    niri_ipc::LayerSurfaceKeyboardInteractivity::OnDemand => "on-demand",
-                };
-                println!("      Keyboard interactivity: {interactivity}");
-            };
-
-            let print_layer = |iter: &mut Peekable<slice::Iter<niri_ipc::LayerSurface>>,
-                               output: &str,
-                               layer| {
-                let mut empty = true;
-                while let Some(surface) = iter.next_if(|s| s.output == output && s.layer == layer) {
-                    empty = false;
-                    println!();
-                    print(surface);
-                }
-                if empty {
-                    println!(" (empty)\n");
-                } else {
-                    println!();
-                }
-            };
-
-            while let Some(surface) = iter.peek() {
-                let output = &surface.output;
-                println!("Output \"{output}\":");
-
-                print!("  Background layer:");
-                print_layer(&mut iter, output, niri_ipc::Layer::Background);
-
-                print!("  Bottom layer:");
-                print_layer(&mut iter, output, niri_ipc::Layer::Bottom);
-
-                print!("  Top layer:");
-                print_layer(&mut iter, output, niri_ipc::Layer::Top);
-
-                print!("  Overlay layer:");
-                print_layer(&mut iter, output, niri_ipc::Layer::Overlay);
-            }
-        }
-        Msg::FocusedOutput => {
-            let Response::FocusedOutput(output) = response else {
-                bail!("unexpected response: expected FocusedOutput, got {response:?}");
-            };
-
-            if json {
-                let output = serde_json::to_string(&output).context("error formatting response")?;
-                println!("{output}");
-                return Ok(());
-            }
-
-            if let Some(output) = output {
-                print_output(output)?;
-            } else {
-                println!("No output is focused.");
-            }
-        }
-        Msg::PickWindow => {
-            let Response::PickedWindow(window) = response else {
-                bail!("unexpected response: expected PickedWindow, got {response:?}");
-            };
-
-            if json {
-                let window = serde_json::to_string(&window).context("error formatting response")?;
-                println!("{window}");
-                return Ok(());
-            }
-
-            if let Some(window) = window {
-                print_window(&window);
-            } else {
-                println!("No window selected.");
-            }
-        }
-        Msg::PickColor => {
-            let Response::PickedColor(color) = response else {
-                bail!("unexpected response: expected PickedColor, got {response:?}");
-            };
-
-            if json {
-                let color = serde_json::to_string(&color).context("error formatting response")?;
-                println!("{color}");
-                return Ok(());
-            }
-
-            if let Some(color) = color {
-                let [r, g, b] = color.rgb.map(|v| (v.clamp(0., 1.) * 255.).round() as u8);
-
-                println!("Picked color: rgb({r}, {g}, {b})");
-                println!("Hex: #{r:02x}{g:02x}{b:02x}");
-            } else {
-                println!("No color was picked.");
-            }
-        }
+        Msg::Version => print_version_response(response, json)?,
+        Msg::Outputs => print_outputs_response(response, json)?,
+        Msg::FocusedWindow => print_focused_window_response(response, json)?,
+        Msg::Windows => print_windows_response(response, json)?,
+        Msg::Layers => print_layers_response(response, json)?,
+        Msg::FocusedOutput => print_focused_output_response(response, json)?,
+        Msg::PickWindow => print_pick_window_response(response, json)?,
+        Msg::PickColor => print_pick_color_response(response, json)?,
         Msg::Action { .. } => {
             let Response::Handled = response else {
                 bail!("unexpected response: expected Handled, got {response:?}");
             };
         }
-        Msg::Output { output, .. } => {
-            let Response::OutputConfigChanged(response) = response else {
-                bail!("unexpected response: expected OutputConfigChanged, got {response:?}");
-            };
+        Msg::Output { output, .. } => print_output_config_response(&response, json, &output)?,
+        Msg::Workspaces => print_workspaces_response(response, json)?,
+        Msg::KeyboardLayouts => print_keyboard_layouts_response(response, json)?,
+        Msg::EventStream => return stream_events(&response, socket, json),
+        Msg::OverviewState => print_overview_state_response(response, json)?,
+    }
 
-            if json {
-                let response =
-                    serde_json::to_string(&response).context("error formatting response")?;
-                println!("{response}");
-                return Ok(());
+    Ok(())
+}
+
+fn print_version_response(response: Response, json: bool) -> anyhow::Result<()> {
+    let Response::Version(compositor_version) = response else {
+        bail!("unexpected response: expected Version, got {response:?}");
+    };
+
+    let cli_version = version();
+
+    if json {
+        println!(
+            "{}",
+            json!({
+                "compositor": compositor_version,
+                "cli": cli_version,
+            })
+        );
+        return Ok(());
+    }
+
+    if cli_version != compositor_version {
+        eprintln!("Running niri compositor has a different version from the niri CLI.");
+        eprintln!("Did you forget to restart niri after an update?");
+        eprintln!();
+    }
+
+    println!("Compositor version: {compositor_version}");
+    println!("CLI version:        {cli_version}");
+
+    Ok(())
+}
+
+fn print_outputs_response(response: Response, json: bool) -> anyhow::Result<()> {
+    let Response::Outputs(outputs) = response else {
+        bail!("unexpected response: expected Outputs, got {response:?}");
+    };
+
+    if json {
+        let output = serde_json::to_string(&outputs).context("error formatting response")?;
+        println!("{output}");
+        return Ok(());
+    }
+
+    let mut outputs = outputs
+        .into_values()
+        .map(|out| (OutputName::from_ipc_output(&out), out))
+        .collect::<Vec<_>>();
+    outputs.sort_unstable_by(|a, b| a.0.compare(&b.0));
+
+    for (_name, output) in outputs {
+        print_output(output)?;
+        println!();
+    }
+
+    Ok(())
+}
+
+fn print_focused_window_response(response: Response, json: bool) -> anyhow::Result<()> {
+    let Response::FocusedWindow(window) = response else {
+        bail!("unexpected response: expected FocusedWindow, got {response:?}");
+    };
+
+    if json {
+        let window = serde_json::to_string(&window).context("error formatting response")?;
+        println!("{window}");
+        return Ok(());
+    }
+
+    if let Some(window) = window {
+        print_window(&window);
+    } else {
+        println!("No window is focused.");
+    }
+
+    Ok(())
+}
+
+fn print_windows_response(response: Response, json: bool) -> anyhow::Result<()> {
+    let Response::Windows(mut windows) = response else {
+        bail!("unexpected response: expected Windows, got {response:?}");
+    };
+
+    if json {
+        let windows = serde_json::to_string(&windows).context("error formatting response")?;
+        println!("{windows}");
+        return Ok(());
+    }
+
+    windows.sort_unstable_by_key(|a| a.id);
+
+    for window in windows {
+        print_window(&window);
+        println!();
+    }
+
+    Ok(())
+}
+
+fn print_layers_response(response: Response, json: bool) -> anyhow::Result<()> {
+    let Response::Layers(mut layers) = response else {
+        bail!("unexpected response: expected Layers, got {response:?}");
+    };
+
+    if json {
+        let layers = serde_json::to_string(&layers).context("error formatting response")?;
+        println!("{layers}");
+        return Ok(());
+    }
+
+    layers.sort_by(|a, b| {
+        Ord::cmp(&a.output, &b.output)
+            .then_with(|| Ord::cmp(&a.layer, &b.layer))
+            .then_with(|| Ord::cmp(&a.namespace, &b.namespace))
+    });
+    let mut iter = layers.iter().peekable();
+
+    let print = |surface: &niri_ipc::LayerSurface| {
+        println!("    Surface:");
+        println!("      Namespace: \"{}\"", surface.namespace);
+
+        let interactivity = match surface.keyboard_interactivity {
+            niri_ipc::LayerSurfaceKeyboardInteractivity::None => "none",
+            niri_ipc::LayerSurfaceKeyboardInteractivity::Exclusive => "exclusive",
+            niri_ipc::LayerSurfaceKeyboardInteractivity::OnDemand => "on-demand",
+        };
+        println!("      Keyboard interactivity: {interactivity}");
+    };
+
+    let print_layer =
+        |iter: &mut Peekable<slice::Iter<niri_ipc::LayerSurface>>, output: &str, layer| {
+            let mut empty = true;
+            while let Some(surface) = iter.next_if(|s| s.output == output && s.layer == layer) {
+                empty = false;
+                println!();
+                print(surface);
             }
-
-            if response == OutputConfigChanged::OutputWasMissing {
-                println!("Output \"{output}\" is not connected.");
-                println!("The change will apply when it is connected.");
-            }
-        }
-        Msg::Workspaces => {
-            let Response::Workspaces(mut response) = response else {
-                bail!("unexpected response: expected Workspaces, got {response:?}");
-            };
-
-            if json {
-                let response =
-                    serde_json::to_string(&response).context("error formatting response")?;
-                println!("{response}");
-                return Ok(());
-            }
-
-            if response.is_empty() {
-                println!("No workspaces.");
-                return Ok(());
-            }
-
-            response.sort_by_key(|ws| ws.idx);
-            response.sort_by(|a, b| a.output.cmp(&b.output));
-
-            let mut current_output = if let Some(output) = response[0].output.as_deref() {
-                println!("Output \"{output}\":");
-                Some(output)
+            if empty {
+                println!(" (empty)\n");
             } else {
-                println!("No output:");
-                None
-            };
+                println!();
+            }
+        };
 
-            for ws in &response {
-                if ws.output.as_deref() != current_output {
-                    let output = ws.output.as_deref().context(
-                        "invalid response: workspace with no output \
-                         following a workspace with an output",
-                    )?;
-                    current_output = Some(output);
-                    println!("\nOutput \"{output}\":");
-                }
+    while let Some(surface) = iter.peek() {
+        let output = &surface.output;
+        println!("Output \"{output}\":");
 
-                let is_active = if ws.is_active { " * " } else { "   " };
-                let idx = ws.idx;
-                let name = if let Some(name) = ws.name.as_deref() {
-                    format!(" \"{name}\"")
+        print!("  Background layer:");
+        print_layer(&mut iter, output, niri_ipc::Layer::Background);
+
+        print!("  Bottom layer:");
+        print_layer(&mut iter, output, niri_ipc::Layer::Bottom);
+
+        print!("  Top layer:");
+        print_layer(&mut iter, output, niri_ipc::Layer::Top);
+
+        print!("  Overlay layer:");
+        print_layer(&mut iter, output, niri_ipc::Layer::Overlay);
+    }
+
+    Ok(())
+}
+
+fn print_focused_output_response(response: Response, json: bool) -> anyhow::Result<()> {
+    let Response::FocusedOutput(output) = response else {
+        bail!("unexpected response: expected FocusedOutput, got {response:?}");
+    };
+
+    if json {
+        let output = serde_json::to_string(&output).context("error formatting response")?;
+        println!("{output}");
+        return Ok(());
+    }
+
+    if let Some(output) = output {
+        print_output(output)?;
+    } else {
+        println!("No output is focused.");
+    }
+
+    Ok(())
+}
+
+fn print_pick_window_response(response: Response, json: bool) -> anyhow::Result<()> {
+    let Response::PickedWindow(window) = response else {
+        bail!("unexpected response: expected PickedWindow, got {response:?}");
+    };
+
+    if json {
+        let window = serde_json::to_string(&window).context("error formatting response")?;
+        println!("{window}");
+        return Ok(());
+    }
+
+    if let Some(window) = window {
+        print_window(&window);
+    } else {
+        println!("No window selected.");
+    }
+
+    Ok(())
+}
+
+fn print_pick_color_response(response: Response, json: bool) -> anyhow::Result<()> {
+    let Response::PickedColor(color) = response else {
+        bail!("unexpected response: expected PickedColor, got {response:?}");
+    };
+
+    if json {
+        let color = serde_json::to_string(&color).context("error formatting response")?;
+        println!("{color}");
+        return Ok(());
+    }
+
+    if let Some(color) = color {
+        // Color channels are clamped to [0, 1] and scaled to [0, 255] before rounding,
+        // so the cast to u8 never truncates a meaningful fraction or wraps sign.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let [r, g, b] = color.rgb.map(|v| (v.clamp(0., 1.) * 255.).round() as u8);
+
+        println!("Picked color: rgb({r}, {g}, {b})");
+        println!("Hex: #{r:02x}{g:02x}{b:02x}");
+    } else {
+        println!("No color was picked.");
+    }
+
+    Ok(())
+}
+
+fn print_output_config_response(
+    response: &Response,
+    json: bool,
+    output: &str,
+) -> anyhow::Result<()> {
+    let Response::OutputConfigChanged(response) = response else {
+        bail!("unexpected response: expected OutputConfigChanged, got {response:?}");
+    };
+
+    if json {
+        let response = serde_json::to_string(&response).context("error formatting response")?;
+        println!("{response}");
+        return Ok(());
+    }
+
+    if *response == OutputConfigChanged::OutputWasMissing {
+        println!("Output \"{output}\" is not connected.");
+        println!("The change will apply when it is connected.");
+    }
+
+    Ok(())
+}
+
+fn print_workspaces_response(response: Response, json: bool) -> anyhow::Result<()> {
+    let Response::Workspaces(mut response) = response else {
+        bail!("unexpected response: expected Workspaces, got {response:?}");
+    };
+
+    if json {
+        let response = serde_json::to_string(&response).context("error formatting response")?;
+        println!("{response}");
+        return Ok(());
+    }
+
+    if response.is_empty() {
+        println!("No workspaces.");
+        return Ok(());
+    }
+
+    response.sort_by_key(|ws| ws.idx);
+    response.sort_by(|a, b| a.output.cmp(&b.output));
+
+    let mut current_output = response[0].output.as_deref().map_or_else(
+        || {
+            println!("No output:");
+            None
+        },
+        |output| {
+            println!("Output \"{output}\":");
+            Some(output)
+        },
+    );
+
+    for ws in &response {
+        if ws.output.as_deref() != current_output {
+            let output = ws.output.as_deref().context(
+                "invalid response: workspace with no output \
+                 following a workspace with an output",
+            )?;
+            current_output = Some(output);
+            println!("\nOutput \"{output}\":");
+        }
+
+        let is_active = if ws.is_active { " * " } else { "   " };
+        let idx = ws.idx;
+        let name = ws
+            .name
+            .as_deref()
+            .map_or_else(String::new, |name| format!(" \"{name}\""));
+        println!("{is_active}{idx}{name}");
+    }
+
+    Ok(())
+}
+
+fn print_keyboard_layouts_response(response: Response, json: bool) -> anyhow::Result<()> {
+    let Response::KeyboardLayouts(response) = response else {
+        bail!("unexpected response: expected KeyboardLayouts, got {response:?}");
+    };
+
+    if json {
+        let response = serde_json::to_string(&response).context("error formatting response")?;
+        println!("{response}");
+        return Ok(());
+    }
+
+    let KeyboardLayouts { names, current_idx } = response;
+    let current_idx = usize::from(current_idx);
+
+    println!("Keyboard layouts:");
+    for (idx, name) in names.iter().enumerate() {
+        let is_active = if idx == current_idx { " * " } else { "   " };
+        println!("{is_active}{idx} {name}");
+    }
+
+    Ok(())
+}
+
+fn stream_events(response: &Response, socket: Socket, json: bool) -> anyhow::Result<()> {
+    let Response::Handled = response else {
+        bail!("unexpected response: expected Handled, got {response:?}");
+    };
+
+    if !json {
+        println!("Started reading events.");
+    }
+
+    let mut read_event = socket.read_events();
+    loop {
+        let event = read_event().context("error reading event from niri")?;
+
+        if json {
+            let event = serde_json::to_string(&event).context("error formatting event")?;
+            println!("{event}");
+            continue;
+        }
+
+        match event {
+            Event::WorkspacesChanged { workspaces } => {
+                println!("Workspaces changed: {workspaces:?}");
+            }
+            Event::WorkspaceUrgencyChanged { id, urgent } => {
+                println!("Workspace {id}: urgency changed to {urgent}");
+            }
+            Event::WorkspaceActivated { id, focused } => {
+                let word = if focused { "focused" } else { "activated" };
+                println!("Workspace {word}: {id}");
+            }
+            Event::WorkspaceActiveWindowChanged {
+                workspace_id,
+                active_window_id,
+            } => {
+                println!(
+                    "Workspace {workspace_id}: \
+                     active window changed to {active_window_id:?}"
+                );
+            }
+            Event::WindowsChanged { windows } => {
+                println!("Windows changed: {windows:?}");
+            }
+            Event::WindowOpenedOrChanged { window } => {
+                println!("Window opened or changed: {window:?}");
+            }
+            Event::WindowClosed { id } => {
+                println!("Window closed: {id}");
+            }
+            Event::WindowFocusChanged { id } => {
+                println!("Window focus changed: {id:?}");
+            }
+            Event::WindowFocusTimestampChanged {
+                id,
+                focus_timestamp,
+            } => {
+                println!("Window {id}: focus timestamp changed to {focus_timestamp:?}");
+            }
+            Event::WindowUrgencyChanged { id, urgent } => {
+                println!("Window {id}: urgency changed to {urgent}");
+            }
+            Event::WindowLayoutsChanged { changes } => {
+                println!("Window layouts changed: {changes:?}");
+            }
+            Event::KeyboardLayoutsChanged { keyboard_layouts } => {
+                println!("Keyboard layouts changed: {keyboard_layouts:?}");
+            }
+            Event::KeyboardLayoutSwitched { idx } => {
+                println!("Keyboard layout switched: {idx}");
+            }
+            Event::OverviewOpenedOrClosed { is_open: opened } => {
+                println!("Overview toggled: {opened}");
+            }
+            Event::ConfigLoaded { failed } => {
+                let status = if failed {
+                    "with an error"
                 } else {
-                    String::new()
+                    "successfully"
                 };
-                println!("{is_active}{idx}{name}");
+                println!("Config loaded {status}");
             }
-        }
-        Msg::KeyboardLayouts => {
-            let Response::KeyboardLayouts(response) = response else {
-                bail!("unexpected response: expected KeyboardLayouts, got {response:?}");
-            };
-
-            if json {
-                let response =
-                    serde_json::to_string(&response).context("error formatting response")?;
-                println!("{response}");
-                return Ok(());
-            }
-
-            let KeyboardLayouts { names, current_idx } = response;
-            let current_idx = usize::from(current_idx);
-
-            println!("Keyboard layouts:");
-            for (idx, name) in names.iter().enumerate() {
-                let is_active = if idx == current_idx { " * " } else { "   " };
-                println!("{is_active}{idx} {name}");
-            }
-        }
-        Msg::EventStream => {
-            let Response::Handled = response else {
-                bail!("unexpected response: expected Handled, got {response:?}");
-            };
-
-            if !json {
-                println!("Started reading events.");
-            }
-
-            let mut read_event = socket.read_events();
-            loop {
-                let event = read_event().context("error reading event from niri")?;
-
-                if json {
-                    let event = serde_json::to_string(&event).context("error formatting event")?;
-                    println!("{event}");
-                    continue;
+            Event::ScreenshotCaptured { path } => {
+                let mut parts = vec![];
+                parts.push("copied to clipboard".to_string());
+                if let Some(path) = &path {
+                    parts.push(format!("saved to {path}"));
                 }
-
-                match event {
-                    Event::WorkspacesChanged { workspaces } => {
-                        println!("Workspaces changed: {workspaces:?}");
-                    }
-                    Event::WorkspaceUrgencyChanged { id, urgent } => {
-                        println!("Workspace {id}: urgency changed to {urgent}");
-                    }
-                    Event::WorkspaceActivated { id, focused } => {
-                        let word = if focused { "focused" } else { "activated" };
-                        println!("Workspace {word}: {id}");
-                    }
-                    Event::WorkspaceActiveWindowChanged {
-                        workspace_id,
-                        active_window_id,
-                    } => {
-                        println!(
-                            "Workspace {workspace_id}: \
-                             active window changed to {active_window_id:?}"
-                        );
-                    }
-                    Event::WindowsChanged { windows } => {
-                        println!("Windows changed: {windows:?}");
-                    }
-                    Event::WindowOpenedOrChanged { window } => {
-                        println!("Window opened or changed: {window:?}");
-                    }
-                    Event::WindowClosed { id } => {
-                        println!("Window closed: {id}");
-                    }
-                    Event::WindowFocusChanged { id } => {
-                        println!("Window focus changed: {id:?}");
-                    }
-                    Event::WindowFocusTimestampChanged {
-                        id,
-                        focus_timestamp,
-                    } => {
-                        println!("Window {id}: focus timestamp changed to {focus_timestamp:?}");
-                    }
-                    Event::WindowUrgencyChanged { id, urgent } => {
-                        println!("Window {id}: urgency changed to {urgent}");
-                    }
-                    Event::WindowLayoutsChanged { changes } => {
-                        println!("Window layouts changed: {changes:?}");
-                    }
-                    Event::KeyboardLayoutsChanged { keyboard_layouts } => {
-                        println!("Keyboard layouts changed: {keyboard_layouts:?}");
-                    }
-                    Event::KeyboardLayoutSwitched { idx } => {
-                        println!("Keyboard layout switched: {idx}");
-                    }
-                    Event::OverviewOpenedOrClosed { is_open: opened } => {
-                        println!("Overview toggled: {opened}");
-                    }
-                    Event::ConfigLoaded { failed } => {
-                        let status = if failed {
-                            "with an error"
-                        } else {
-                            "successfully"
-                        };
-                        println!("Config loaded {status}");
-                    }
-                    Event::ScreenshotCaptured { path } => {
-                        let mut parts = vec![];
-                        parts.push("copied to clipboard".to_string());
-                        if let Some(path) = &path {
-                            parts.push(format!("saved to {path}"));
-                        }
-                        let description = parts.join(" and ");
-                        println!("Screenshot captured: {description}");
-                    }
-                }
+                let description = parts.join(" and ");
+                println!("Screenshot captured: {description}");
             }
         }
-        Msg::OverviewState => {
-            let Response::OverviewState(response) = response else {
-                bail!("unexpected response: expected Overview, got {response:?}");
-            };
+    }
+}
 
-            if json {
-                let response =
-                    serde_json::to_string(&response).context("error formatting response")?;
-                println!("{response}");
-                return Ok(());
-            }
+fn print_overview_state_response(response: Response, json: bool) -> anyhow::Result<()> {
+    let Response::OverviewState(response) = response else {
+        bail!("unexpected response: expected Overview, got {response:?}");
+    };
 
-            let Overview { is_open } = response;
-            if is_open {
-                println!("Overview is open.");
-            } else {
-                println!("Overview is closed.");
-            }
-        }
+    if json {
+        let response = serde_json::to_string(&response).context("error formatting response")?;
+        println!("{response}");
+        return Ok(());
+    }
+
+    let Overview { is_open } = response;
+    if is_open {
+        println!("Overview is open.");
+    } else {
+        println!("Overview is closed.");
     }
 
     Ok(())
@@ -717,7 +771,10 @@ fn ensure_absolute_path(path: &mut String) -> anyhow::Result<()> {
         cwd.push(p);
         match cwd.into_os_string().into_string() {
             Ok(absolute) => *path = absolute,
-            Err(cwd) => bail!("couldn't convert absolute path to string: {cwd:?}"),
+            Err(cwd) => bail!(
+                "couldn't convert absolute path to string: {}",
+                cwd.display()
+            ),
         }
     }
     Ok(())

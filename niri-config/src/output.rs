@@ -254,15 +254,17 @@ impl<S: ErrorSpan> knus::DecodeScalar<S> for MaxBpc {
         value: &knus::span::Spanned<knus::ast::Literal, S>,
         ctx: &mut Context<S>,
     ) -> Result<Self, DecodeError<S>> {
-        if let knus::ast::Literal::Int(val) = &**value { match u8::try_from(val) {
-            Ok(v) => niri_ipc::MaxBpc::try_from(v)
-                .map(MaxBpc)
-                .map_err(|e| DecodeError::conversion(value, e)),
-            Err(e) => {
-                ctx.emit_error(DecodeError::conversion(value, e));
-                Ok(Self::default())
+        if let knus::ast::Literal::Int(val) = &**value {
+            match u8::try_from(val) {
+                Ok(v) => niri_ipc::MaxBpc::try_from(v)
+                    .map(MaxBpc)
+                    .map_err(|e| DecodeError::conversion(value, e)),
+                Err(e) => {
+                    ctx.emit_error(DecodeError::conversion(value, e));
+                    Ok(Self::default())
+                }
             }
-        } } else {
+        } else {
             ctx.emit_error(DecodeError::scalar_kind(knus::decode::Kind::Int, value));
             Ok(Self::default())
         }

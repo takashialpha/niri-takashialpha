@@ -1,4 +1,4 @@
-use std::cell::{Cell, Ref, RefCell};
+use std::cell::{Cell, OnceCell, Ref, RefCell};
 use std::time::Duration;
 
 use niri_config::WindowRule;
@@ -44,6 +44,11 @@ use crate::utils::{
     with_toplevel_last_uncommitted_configure, with_toplevel_role, with_toplevel_role_and_current,
 };
 
+// These bools are independent, orthogonal pieces of window state that can be set
+// in any combination (e.g. a window can be focused, urgent, and floating all at
+// once) rather than mutually-exclusive states, so a bitflags/enum wouldn't be a
+// clean fit.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug)]
 pub struct Mapped {
     pub window: Window,
@@ -230,9 +235,9 @@ enum InteractiveResize {
 impl InteractiveResize {
     const fn data(&self) -> InteractiveResizeData {
         match self {
-            Self::Ongoing(data) => *data,
-            Self::WaitingForLastConfigure(data) => *data,
-            Self::WaitingForLastCommit { data, .. } => *data,
+            Self::Ongoing(data)
+            | Self::WaitingForLastConfigure(data)
+            | Self::WaitingForLastCommit { data, .. } => *data,
         }
     }
 }
@@ -400,9 +405,9 @@ impl Mapped {
             blocked_out_contents,
             block_out_from: self.rules().block_out_from,
             size,
-            texture: Default::default(),
-            texture_with_blocked_out_bg: Default::default(),
-            blocked_out_texture: Default::default(),
+            texture: OnceCell::new(),
+            texture_with_blocked_out_bg: OnceCell::new(),
+            blocked_out_texture: OnceCell::new(),
         }
     }
 
@@ -779,7 +784,8 @@ impl LayoutElement for Mapped {
             None => with_states(toplevel.wl_surface(), |states| {
                 states
                     .data_map
-                    .get::<KdeDecorationsModeState>().is_some_and(KdeDecorationsModeState::is_server)
+                    .get::<KdeDecorationsModeState>()
+                    .is_some_and(KdeDecorationsModeState::is_server)
             }),
             _ => false,
         }
@@ -967,7 +973,10 @@ impl LayoutElement for Mapped {
                 x => x,
             };
 
-            if matches!(self.request_size_once, Some(RequestSizeOnce::WaitingForConfigure)) {
+            if matches!(
+                self.request_size_once,
+                Some(RequestSizeOnce::WaitingForConfigure)
+            ) {
                 self.request_size_once = Some(RequestSizeOnce::WaitingForCommit(serial));
             }
 
@@ -1060,6 +1069,9 @@ impl LayoutElement for Mapped {
         self.toplevel().with_pending_state(|state| state.size)
     }
 
+    // `server_pending` (below) borrows out of `role` and is used through the end of the
+    // `with_states` closure, so `role` cannot be dropped any earlier.
+    #[allow(clippy::significant_drop_tightening)]
     fn expected_size(&self) -> Option<Size<i32, Logical>> {
         // We can only use current size if it's not maximized or fullscreen.
         let current_size = (self.sizing_mode().is_normal()).then(|| self.window.geometry().size);

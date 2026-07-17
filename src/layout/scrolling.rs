@@ -473,6 +473,10 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         )
     }
 
+    // Logical-pixel window sizes here are derived from `working_size`/`extra`, which come
+    // from real output geometry and top out at real display resolutions (order 10^4), so
+    // the f64 -> i32 narrowing below never truncates in practice.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn new_window_size(
         &self,
         width: Option<PresetSize>,
@@ -493,7 +497,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
         let working_size = self.working_area.size;
 
-        let width = if let Some(size) = width {
+        let width = width.map_or(0, |size| {
             let size = match resolve_preset_size(size, &self.options, working_size.w, extra.w) {
                 ResolvedSize::Tile(mut size) => {
                     if !border.off {
@@ -505,16 +509,18 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             };
 
             max(1, size.floor() as i32)
-        } else {
-            0
-        };
+        });
 
-        let mut full_height = self.options.layout.gaps.mul_add(-2., self.working_area.size.h);
+        let mut full_height = self
+            .options
+            .layout
+            .gaps
+            .mul_add(-2., self.working_area.size.h);
         if !border.off {
             full_height = border.width.mul_add(-2., full_height);
         }
 
-        let height = if let Some(height) = height {
+        let height = height.map_or(full_height, |height| {
             let height = match resolve_preset_size(height, &self.options, working_size.h, extra.h) {
                 ResolvedSize::Tile(mut size) => {
                     if !border.off {
@@ -525,9 +531,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                 ResolvedSize::Window(size) => size,
             };
             f64::min(height, full_height)
-        } else {
-            full_height
-        };
+        });
 
         Size::from((width, max(height.floor() as i32, 1)))
     }
@@ -651,13 +655,16 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
                 // NOTE: This logic won't work entirely correctly with small fixed-size maximized
                 // windows (they have a different area and padding).
-                let total_width = self.options.layout.gaps.mul_add(2., if source_col_x < target_col_x {
-                    // Source is left from target.
-                    target_col_x - source_col_x + target_col_width
-                } else {
-                    // Source is right from target.
-                    source_col_x - target_col_x + source_col_width
-                });
+                let total_width = self.options.layout.gaps.mul_add(
+                    2.,
+                    if source_col_x < target_col_x {
+                        // Source is left from target.
+                        target_col_x - source_col_x + target_col_width
+                    } else {
+                        // Source is right from target.
+                        source_col_x - target_col_x + source_col_width
+                    },
+                );
 
                 // If it fits together, do a normal animation, otherwise center the new column.
                 if total_width <= self.working_area.size.w {
@@ -1044,6 +1051,11 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         self.remove_tile_by_idx(column_idx, tile_idx, transaction, None)
     }
 
+    // `Transaction` is a cheap Arc/Rc-backed handle threaded by value through the
+    // whole tile-removal call chain (monitor.rs/workspace.rs/layout.rs); taking it
+    // by reference here would just push this same lint onto every caller in that
+    // chain for no benefit, since none of them need to reuse it afterwards either.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn remove_tile_by_idx(
         &mut self,
         column_idx: usize,
@@ -1128,7 +1140,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             }
         }
 
-        column.update_tile_sizes_with_transaction(true, transaction);
+        column.update_tile_sizes_with_transaction(true, &transaction);
         self.data[column_idx].update(column);
         let offset = prev_width - column.width();
 
@@ -1805,7 +1817,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                 // improves the workflow that has become common with tabbed columns: open a new
                 // window, then immediately consume it left as a new tab.
                 self.activate_prev_column_on_removal
-                    .get_or_insert(self.view_offset.stationary() + offset.x);
+                    .get_or_insert_with(|| self.view_offset.stationary() + offset.x);
             }
 
             offset.x += self.columns[source_col_idx].render_offset().x;
@@ -2432,7 +2444,10 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                 if column_index == 0 || column_index == self.columns.len() {
                     let size = Size::from((
                         300.,
-                        self.options.layout.gaps.mul_add(-2., self.working_area.size.h),
+                        self.options
+                            .layout
+                            .gaps
+                            .mul_add(-2., self.working_area.size.h),
                     ));
                     let mut loc = Point::from((
                         self.column_x(column_index),
@@ -2448,7 +2463,10 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                 } else {
                     let size = Size::from((
                         300.,
-                        self.options.layout.gaps.mul_add(-2., self.working_area.size.h),
+                        self.options
+                            .layout
+                            .gaps
+                            .mul_add(-2., self.working_area.size.h),
                     ));
                     let loc = Point::from((
                         self.column_x(column_index) - size.w / 2. - self.options.layout.gaps / 2.,
@@ -3136,7 +3154,20 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         true
     }
 
+    // This is a single cohesive decision procedure for where a view-offset swipe
+    // gesture settles (snap points, direction, activation column); splitting it up
+    // would scatter tightly-coupled local state across helper functions without
+    // making any individual piece easier to follow.
+    #[allow(clippy::too_many_lines)]
     pub fn view_offset_gesture_end(&mut self) -> bool {
+        // Snapping point: where the view aligns with column boundaries on either side.
+        struct Snap {
+            // View position relative to x = 0 (the first column).
+            view_pos: f64,
+            // Column to activate for this snapping point.
+            col_idx: usize,
+        }
+
         let ViewOffset::Gesture(gesture) = &mut self.view_offset else {
             return false;
         };
@@ -3163,15 +3194,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         let end_pos = gesture.tracker.projected_end_pos();
         let target_view_offset = end_pos + gesture.delta_from_tracker;
 
-        // Compute the snapping points. These are where the view aligns with column boundaries on
-        // either side.
-        struct Snap {
-            // View position relative to x = 0 (the first column).
-            view_pos: f64,
-            // Column to activate for this snapping point.
-            col_idx: usize,
-        }
-
+        // Compute the snapping points.
         let mut snapping_points = Vec::new();
 
         if self.is_centering_focused_column() {
@@ -3244,12 +3267,12 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                         let is_overflowing = |adj_col_w: Option<f64>| {
                             center_on_overflow
                                 && adj_col_w.as_ref().is_some_and(|adj_col_w| {
-                                        // NOTE: This logic won't work entirely correctly with small
-                                        // fixed-size maximized windows (they have a different area
-                                        // and padding).
-                                        center_on_overflow
-                                            && adj_col_w + 3.0 * gaps + col_w > area.size.w
-                                    })
+                                    // NOTE: This logic won't work entirely correctly with small
+                                    // fixed-size maximized windows (they have a different area
+                                    // and padding).
+                                    center_on_overflow
+                                        && adj_col_w + 3.0 * gaps + col_w > area.size.w
+                                })
                         };
 
                         let left = if is_overflowing(next_col_w) {
@@ -3516,6 +3539,9 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         true
     }
 
+    // Resulting window sizes are logical-pixel screen coordinates, which top out at
+    // real display resolutions (order 10^4), so rounding to i32 never truncates.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn interactive_resize_update(
         &mut self,
         window: &W::Id,
@@ -3598,12 +3624,13 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
     pub fn refresh(&mut self, is_active: bool, _is_focused: bool) {
         for (col_idx, col) in self.columns.iter_mut().enumerate() {
-            let mut col_resize_data = None;
-            if let Some(resize) = &self.interactive_resize
+            let col_resize_data = if let Some(resize) = &self.interactive_resize
                 && col.contains(&resize.window)
             {
-                col_resize_data = Some(resize.data);
-            }
+                Some(resize.data)
+            } else {
+                None
+            };
 
             let is_tabbed = col.display_mode == ColumnDisplay::Tabbed;
             let extra_size = col.extra_size();
@@ -3682,7 +3709,10 @@ impl ViewOffset {
             Self::Animation(anim) => anim.value(),
             Self::Gesture(gesture) => {
                 gesture.current_view_offset
-                    + gesture.animation.as_ref().map_or(0., super::super::animation::Animation::value)
+                    + gesture
+                        .animation
+                        .as_ref()
+                        .map_or(0., super::super::animation::Animation::value)
             }
         }
     }
@@ -3794,8 +3824,8 @@ impl TileData {
 impl From<PresetSize> for ColumnWidth {
     fn from(value: PresetSize) -> Self {
         match value {
-            PresetSize::Proportion(p) => Self::Proportion(p.clamp(0., 10000.)),
-            PresetSize::Fixed(f) => Self::Fixed(f64::from(f.clamp(1, 100000))),
+            PresetSize::Proportion(p) => Self::Proportion(p.clamp(0., 10_000.)),
+            PresetSize::Fixed(f) => Self::Fixed(f64::from(f.clamp(1, 100_000))),
         }
     }
 }
@@ -3893,14 +3923,9 @@ impl<W: LayoutElement> Column<W> {
         scale: f64,
         options: Rc<Options>,
     ) {
-        let mut update_sizes = false;
-
-        if self.view_size != view_size
+        let mut update_sizes = self.view_size != view_size
             || self.working_area != working_area
-            || self.parent_area != parent_area
-        {
-            update_sizes = true;
-        }
+            || self.parent_area != parent_area;
 
         // If preset widths changed, clear our stored preset index.
         if self.options.layout.preset_column_widths != options.layout.preset_column_widths {
@@ -3913,10 +3938,14 @@ impl<W: LayoutElement> Column<W> {
             update_sizes = true;
         }
 
+        // Detecting *any* change to a config value, however tiny, is the intent here,
+        // not comparing the result of a computation, so exact float equality is correct.
+        #[allow(clippy::float_cmp)]
         if self.options.layout.gaps != options.layout.gaps {
             update_sizes = true;
         }
 
+        #[allow(clippy::float_cmp)]
         if self.options.layout.border.off != options.layout.border.off
             || self.options.layout.border.width != options.layout.border.width
         {
@@ -4298,10 +4327,14 @@ impl<W: LayoutElement> Column<W> {
     }
 
     fn update_tile_sizes(&mut self, animate: bool) {
-        self.update_tile_sizes_with_transaction(animate, Transaction::new());
+        self.update_tile_sizes_with_transaction(animate, &Transaction::new());
     }
 
-    fn update_tile_sizes_with_transaction(&mut self, animate: bool, transaction: Transaction) {
+    // This is a single auto-height distribution pass across all tiles in the column
+    // (fixed/min/max constraints, tabbed mode, leftover space); splitting it up would
+    // scatter the running `height_left`/`auto_tiles_left` state across helpers.
+    #[allow(clippy::too_many_lines)]
+    fn update_tile_sizes_with_transaction(&mut self, animate: bool, transaction: &Transaction) {
         let sizing_mode = self.pending_sizing_mode();
         if matches!(sizing_mode, SizingMode::Fullscreen | SizingMode::Maximized) {
             for (tile_idx, tile) in self.tiles.iter_mut().enumerate() {
@@ -4358,7 +4391,7 @@ impl<W: LayoutElement> Column<W> {
                 }
             })
             .min()
-            .map_or(f64::from(i32::MAX), NotNan::into_inner);
+            .map_or_else(|| f64::from(i32::MAX), NotNan::into_inner);
         let max_width = f64::max(max_width, min_width);
 
         let width = if self.is_full_width {
@@ -4376,8 +4409,7 @@ impl<W: LayoutElement> Column<W> {
 
         // If there are multiple windows in a column, clamp the non-auto window's height according
         // to other windows' min sizes.
-        let mut max_non_auto_window_height = None;
-        if self.tiles.len() > 1
+        let max_non_auto_window_height = if self.tiles.len() > 1
             && !is_tabbed
             && let Some(non_auto_idx) = self
                 .data
@@ -4393,11 +4425,13 @@ impl<W: LayoutElement> Column<W> {
 
             let tile = &self.tiles[non_auto_idx];
             let height_left = max_tile_height - min_height_taken;
-            max_non_auto_window_height = Some(f64::max(
+            Some(f64::max(
                 1.,
                 tile.window_height_for_tile_height(height_left).round(),
-            ));
-        }
+            ))
+        } else {
+            None
+        };
 
         // Compute the tile heights. Start by converting window heights to tile heights.
         let mut heights = zip(&self.tiles, &self.data)
@@ -4422,7 +4456,7 @@ impl<W: LayoutElement> Column<W> {
                         ResolvedSize::Window(h) => h,
                     };
 
-                    let mut window_height = window_height.round().clamp(1., 100000.);
+                    let mut window_height = window_height.round().clamp(1., 100_000.);
                     if let Some(max) = max_non_auto_window_height {
                         window_height = f64::min(window_height, max);
                     }
@@ -4464,13 +4498,18 @@ impl<W: LayoutElement> Column<W> {
             // The following logic will apply individual min/max height, etc.
         }
 
+        // Tile counts in a column are always tiny compared to f64's exact-integer range.
+        #[allow(clippy::cast_precision_loss)]
         let gaps_left = self.options.layout.gaps * (self.tiles.len() + 1) as f64;
         let mut height_left = working_size.h - gaps_left;
         let mut auto_tiles_left = self.tiles.len();
 
         // Subtract all fixed-height tiles.
         for (h, (min_size, max_size)) in zip(&mut heights, zip(&min_size, &max_size)) {
-            // Check if the tile has an exact height constraint.
+            // Check if the tile has an exact height constraint, i.e. min and max were
+            // pinned to the same value; this is an intentional exact comparison, not a
+            // computed-value one.
+            #[allow(clippy::float_cmp)]
             if min_size.h == max_size.h {
                 *h = WindowHeight::Fixed(min_size.h);
             }
@@ -4742,6 +4781,10 @@ impl<W: LayoutElement> Column<W> {
     }
 
     fn set_column_width(&mut self, change: SizeChange, tile_idx: Option<usize>, animate: bool) {
+        // FIXME: fix overflows then remove limits.
+        const MAX_PX: f64 = 100_000.;
+        const MAX_F: f64 = 10_000.;
+
         let current = if self.is_full_width || self.is_pending_maximized {
             ColumnWidth::Proportion(1.)
         } else {
@@ -4749,10 +4792,6 @@ impl<W: LayoutElement> Column<W> {
         };
 
         let current_px = self.resolve_column_width(current);
-
-        // FIXME: fix overflows then remove limits.
-        const MAX_PX: f64 = 100000.;
-        const MAX_F: f64 = 10000.;
 
         let width = match (current, change) {
             (_, SizeChange::SetFixed(fixed)) => {
@@ -4797,6 +4836,9 @@ impl<W: LayoutElement> Column<W> {
     }
 
     fn set_window_height(&mut self, change: SizeChange, tile_idx: Option<usize>, animate: bool) {
+        // FIXME: fix overflows then remove limits.
+        const MAX_PX: f64 = 100_000.;
+
         let tile_idx = tile_idx.unwrap_or(self.active_tile_idx);
 
         // Start by converting all heights to automatic, since only one window in the column can be
@@ -4826,13 +4868,11 @@ impl<W: LayoutElement> Column<W> {
             (current_tile_px + gaps) / full
         };
 
-        // FIXME: fix overflows then remove limits.
-        const MAX_PX: f64 = 100000.;
-
         let mut window_height = match change {
             SizeChange::SetFixed(fixed) => f64::from(fixed),
             SizeChange::SetProportion(proportion) => {
-                let tile_height = (working_size - gaps).mul_add(proportion / 100., -gaps) - extra_size;
+                let tile_height =
+                    (working_size - gaps).mul_add(proportion / 100., -gaps) - extra_size;
                 tile.window_height_for_tile_height(tile_height)
             }
             SizeChange::AdjustFixed(delta) => current_window_px + f64::from(delta),
@@ -4922,7 +4962,9 @@ impl<W: LayoutElement> Column<W> {
                             ResolvedSize::Tile(h) => tile.window_height_for_tile_height(h),
                             ResolvedSize::Window(h) => h,
                         };
-                        tile.tile_height_for_window_height(window_height.round().clamp(1., 100000.))
+                        tile.tile_height_for_window_height(
+                            window_height.round().clamp(1., 100_000.),
+                        )
                     });
 
                 if forwards {
@@ -5308,14 +5350,21 @@ fn compute_toplevel_bounds(
     extra_size: Size<f64, Logical>,
     gaps: f64,
 ) -> Size<i32, Logical> {
-    let mut border = 0.;
-    if !border_config.off {
-        border = border_config.width * 2.;
-    }
+    let border = if border_config.off {
+        0.
+    } else {
+        border_config.width * 2.
+    };
 
     Size::from((
-        f64::max(gaps.mul_add(-2., working_area_size.w) - extra_size.w - border, 1.),
-        f64::max(gaps.mul_add(-2., working_area_size.h) - extra_size.h - border, 1.),
+        f64::max(
+            gaps.mul_add(-2., working_area_size.w) - extra_size.w - border,
+            1.,
+        ),
+        f64::max(
+            gaps.mul_add(-2., working_area_size.h) - extra_size.h - border,
+            1.,
+        ),
     ))
     .to_i32_floor()
 }
@@ -5343,7 +5392,8 @@ fn resolve_preset_size(
 ) -> ResolvedSize {
     match preset {
         PresetSize::Proportion(proportion) => ResolvedSize::Tile(
-            (view_size - options.layout.gaps).mul_add(proportion, -options.layout.gaps) - extra_size,
+            (view_size - options.layout.gaps).mul_add(proportion, -options.layout.gaps)
+                - extra_size,
         ),
         PresetSize::Fixed(width) => ResolvedSize::Window(f64::from(width)),
     }

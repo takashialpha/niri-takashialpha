@@ -300,7 +300,13 @@ impl<W: LayoutElement> Tile<W> {
                 tile_size.h = (tile_size.h - tile_size_from.h).mul_add(val, tile_size_from.h);
 
                 let fullscreen_from = resize.fullscreen_progress.map_or_else(
-                    || if prev_sizing_mode.is_fullscreen() { 1. } else { 0. },
+                    || {
+                        if prev_sizing_mode.is_fullscreen() {
+                            1.
+                        } else {
+                            0.
+                        }
+                    },
                     |anim| anim.clamped_value().clamp(0., 1.),
                 );
 
@@ -594,7 +600,10 @@ impl<W: LayoutElement> Tile<W> {
 
         // Preserve the previous config if ongoing.
         let anim = self.move_x_animation.take().map(|move_| move_.anim);
-        let anim = anim.map_or_else(|| Animation::new(self.clock.clone(), 1., 0., 0., config), |anim| anim.restarted(1., 0., 0.));
+        let anim = anim.map_or_else(
+            || Animation::new(self.clock.clone(), 1., 0., 0., config),
+            |anim| anim.restarted(1., 0., 0.),
+        );
 
         self.move_x_animation = Some(MoveAnimation {
             anim,
@@ -611,7 +620,10 @@ impl<W: LayoutElement> Tile<W> {
 
         // Preserve the previous config if ongoing.
         let anim = self.move_y_animation.take().map(|move_| move_.anim);
-        let anim = anim.map_or_else(|| Animation::new(self.clock.clone(), 1., 0., 0., config), |anim| anim.restarted(1., 0., 0.));
+        let anim = anim.map_or_else(
+            || Animation::new(self.clock.clone(), 1., 0., 0., config),
+            |anim| anim.restarted(1., 0., 0.),
+        );
 
         self.move_y_animation = Some(MoveAnimation {
             anim,
@@ -1184,14 +1196,8 @@ impl<W: LayoutElement> Tile<W> {
                         && let Some(shader) = clip_shader.clone()
                         && ClippedSurfaceRenderElement::will_clip(&elem, scale, geo, radius)
                     {
-                        return ClippedSurfaceRenderElement::new(
-                            elem,
-                            scale,
-                            geo,
-                            shader,
-                            radius,
-                        )
-                        .into();
+                        return ClippedSurfaceRenderElement::new(elem, scale, geo, shader, radius)
+                            .into();
                     }
 
                     // Otherwise, render it normally.

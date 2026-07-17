@@ -196,7 +196,11 @@ impl WorkspaceSwitch {
         match self {
             Self::Animation(anim) => anim.value(),
             Self::Gesture(gesture) => {
-                gesture.current_idx + gesture.animation.as_ref().map_or(0., super::super::animation::Animation::value)
+                gesture.current_idx
+                    + gesture
+                        .animation
+                        .as_ref()
+                        .map_or(0., super::super::animation::Animation::value)
             }
         }
     }
@@ -360,7 +364,8 @@ impl<W: LayoutElement> Monitor<W> {
 
     #[must_use]
     pub fn into_workspaces(mut self) -> Vec<Workspace<W>> {
-        self.workspaces.retain(super::workspace::Workspace::has_windows_or_name);
+        self.workspaces
+            .retain(super::workspace::Workspace::has_windows_or_name);
 
         for ws in &mut self.workspaces {
             ws.set_output(None);
@@ -403,7 +408,9 @@ impl<W: LayoutElement> Monitor<W> {
     }
 
     pub fn windows(&self) -> impl Iterator<Item = &W> {
-        self.workspaces.iter().flat_map(super::workspace::Workspace::windows)
+        self.workspaces
+            .iter()
+            .flat_map(super::workspace::Workspace::windows)
     }
 
     pub fn has_window(&self, window: &W::Id) -> bool {
@@ -1103,7 +1110,10 @@ impl<W: LayoutElement> Monitor<W> {
         self.workspace_switch
             .as_ref()
             .is_some_and(WorkspaceSwitch::is_animation_ongoing)
-            || self.workspaces.iter().any(super::workspace::Workspace::are_animations_ongoing)
+            || self
+                .workspaces
+                .iter()
+                .any(super::workspace::Workspace::are_animations_ongoing)
     }
 
     #[must_use]
@@ -1487,14 +1497,18 @@ impl<W: LayoutElement> Monitor<W> {
             let zoom = self.overview_zoom();
             let ws_height_with_gap = self.workspace_size_with_gap(zoom).h;
 
-            let first_ws_y = switch_anim.to().mul_add(from_ws_height_with_gap - ws_height_with_gap, -switch_anim.value() * from_ws_height_with_gap);
+            let first_ws_y = switch_anim.to().mul_add(
+                from_ws_height_with_gap - ws_height_with_gap,
+                -switch_anim.value() * from_ws_height_with_gap,
+            );
 
             return -first_ws_y / ws_height_with_gap;
         }
 
-        self.workspace_switch
-            .as_ref()
-            .map_or(self.active_workspace_idx as f64, WorkspaceSwitch::current_idx)
+        self.workspace_switch.as_ref().map_or(
+            self.active_workspace_idx as f64,
+            WorkspaceSwitch::current_idx,
+        )
     }
 
     // Workspace count/indices are always tiny in practice, so usize -> f64 never loses precision.
@@ -1784,7 +1798,11 @@ impl<W: LayoutElement> Monitor<W> {
         renderer: &mut R,
         push: &mut dyn FnMut(MonitorRenderElement<R>),
     ) {
-        let Some(progress) = self.overview_progress.as_ref().map(OverviewProgress::clamped_value) else {
+        let Some(progress) = self
+            .overview_progress
+            .as_ref()
+            .map(OverviewProgress::clamped_value)
+        else {
             return;
         };
         // f32 is what the renderer wants for alpha; precision loss on a 0..1 value is harmless.

@@ -527,14 +527,14 @@ impl<W: LayoutElement> InteractiveMoveState<W> {
     const fn moving(&self) -> Option<&InteractiveMoveData<W>> {
         match self {
             Self::Moving(move_) => Some(move_),
-            _ => None,
+            Self::Starting { .. } => None,
         }
     }
 
     const fn moving_mut(&mut self) -> Option<&mut InteractiveMoveData<W>> {
         match self {
             Self::Moving(move_) => Some(move_),
-            _ => None,
+            Self::Starting { .. } => None,
         }
     }
 }
@@ -855,7 +855,14 @@ impl<W: LayoutElement> Layout<W> {
     /// Adds a new window to the layout.
     ///
     /// Returns an output that the window was added to, if there were any outputs.
-    #[allow(clippy::too_many_arguments)]
+    // This is a single monitor/workspace dispatch decision for where a new window
+    // goes; splitting it up would scatter the match on `target` and the resulting
+    // `&mut self.monitor_set` borrow across helper functions for no real gain.
+    // `AddWindowTarget` is `Copy` (only references and small Copy fields), so passing
+    // it by value here is the idiomatic, cheap choice despite clippy's generic
+    // lifetime confusing its Copy detection.
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+    #[allow(clippy::needless_pass_by_value)]
     pub fn add_window(
         &mut self,
         window: W,
@@ -900,35 +907,33 @@ impl<W: LayoutElement> Layout<W> {
                         )
                     }
                     AddWindowTarget::NextTo(next_to) => {
-                        if let Some(output) = self
+                        let moving_next_to_output = self
                             .interactive_move
                             .as_ref()
-                            .and_then(|move_| {
-                                if let InteractiveMoveState::Moving(move_) = move_ {
-                                    Some(move_)
-                                } else {
-                                    None
-                                }
-                            })
+                            .and_then(InteractiveMoveState::moving)
                             .filter(|move_| next_to == move_.tile.window().id())
-                            .map(|move_| move_.output.clone())
-                        {
-                            // The next_to window is being interactively moved.
-                            let mon_idx = monitors
-                                .iter()
-                                .position(|mon| mon.output == output)
-                                .unwrap_or(*active_monitor_idx);
+                            .map(|move_| move_.output.clone());
 
-                            (mon_idx, MonitorAddWindowTarget::Auto)
-                        } else {
-                            let mon_idx = monitors
-                                .iter()
-                                .position(|mon| {
-                                    mon.workspaces.iter().any(|ws| ws.has_window(next_to))
-                                })
-                                .unwrap();
-                            (mon_idx, MonitorAddWindowTarget::NextTo(next_to))
-                        }
+                        moving_next_to_output.map_or_else(
+                            || {
+                                let mon_idx = monitors
+                                    .iter()
+                                    .position(|mon| {
+                                        mon.workspaces.iter().any(|ws| ws.has_window(next_to))
+                                    })
+                                    .unwrap();
+                                (mon_idx, MonitorAddWindowTarget::NextTo(next_to))
+                            },
+                            |output| {
+                                // The next_to window is being interactively moved.
+                                let mon_idx = monitors
+                                    .iter()
+                                    .position(|mon| mon.output == output)
+                                    .unwrap_or(*active_monitor_idx);
+
+                                (mon_idx, MonitorAddWindowTarget::Auto)
+                            },
+                        )
                     }
                 };
                 let mon = &mut monitors[mon_idx];
@@ -989,7 +994,9 @@ impl<W: LayoutElement> Layout<W> {
                                 } else {
                                     None
                                 }
-                            }).as_ref().is_some_and(|move_| next_to == move_.tile.window().id())
+                            })
+                            .as_ref()
+                            .is_some_and(|move_| next_to == move_.tile.window().id())
                         {
                             // The next_to window is being interactively moved. If there are no
                             // other windows, we may have no workspaces at all.
@@ -1231,7 +1238,7 @@ impl<W: LayoutElement> Layout<W> {
 
     pub fn find_workspace_by_ref(
         &mut self,
-        reference: WorkspaceReference,
+        reference: &WorkspaceReference,
     ) -> Option<&mut Workspace<W>> {
         if let WorkspaceReference::Index(index) = reference {
             self.active_monitor().and_then(|m| {
@@ -1239,7 +1246,7 @@ impl<W: LayoutElement> Layout<W> {
                 m.workspaces.get_mut(index)
             })
         } else {
-            self.workspaces_mut().find(|ws| match &reference {
+            self.workspaces_mut().find(|ws| match reference {
                 WorkspaceReference::Name(ref_name) => ws
                     .name
                     .as_ref()
@@ -1251,10 +1258,10 @@ impl<W: LayoutElement> Layout<W> {
     }
 
     pub fn unname_workspace(&mut self, workspace_name: &str) {
-        self.unname_workspace_by_ref(WorkspaceReference::Name(workspace_name.into()));
+        self.unname_workspace_by_ref(&WorkspaceReference::Name(workspace_name.into()));
     }
 
-    pub fn unname_workspace_by_ref(&mut self, reference: WorkspaceReference) {
+    pub fn unname_workspace_by_ref(&mut self, reference: &WorkspaceReference) {
         let id = self.find_workspace_by_ref(reference).map(|ws| ws.id());
         if let Some(id) = id {
             self.unname_workspace_by_id(id);
@@ -1434,6 +1441,11 @@ impl<W: LayoutElement> Layout<W> {
         ws_idx == mon.active_workspace_idx
     }
 
+    // `gesture.current_idx.floor()`/`.ceil()` are already-integral f64 values, and
+    // `workspace_idx` (a tiny per-monitor workspace count) converts to f64 exactly, so
+    // comparing them for exact equality is intentional (checking if the gesture sits
+    // exactly on an index), not a computed-value comparison.
+    #[allow(clippy::float_cmp, clippy::cast_precision_loss)]
     pub fn activate_window(&mut self, window: &W::Id) {
         if let Some(InteractiveMoveState::Moving(move_)) = &self.interactive_move
             && move_.tile.window().id() == window
@@ -1470,6 +1482,8 @@ impl<W: LayoutElement> Layout<W> {
         }
     }
 
+    // See the comment on `activate_window` above about the gesture index comparison.
+    #[allow(clippy::float_cmp, clippy::cast_precision_loss)]
     pub fn activate_window_without_raising(&mut self, window: &W::Id) {
         if let Some(InteractiveMoveState::Moving(move_)) = &self.interactive_move
             && move_.tile.window().id() == window
@@ -1561,7 +1575,10 @@ impl<W: LayoutElement> Layout<W> {
             .into_iter();
 
         let mon = monitors.iter().find(|mon| &mon.output == output).unwrap();
-        let mon_windows = mon.workspaces.iter().flat_map(workspace::Workspace::windows);
+        let mon_windows = mon
+            .workspaces
+            .iter()
+            .flat_map(workspace::Workspace::windows);
 
         moving_window.chain(mon_windows)
     }
@@ -1583,7 +1600,10 @@ impl<W: LayoutElement> Layout<W> {
             .iter_mut()
             .find(|mon| &mon.output == output)
             .unwrap();
-        let mon_windows = mon.workspaces.iter_mut().flat_map(workspace::Workspace::windows_mut);
+        let mon_windows = mon
+            .workspaces
+            .iter_mut()
+            .flat_map(workspace::Workspace::windows_mut);
 
         moving_window.chain(mon_windows)
     }
@@ -2290,13 +2310,16 @@ impl<W: LayoutElement> Layout<W> {
         compute_overview_zoom(&self.options, progress)
     }
 
+    // This is a single per-frame animation-advancement pass (window animations, then
+    // DnD/interactive-move view scrolling); splitting it up would scatter the
+    // `dnd_scroll`/`is_overview_open` local state across helpers.
+    #[allow(clippy::too_many_lines)]
     pub fn advance_animations(&mut self) {
-        let mut dnd_scroll = None;
-        let mut is_dnd = false;
-        if let Some(dnd) = &self.dnd {
-            dnd_scroll = Some((dnd.output.clone(), dnd.pointer_pos_within_output, true));
-            is_dnd = true;
-        }
+        let is_dnd = self.dnd.is_some();
+        let mut dnd_scroll = self
+            .dnd
+            .as_ref()
+            .map(|dnd| (dnd.output.clone(), dnd.pointer_pos_within_output, true));
 
         if let Some(InteractiveMoveState::Moving(move_)) = &mut self.interactive_move {
             move_.tile.advance_animations();
@@ -2573,6 +2596,9 @@ impl<W: LayoutElement> Layout<W> {
                     };
 
                     let border_width = move_.tile.effective_border_width().unwrap_or(0.);
+                    // Border widths are a handful of logical pixels at most, well within
+                    // f32's exact range.
+                    #[allow(clippy::cast_possible_truncation)]
                     let corner_radius = move_
                         .tile
                         .window()
@@ -2616,15 +2642,16 @@ impl<W: LayoutElement> Layout<W> {
                 primary_idx,
                 active_monitor_idx,
             } => {
-                let mon_idx = ws_config
-                    .open_on_output
-                    .as_deref()
-                    .map_or(*active_monitor_idx, |name| {
-                        monitors
-                            .iter_mut()
-                            .position(|monitor| output_matches_name(&monitor.output, name))
-                            .unwrap_or(*primary_idx)
-                    });
+                let mon_idx =
+                    ws_config
+                        .open_on_output
+                        .as_deref()
+                        .map_or(*active_monitor_idx, |name| {
+                            monitors
+                                .iter_mut()
+                                .position(|monitor| output_matches_name(&monitor.output, name))
+                                .unwrap_or(*primary_idx)
+                        });
                 let mon = &mut monitors[mon_idx];
 
                 let ws = Workspace::new_with_config(
@@ -3002,22 +3029,25 @@ impl<W: LayoutElement> Layout<W> {
                 .position(|mon| &mon.output == output)
                 .unwrap();
 
-            let (mon_idx, ws_idx) = if let Some(window) = window {
-                monitors
-                    .iter()
-                    .enumerate()
-                    .find_map(|(mon_idx, mon)| {
-                        mon.workspaces
-                            .iter()
-                            .position(|ws| ws.has_window(window))
-                            .map(|ws_idx| (mon_idx, ws_idx))
-                    })
-                    .unwrap()
-            } else {
-                let mon_idx = *active_monitor_idx;
-                let mon = &monitors[mon_idx];
-                (mon_idx, mon.active_workspace_idx)
-            };
+            let (mon_idx, ws_idx) = window.map_or_else(
+                || {
+                    let mon_idx = *active_monitor_idx;
+                    let mon = &monitors[mon_idx];
+                    (mon_idx, mon.active_workspace_idx)
+                },
+                |window| {
+                    monitors
+                        .iter()
+                        .enumerate()
+                        .find_map(|(mon_idx, mon)| {
+                            mon.workspaces
+                                .iter()
+                                .position(|ws| ws.has_window(window))
+                                .map(|ws_idx| (mon_idx, ws_idx))
+                        })
+                        .unwrap()
+                },
+            );
 
             let workspace_idx = target_ws_idx.unwrap_or(monitors[new_idx].active_workspace_idx);
             if mon_idx == new_idx && ws_idx == workspace_idx {
@@ -3146,14 +3176,12 @@ impl<W: LayoutElement> Layout<W> {
             return false;
         };
 
-        let current_idx = if let Some(old_output) = old_output {
+        let current_idx = old_output.map_or(*active_monitor_idx, |old_output| {
             monitors
                 .iter()
                 .position(|mon| mon.output == old_output)
                 .unwrap()
-        } else {
-            *active_monitor_idx
-        };
+        });
         let target_idx = monitors
             .iter()
             .position(|mon| mon.output == *new_output)
@@ -3465,6 +3493,10 @@ impl<W: LayoutElement> Layout<W> {
         true
     }
 
+    // This is a single cohesive interactive-move update step (position tracking,
+    // cross-output/cross-workspace transfer, insert-hint computation); splitting it
+    // up would scatter tightly-coupled local state across helpers.
+    #[allow(clippy::too_many_lines)]
     pub fn interactive_move_update(
         &mut self,
         window: &W::Id,
@@ -3544,8 +3576,7 @@ impl<W: LayoutElement> Layout<W> {
                 //
                 // FIXME: when and if the layout code knows about monitor positions, this will be
                 // potentially animatable.
-                let mut tile_pos = None;
-                if let Some((mon, (ws, ws_geo))) = self.monitors().find_map(|mon| {
+                let tile_pos = if let Some((mon, (ws, ws_geo))) = self.monitors().find_map(|mon| {
                     mon.workspaces_with_render_geo()
                         .find(|(ws, _)| ws.has_window(window))
                         .map(|rv| (mon, rv))
@@ -3557,8 +3588,10 @@ impl<W: LayoutElement> Layout<W> {
                         .unwrap();
 
                     let zoom = mon.overview_zoom();
-                    tile_pos = Some((ws_geo.loc + tile_offset.upscale(zoom), zoom));
-                }
+                    Some((ws_geo.loc + tile_offset.upscale(zoom), zoom))
+                } else {
+                    None
+                };
 
                 // Clear it before calling remove_window() to avoid running interactive_move_end()
                 // in the middle of interactive_move_update() and the confusion that causes.
@@ -3647,13 +3680,19 @@ impl<W: LayoutElement> Layout<W> {
                 }
 
                 // If moved over a different workspace, reset the config override.
-                let mut update_config = false;
-                if let Some((id, _)) = &move_.workspace_config
+                //
+                // clippy suggests folding this and the `output != move_.output` check below
+                // into a single if/else-if, but that would make them mutually exclusive; they
+                // are actually independent conditions that can both fire in the same call.
+                #[allow(clippy::useless_let_if_seq)]
+                let mut update_config = if let Some((id, _)) = &move_.workspace_config
                     && Some(*id) != ws_id
                 {
                     move_.workspace_config = None;
-                    update_config = true;
-                }
+                    true
+                } else {
+                    false
+                };
 
                 if output != move_.output {
                     move_.tile.window().output_leave(&move_.output);
@@ -3691,6 +3730,10 @@ impl<W: LayoutElement> Layout<W> {
         true
     }
 
+    // This is a single cohesive interactive-move finalization step (placing the tile
+    // back into floating/scrolling, restoring size, animations); splitting it up
+    // would scatter tightly-coupled local state across helpers.
+    #[allow(clippy::too_many_lines)]
     pub fn interactive_move_end(&mut self, window: &W::Id) {
         let Some(move_) = &self.interactive_move else {
             return;
@@ -4138,7 +4181,7 @@ impl<W: LayoutElement> Layout<W> {
         }
 
         let ws = if let Some(reference) = reference {
-            self.find_workspace_by_ref(reference)
+            self.find_workspace_by_ref(&reference)
         } else {
             self.active_workspace_mut()
         };
@@ -4183,7 +4226,7 @@ impl<W: LayoutElement> Layout<W> {
 
     pub fn unset_workspace_name(&mut self, reference: Option<WorkspaceReference>) {
         let ws = if let Some(reference) = reference {
-            self.find_workspace_by_ref(reference)
+            self.find_workspace_by_ref(&reference)
         } else {
             self.active_workspace_mut()
         };
@@ -4596,9 +4639,5 @@ fn compute_overview_zoom(options: &Options, overview_progress: Option<f64>) -> f
     // Clamp to some sane values.
     let zoom = options.overview.zoom.clamp(0.0001, 0.75);
 
-    if let Some(p) = overview_progress {
-        p.mul_add(-(1. - zoom), 1.).max(0.0001)
-    } else {
-        1.
-    }
+    overview_progress.map_or(1., |p| p.mul_add(-(1. - zoom), 1.).max(0.0001))
 }

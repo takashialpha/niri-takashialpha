@@ -730,6 +730,9 @@ impl<W: LayoutElement> FloatingSpace<W> {
     }
 
     pub fn set_window_width(&mut self, id: Option<&W::Id>, change: SizeChange, animate: bool) {
+        const MAX_PX: f64 = 100_000.;
+        const MAX_F: f64 = 10000.;
+
         let Some(id) = id.or(self.active_window_id.as_ref()) else {
             return;
         };
@@ -742,9 +745,6 @@ impl<W: LayoutElement> FloatingSpace<W> {
         let win = tile.window();
         let current_window = win.expected_size().unwrap_or_else(|| win.size()).w;
         let current_tile = tile.tile_expected_or_current_size().w;
-
-        const MAX_PX: f64 = 100_000.;
-        const MAX_F: f64 = 10000.;
 
         let win_width = match change {
             SizeChange::SetFixed(win_width) => f64::from(win_width),
@@ -761,6 +761,9 @@ impl<W: LayoutElement> FloatingSpace<W> {
                 tile.window_width_for_tile_width(tile_width)
             }
         };
+        // Window widths are logical-pixel screen coordinates, clamped to `MAX_PX`
+        // above, which fits exactly in an i32.
+        #[allow(clippy::cast_possible_truncation)]
         let win_width = win_width.round().clamp(1., MAX_PX) as i32;
 
         let win = tile.window_mut();
@@ -777,6 +780,9 @@ impl<W: LayoutElement> FloatingSpace<W> {
     }
 
     pub fn set_window_height(&mut self, id: Option<&W::Id>, change: SizeChange, animate: bool) {
+        const MAX_PX: f64 = 100_000.;
+        const MAX_F: f64 = 10000.;
+
         let Some(id) = id.or(self.active_window_id.as_ref()) else {
             return;
         };
@@ -789,9 +795,6 @@ impl<W: LayoutElement> FloatingSpace<W> {
         let win = tile.window();
         let current_window = win.expected_size().unwrap_or_else(|| win.size()).h;
         let current_tile = tile.tile_expected_or_current_size().h;
-
-        const MAX_PX: f64 = 100_000.;
-        const MAX_F: f64 = 10000.;
 
         let win_height = match change {
             SizeChange::SetFixed(win_height) => f64::from(win_height),
@@ -808,6 +811,9 @@ impl<W: LayoutElement> FloatingSpace<W> {
                 tile.window_height_for_tile_height(tile_height)
             }
         };
+        // Window heights are logical-pixel screen coordinates, clamped to `MAX_PX`
+        // above, which fits exactly in an i32.
+        #[allow(clippy::cast_possible_truncation)]
         let win_height = win_height.round().clamp(1., MAX_PX) as i32;
 
         let win = tile.window_mut();
@@ -946,6 +952,8 @@ impl<W: LayoutElement> FloatingSpace<W> {
         y: PositionChange,
         animate: bool,
     ) {
+        const MAX_F: f64 = 10000.;
+
         let Some(id) = id.or(self.active_window_id.as_ref()) else {
             return;
         };
@@ -956,8 +964,6 @@ impl<W: LayoutElement> FloatingSpace<W> {
         let available_width = self.working_area.size.w;
         let available_height = self.working_area.size.h;
         let working_area_loc = self.working_area.loc;
-
-        const MAX_F: f64 = 10000.;
 
         match x {
             PositionChange::SetFixed(x) => pos.x = x + working_area_loc.x,
@@ -1092,6 +1098,9 @@ impl<W: LayoutElement> FloatingSpace<W> {
         true
     }
 
+    // Resulting window sizes are logical-pixel screen coordinates, which top out at
+    // real display resolutions (order 10^4), so rounding to i32 never truncates.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn interactive_resize_update(
         &mut self,
         window: &W::Id,
@@ -1215,6 +1224,10 @@ impl<W: LayoutElement> FloatingSpace<W> {
         }
     }
 
+    // Logical-pixel window sizes here are derived from `working_area_size`, which
+    // comes from real output geometry and tops out at real display resolutions
+    // (order 10^4), so the f64 -> i32 narrowing below never truncates in practice.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn new_window_size(
         &self,
         width: Option<PresetSize>,
@@ -1224,7 +1237,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
         let border = self.options.layout.border.merged_with(&rules.border);
 
         let resolve = |size: Option<PresetSize>, working_area_size: f64| {
-            if let Some(size) = size {
+            size.map_or(0, |size| {
                 let size = match resolve_preset_size(size, working_area_size) {
                     ResolvedSize::Tile(mut size) => {
                         if !border.off {
@@ -1236,9 +1249,7 @@ impl<W: LayoutElement> FloatingSpace<W> {
                 };
 
                 max(1, size.floor() as i32)
-            } else {
-                0
-            }
+            })
         };
 
         let width = resolve(width, self.working_area.size.w);
@@ -1289,10 +1300,11 @@ fn compute_toplevel_bounds(
     border_config: niri_config::Border,
     working_area_size: Size<f64, Logical>,
 ) -> Size<i32, Logical> {
-    let mut border = 0.;
-    if !border_config.off {
-        border = border_config.width * 2.;
-    }
+    let border = if border_config.off {
+        0.
+    } else {
+        border_config.width * 2.
+    };
 
     Size::from((
         f64::max(working_area_size.w - border, 1.),

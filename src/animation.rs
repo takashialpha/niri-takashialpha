@@ -119,14 +119,20 @@ impl Animation {
         let initial_velocity = initial_velocity / self.clock.rate().max(0.001);
 
         match self.kind {
-            Kind::Easing { curve } => Self::ease(
-                self.clock.clone(),
-                from,
-                to,
-                initial_velocity,
-                self.duration.as_millis() as u64,
-                curve,
-            ),
+            Kind::Easing { curve } => {
+                // Animation durations are always small (configured in ms), nowhere
+                // near u64::MAX, so this narrowing from u128 never truncates.
+                #[allow(clippy::cast_possible_truncation)]
+                let duration_ms = self.duration.as_millis() as u64;
+                Self::ease(
+                    self.clock.clone(),
+                    from,
+                    to,
+                    initial_velocity,
+                    duration_ms,
+                    curve,
+                )
+            }
             Kind::Spring(spring) => {
                 let spring = Spring {
                     from,
@@ -294,7 +300,8 @@ impl Animation {
             } => {
                 let passed = passed.as_secs_f64();
                 let coeff = 1000. * deceleration_rate.ln();
-                ((deceleration_rate.powf(1000. * passed) - 1.) / coeff).mul_add(initial_velocity, self.from)
+                ((deceleration_rate.powf(1000. * passed) - 1.) / coeff)
+                    .mul_add(initial_velocity, self.from)
             }
         }
     }

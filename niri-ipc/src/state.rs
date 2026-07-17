@@ -228,9 +228,11 @@ impl EventStreamStatePart for WindowsState {
 
 impl EventStreamStatePart for KeyboardLayoutsState {
     fn replicate(&self) -> Vec<Event> {
-        self.keyboard_layouts.clone().map_or_else(Vec::new, |keyboard_layouts| {
-            vec![Event::KeyboardLayoutsChanged { keyboard_layouts }]
-        })
+        self.keyboard_layouts
+            .clone()
+            .map_or_else(Vec::new, |keyboard_layouts| {
+                vec![Event::KeyboardLayoutsChanged { keyboard_layouts }]
+            })
     }
 
     fn apply(&mut self, event: Event) -> Option<Event> {

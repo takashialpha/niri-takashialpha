@@ -38,6 +38,10 @@ fn compiled_or_warn<T>(result: Result<T, GlesError>, what: &str) -> Option<T> {
 }
 
 impl Shaders {
+    // Flat sequential "compile this shader, then that one" initialization with no
+    // control flow; it's long only because each shader's uniform list is spelled
+    // out, not because it's complex.
+    #[allow(clippy::too_many_lines)]
     fn compile(renderer: &mut GlesRenderer) -> Self {
         let border = compiled_or_warn(
             ShaderProgram::compile(

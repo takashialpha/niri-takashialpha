@@ -10,6 +10,9 @@ readme = "../README.md"
 keywords = ["wayland"]
 categories = ["api-bindings", "os"]
 
+[lints]
+workspace = true
+
 [dependencies]
 clap = { workspace = true }
 serde.workspace = true

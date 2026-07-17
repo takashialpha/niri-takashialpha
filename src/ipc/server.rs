@@ -110,7 +110,7 @@ impl IpcServer {
         })
     }
 
-    fn send_event(&self, event: Event) {
+    fn send_event(&self, event: &Event) {
         let mut streams = self.event_streams.borrow_mut();
         let mut to_remove = Vec::new();
         for (idx, stream) in streams.iter_mut().enumerate() {
@@ -144,10 +144,11 @@ impl Drop for IpcServer {
 
 fn socket_dir() -> PathBuf {
     BaseDirectories::new()
-        .get_runtime_directory().map_or_else(|_| env::temp_dir(), std::borrow::ToOwned::to_owned)
+        .get_runtime_directory()
+        .map_or_else(|_| env::temp_dir(), std::borrow::ToOwned::to_owned)
 }
 
-fn on_new_ipc_client(state: &mut State, stream: UnixStream) {
+fn on_new_ipc_client(state: &State, stream: UnixStream) {
     trace!("new IPC client connected");
 
     let stream = match state.niri.event_loop.adapt_io(stream) {
@@ -178,6 +179,13 @@ fn on_new_ipc_client(state: &mut State, stream: UnixStream) {
     }
 }
 
+// `ClientCtx` holds `Rc`/`RefCell` fields and is deliberately !Send: these futures are
+// only ever scheduled on `calloop`'s single-threaded executor (`Scheduler::schedule`
+// does not require `Send`), so there is no real thread-safety issue here.
+#[allow(
+    clippy::future_not_send,
+    reason = "scheduled on calloop's single-threaded executor only"
+)]
 async fn handle_client(ctx: ClientCtx, stream: Async<'static, UnixStream>) -> anyhow::Result<()> {
     let (read, mut write) = stream.split();
     let mut read = BufReader::new(read);
@@ -262,191 +270,238 @@ async fn handle_client(ctx: ClientCtx, stream: Async<'static, UnixStream>) -> an
     }
 }
 
+// Same reasoning as `handle_client` above: `ctx` is !Send, but only calloop's
+// single-threaded executor ever polls this future.
+#[allow(
+    clippy::future_not_send,
+    reason = "scheduled on calloop's single-threaded executor only"
+)]
 async fn process(ctx: &ClientCtx, request: Request) -> Reply {
-    let response = match request {
-        Request::ReturnError => return Err(String::from("example compositor error")),
-        Request::Version => Response::Version(version()),
-        Request::Outputs => {
-            let ipc_outputs = ctx.ipc_outputs.lock().unwrap().clone();
-            let outputs = ipc_outputs.values().cloned().map(|o| (o.name.clone(), o));
-            Response::Outputs(outputs.collect())
-        }
-        Request::Workspaces => {
-            let state = ctx.event_stream_state.borrow();
-            let workspaces = state.workspaces.workspaces.values().cloned().collect();
-            Response::Workspaces(workspaces)
-        }
-        Request::Windows => {
-            let state = ctx.event_stream_state.borrow();
-            let windows = state.windows.windows.values().cloned().collect();
-            Response::Windows(windows)
-        }
-        Request::Layers => {
-            let (tx, rx) = async_channel::bounded(1);
-            ctx.event_loop.insert_idle(move |state| {
-                let mut layers = Vec::new();
-                for output in state.niri.global_space.outputs() {
-                    let name = output.name();
-                    for surface in layer_map_for_output(output).layers() {
-                        let layer = match surface.layer() {
-                            Layer::Background => niri_ipc::Layer::Background,
-                            Layer::Bottom => niri_ipc::Layer::Bottom,
-                            Layer::Top => niri_ipc::Layer::Top,
-                            Layer::Overlay => niri_ipc::Layer::Overlay,
-                        };
-                        let keyboard_interactivity =
-                            match surface.cached_state().keyboard_interactivity {
-                                KeyboardInteractivity::None => {
-                                    niri_ipc::LayerSurfaceKeyboardInteractivity::None
-                                }
-                                KeyboardInteractivity::Exclusive => {
-                                    niri_ipc::LayerSurfaceKeyboardInteractivity::Exclusive
-                                }
-                                KeyboardInteractivity::OnDemand => {
-                                    niri_ipc::LayerSurfaceKeyboardInteractivity::OnDemand
-                                }
-                            };
+    match request {
+        Request::ReturnError => Err(String::from("example compositor error")),
+        Request::Version => Ok(Response::Version(version())),
+        Request::Outputs => Ok(handle_outputs(ctx)),
+        Request::Workspaces => Ok(handle_workspaces(ctx)),
+        Request::Windows => Ok(handle_windows(ctx)),
+        Request::Layers => handle_layers(ctx).await,
+        Request::KeyboardLayouts => Ok(handle_keyboard_layouts(ctx)),
+        Request::FocusedWindow => Ok(handle_focused_window(ctx)),
+        Request::PickWindow => handle_pick_window(ctx).await,
+        Request::PickColor => handle_pick_color(ctx).await,
+        Request::Action(action) => handle_action(ctx, action).await,
+        Request::Output { output, action } => handle_output(ctx, output, action),
+        Request::FocusedOutput => handle_focused_output(ctx).await,
+        Request::EventStream => Ok(Response::Handled),
+        Request::OverviewState => Ok(handle_overview_state(ctx)),
+    }
+}
 
-                        layers.push(niri_ipc::LayerSurface {
-                            namespace: surface.namespace().to_owned(),
-                            output: name.clone(),
-                            layer,
-                            keyboard_interactivity,
-                        });
-                    }
-                }
+fn handle_outputs(ctx: &ClientCtx) -> Response {
+    let ipc_outputs = ctx.ipc_outputs.lock().unwrap().clone();
+    let outputs = ipc_outputs.values().cloned().map(|o| (o.name.clone(), o));
+    Response::Outputs(outputs.collect())
+}
 
-                let _ = tx.send_blocking(layers);
-            });
-            let result = rx.recv().await;
-            let layers = result.map_err(|_| String::from("error getting layers info"))?;
-            Response::Layers(layers)
-        }
-        Request::KeyboardLayouts => {
-            let state = ctx.event_stream_state.borrow();
-            let layout = state.keyboard_layouts.keyboard_layouts.clone();
-            let layout = layout.expect("keyboard layouts should be set at startup");
-            Response::KeyboardLayouts(layout)
-        }
-        Request::FocusedWindow => {
-            let state = ctx.event_stream_state.borrow();
-            let windows = &state.windows.windows;
-            let window = windows.values().find(|win| win.is_focused).cloned();
-            Response::FocusedWindow(window)
-        }
-        Request::PickWindow => {
-            let (tx, rx) = async_channel::bounded(1);
-            ctx.event_loop.insert_idle(move |state| {
-                let pointer = state.niri.seat.get_pointer().unwrap();
-                let start_data = PointerGrabStartData {
-                    focus: None,
-                    button: 0,
-                    location: pointer.current_location(),
+fn handle_workspaces(ctx: &ClientCtx) -> Response {
+    let state = ctx.event_stream_state.borrow();
+    let workspaces = state.workspaces.workspaces.values().cloned().collect();
+    Response::Workspaces(workspaces)
+}
+
+fn handle_windows(ctx: &ClientCtx) -> Response {
+    let state = ctx.event_stream_state.borrow();
+    let windows = state.windows.windows.values().cloned().collect();
+    Response::Windows(windows)
+}
+
+#[allow(
+    clippy::future_not_send,
+    reason = "scheduled on calloop's single-threaded executor only"
+)]
+async fn handle_layers(ctx: &ClientCtx) -> Reply {
+    let (tx, rx) = async_channel::bounded(1);
+    ctx.event_loop.insert_idle(move |state| {
+        let mut layers = Vec::new();
+        for output in state.niri.global_space.outputs() {
+            let name = output.name();
+            for surface in layer_map_for_output(output).layers() {
+                let layer = match surface.layer() {
+                    Layer::Background => niri_ipc::Layer::Background,
+                    Layer::Bottom => niri_ipc::Layer::Bottom,
+                    Layer::Top => niri_ipc::Layer::Top,
+                    Layer::Overlay => niri_ipc::Layer::Overlay,
                 };
-                let grab = PickWindowGrab::new(start_data);
-                // The `WindowPickGrab` ungrab handler will cancel the previous ongoing pick, if
-                // any.
-                pointer.set_grab(state, grab, SERIAL_COUNTER.next_serial(), Focus::Clear);
-                state.niri.pick_window = Some(tx);
-                state
-                    .niri
-                    .cursor_manager
-                    .set_cursor_image(CursorImageStatus::Named(CursorIcon::Crosshair));
-                // Redraw to update the cursor.
-                state.niri.queue_redraw_all();
-            });
-            let result = rx.recv().await;
-            let id = result.map_err(|_| String::from("error getting picked window info"))?;
-            let window = id.and_then(|id| {
-                let state = ctx.event_stream_state.borrow();
-                state.windows.windows.get(&id.get()).cloned()
-            });
-            Response::PickedWindow(window)
-        }
-        Request::PickColor => {
-            let (tx, rx) = async_channel::bounded(1);
-            ctx.event_loop.insert_idle(move |state| {
-                state.handle_pick_color(tx);
-            });
-            let result = rx.recv().await;
-            let color = result.map_err(|_| String::from("error getting picked color"))?;
-            Response::PickedColor(color)
-        }
-        Request::Action(action) => {
-            validate_action(&action)?;
+                let keyboard_interactivity = match surface.cached_state().keyboard_interactivity {
+                    KeyboardInteractivity::None => {
+                        niri_ipc::LayerSurfaceKeyboardInteractivity::None
+                    }
+                    KeyboardInteractivity::Exclusive => {
+                        niri_ipc::LayerSurfaceKeyboardInteractivity::Exclusive
+                    }
+                    KeyboardInteractivity::OnDemand => {
+                        niri_ipc::LayerSurfaceKeyboardInteractivity::OnDemand
+                    }
+                };
 
-            let (tx, rx) = async_channel::bounded(1);
-
-            let action = niri_config::Action::from(action);
-            ctx.event_loop.insert_idle(move |state| {
-                // Make sure some logic like workspace clean-up has a chance to run before doing
-                // actions.
-                state.niri.advance_animations();
-                state.do_action(action, false);
-                let _ = tx.send_blocking(());
-            });
-
-            // Wait until the action has been processed before returning. This is important for a
-            // few actions, for instance for DoScreenTransition this wait ensures that the screen
-            // contents were sampled into the texture.
-            let _ = rx.recv().await;
-            Response::Handled
-        }
-        Request::Output { output, action } => {
-            action.validate()?;
-
-            let ipc_outputs = ctx.ipc_outputs.lock().unwrap();
-            let found = ipc_outputs
-                .values()
-                .any(|o| OutputName::from_ipc_output(o).matches(&output));
-            let response = if found {
-                OutputConfigChanged::Applied
-            } else {
-                OutputConfigChanged::OutputWasMissing
-            };
-            drop(ipc_outputs);
-
-            ctx.event_loop.insert_idle(move |state| {
-                state.apply_transient_output_config(&output, action);
-            });
-
-            Response::OutputConfigChanged(response)
-        }
-        Request::FocusedOutput => {
-            let (tx, rx) = async_channel::bounded(1);
-            ctx.event_loop.insert_idle(move |state| {
-                let active_output = state
-                    .niri
-                    .layout
-                    .active_output()
-                    .map(smithay::output::Output::name);
-
-                let output = active_output.and_then(|active_output| {
-                    state
-                        .backend
-                        .ipc_outputs()
-                        .lock()
-                        .unwrap()
-                        .values()
-                        .find(|o| o.name == active_output)
-                        .cloned()
+                layers.push(niri_ipc::LayerSurface {
+                    namespace: surface.namespace().to_owned(),
+                    output: name.clone(),
+                    layer,
+                    keyboard_interactivity,
                 });
+            }
+        }
 
-                let _ = tx.send_blocking(output);
-            });
-            let result = rx.recv().await;
-            let output = result.map_err(|_| String::from("error getting active output info"))?;
-            Response::FocusedOutput(output)
-        }
-        Request::EventStream => Response::Handled,
-        Request::OverviewState => {
-            let state = ctx.event_stream_state.borrow();
-            let is_open = state.overview.is_open;
-            Response::OverviewState(Overview { is_open })
-        }
+        let _ = tx.send_blocking(layers);
+    });
+    let result = rx.recv().await;
+    let layers = result.map_err(|_| String::from("error getting layers info"))?;
+    Ok(Response::Layers(layers))
+}
+
+fn handle_keyboard_layouts(ctx: &ClientCtx) -> Response {
+    let state = ctx.event_stream_state.borrow();
+    let layout = state.keyboard_layouts.keyboard_layouts.clone();
+    let layout = layout.expect("keyboard layouts should be set at startup");
+    Response::KeyboardLayouts(layout)
+}
+
+fn handle_focused_window(ctx: &ClientCtx) -> Response {
+    let state = ctx.event_stream_state.borrow();
+    let windows = &state.windows.windows;
+    let window = windows.values().find(|win| win.is_focused).cloned();
+    Response::FocusedWindow(window)
+}
+
+#[allow(
+    clippy::future_not_send,
+    reason = "scheduled on calloop's single-threaded executor only"
+)]
+async fn handle_pick_window(ctx: &ClientCtx) -> Reply {
+    let (tx, rx) = async_channel::bounded(1);
+    ctx.event_loop.insert_idle(move |state| {
+        let pointer = state.niri.seat.get_pointer().unwrap();
+        let start_data = PointerGrabStartData {
+            focus: None,
+            button: 0,
+            location: pointer.current_location(),
+        };
+        let grab = PickWindowGrab::new(start_data);
+        // The `WindowPickGrab` ungrab handler will cancel the previous ongoing pick, if
+        // any.
+        pointer.set_grab(state, grab, SERIAL_COUNTER.next_serial(), Focus::Clear);
+        state.niri.pick_window = Some(tx);
+        state
+            .niri
+            .cursor_manager
+            .set_cursor_image(CursorImageStatus::Named(CursorIcon::Crosshair));
+        // Redraw to update the cursor.
+        state.niri.queue_redraw_all();
+    });
+    let result = rx.recv().await;
+    let id = result.map_err(|_| String::from("error getting picked window info"))?;
+    let window = id.and_then(|id| {
+        let state = ctx.event_stream_state.borrow();
+        state.windows.windows.get(&id.get()).cloned()
+    });
+    Ok(Response::PickedWindow(window))
+}
+
+#[allow(
+    clippy::future_not_send,
+    reason = "scheduled on calloop's single-threaded executor only"
+)]
+async fn handle_pick_color(ctx: &ClientCtx) -> Reply {
+    let (tx, rx) = async_channel::bounded(1);
+    ctx.event_loop.insert_idle(move |state| {
+        state.handle_pick_color(tx);
+    });
+    let result = rx.recv().await;
+    let color = result.map_err(|_| String::from("error getting picked color"))?;
+    Ok(Response::PickedColor(color))
+}
+
+#[allow(
+    clippy::future_not_send,
+    reason = "scheduled on calloop's single-threaded executor only"
+)]
+async fn handle_action(ctx: &ClientCtx, action: Action) -> Reply {
+    validate_action(&action)?;
+
+    let (tx, rx) = async_channel::bounded(1);
+
+    let action = niri_config::Action::from(action);
+    ctx.event_loop.insert_idle(move |state| {
+        // Make sure some logic like workspace clean-up has a chance to run before doing
+        // actions.
+        state.niri.advance_animations();
+        state.do_action(action, false);
+        let _ = tx.send_blocking(());
+    });
+
+    // Wait until the action has been processed before returning. This is important for a
+    // few actions, for instance for DoScreenTransition this wait ensures that the screen
+    // contents were sampled into the texture.
+    let _ = rx.recv().await;
+    Ok(Response::Handled)
+}
+
+fn handle_output(ctx: &ClientCtx, output: String, action: niri_ipc::OutputAction) -> Reply {
+    action.validate()?;
+
+    let ipc_outputs = ctx.ipc_outputs.lock().unwrap();
+    let found = ipc_outputs
+        .values()
+        .any(|o| OutputName::from_ipc_output(o).matches(&output));
+    let response = if found {
+        OutputConfigChanged::Applied
+    } else {
+        OutputConfigChanged::OutputWasMissing
     };
+    drop(ipc_outputs);
 
-    Ok(response)
+    ctx.event_loop.insert_idle(move |state| {
+        state.apply_transient_output_config(&output, action);
+    });
+
+    Ok(Response::OutputConfigChanged(response))
+}
+
+#[allow(
+    clippy::future_not_send,
+    reason = "scheduled on calloop's single-threaded executor only"
+)]
+async fn handle_focused_output(ctx: &ClientCtx) -> Reply {
+    let (tx, rx) = async_channel::bounded(1);
+    ctx.event_loop.insert_idle(move |state| {
+        let active_output = state
+            .niri
+            .layout
+            .active_output()
+            .map(smithay::output::Output::name);
+
+        let output = active_output.and_then(|active_output| {
+            state
+                .backend
+                .ipc_outputs()
+                .lock()
+                .unwrap()
+                .values()
+                .find(|o| o.name == active_output)
+                .cloned()
+        });
+
+        let _ = tx.send_blocking(output);
+    });
+    let result = rx.recv().await;
+    let output = result.map_err(|_| String::from("error getting active output info"))?;
+    Ok(Response::FocusedOutput(output))
+}
+
+fn handle_overview_state(ctx: &ClientCtx) -> Response {
+    let state = ctx.event_stream_state.borrow();
+    let is_open = state.overview.is_open;
+    Response::OverviewState(Overview { is_open })
 }
 
 fn validate_action(action: &Action) -> Result<(), String> {
@@ -473,6 +528,12 @@ fn validate_action(action: &Action) -> Result<(), String> {
     Ok(())
 }
 
+// Same reasoning as `handle_client` above: only calloop's single-threaded executor
+// ever polls this future.
+#[allow(
+    clippy::future_not_send,
+    reason = "scheduled on calloop's single-threaded executor only"
+)]
 async fn handle_event_stream_client(client: EventStreamClient) -> anyhow::Result<()> {
     let EventStreamClient {
         events,
@@ -529,7 +590,7 @@ impl State {
                 names: layouts
                     .map(|layout| xkb.layout_name(layout).to_owned())
                     .collect(),
-                current_idx: xkb.active_layout().0 as u8,
+                current_idx: u8::try_from(xkb.active_layout().0).unwrap_or(u8::MAX),
             }
         });
 
@@ -542,14 +603,14 @@ impl State {
 
         let event = Event::KeyboardLayoutsChanged { keyboard_layouts };
         state.apply(event.clone());
-        server.send_event(event);
+        server.send_event(&event);
     }
 
     pub fn ipc_refresh_keyboard_layout_index(&mut self) {
         let keyboard = self.niri.seat.get_keyboard().unwrap();
         let idx = keyboard.with_xkb_state(self, |context| {
             let xkb = context.xkb().lock().unwrap();
-            xkb.active_layout().0 as u8
+            u8::try_from(xkb.active_layout().0).unwrap_or(u8::MAX)
         });
 
         let Some(server) = &self.niri.ipc_server else {
@@ -565,7 +626,7 @@ impl State {
 
         let event = Event::KeyboardLayoutSwitched { idx };
         state.apply(event.clone());
-        server.send_event(event);
+        server.send_event(&event);
     }
 
     pub fn ipc_refresh_layout(&mut self) {
@@ -574,7 +635,7 @@ impl State {
         self.ipc_refresh_overview();
     }
 
-    fn ipc_refresh_workspaces(&mut self) {
+    fn ipc_refresh_workspaces(&self) {
         let Some(server) = &self.niri.ipc_server else {
             return;
         };
@@ -667,11 +728,11 @@ impl State {
 
         for event in events {
             state.apply(event.clone());
-            server.send_event(event);
+            server.send_event(&event);
         }
     }
 
-    fn ipc_refresh_windows(&mut self) {
+    fn ipc_refresh_windows(&self) {
         let Some(server) = &self.niri.ipc_server else {
             return;
         };
@@ -768,7 +829,7 @@ impl State {
 
         for event in events {
             state.apply(event.clone());
-            server.send_event(event);
+            server.send_event(&event);
         }
     }
 
@@ -787,7 +848,7 @@ impl State {
 
         let event = Event::OverviewOpenedOrClosed { is_open };
         state.apply(event.clone());
-        server.send_event(event);
+        server.send_event(&event);
     }
 
     pub fn ipc_config_loaded(&mut self, failed: bool) {
@@ -798,7 +859,7 @@ impl State {
 
         let event = Event::ConfigLoaded { failed };
         state.apply(event.clone());
-        server.send_event(event);
+        server.send_event(&event);
     }
 
     pub fn ipc_screenshot_taken(&mut self, path: Option<String>) {
@@ -809,6 +870,6 @@ impl State {
 
         let event = Event::ScreenshotCaptured { path };
         state.apply(event.clone());
-        server.send_event(event);
+        server.send_event(&event);
     }
 }

@@ -181,15 +181,17 @@ fn render(
 ) -> anyhow::Result<TextureBuffer<GlesTexture>> {
     let padding: i32 = to_physical_precise_round(scale, PADDING);
 
-    let mut text = error_text(true);
-    let mut border_color = (1., 0.3, 0.3);
-    if let Some(path) = created_path {
-        text = format!(
-            "Created a default config file at \
-             <span face='monospace' bgcolor='#000000'>{path:?}</span>",
-        );
-        border_color = (0.5, 1., 0.5);
-    }
+    let (text, border_color) = created_path.map_or_else(
+        || (error_text(true), (1., 0.3, 0.3)),
+        |path| {
+            let text = format!(
+                "Created a default config file at \
+                 <span face='monospace' bgcolor='#000000'>{}</span>",
+                path.display()
+            );
+            (text, (0.5, 1., 0.5))
+        },
+    );
 
     let mut font = FontDescription::from_string(FONT);
     font.set_absolute_size(to_physical_precise_round(scale, font.size()));

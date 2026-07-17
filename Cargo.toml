@@ -1,6 +1,28 @@
 [workspace]
 members = ["niri-config", "niri-ipc"]
 
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+
+# not something easily fixable for a binary crate like this
+multiple_crate_versions = "allow"
+# panic/error
+# contracts aren't consumed by external callers the way they would be for
+# a crate on crates.io.
+missing_panics_doc = "allow"
+missing_errors_doc = "allow"
+
+# Extra hygiene lints beyond the standard groups above.
+# Forgotten debug prints never make it to a commit.
+dbg_macro = "warn"
+# This codebase talks to libinput/GBM/EGL/DRM directly; every unsafe block
+# should carry a `// SAFETY:` comment explaining the invariant that makes it
+# sound, the same way `render_helpers` already documents its casts.
+undocumented_unsafe_blocks = "warn"
+
 [workspace.package]
 description = "[ALL CREDITS TO YaLTeR] A scrollable-tiling Wayland compositor (takashialpha's personal fork!)"
 authors = [
@@ -46,6 +68,9 @@ repository.workspace = true
 readme = "README.md"
 keywords = ["wayland", "compositor", "tiling", "smithay", "wm"]
 categories = ["gui", "os::linux-apis"]
+
+[lints]
+workspace = true
 
 [dependencies]
 anyhow.workspace = true

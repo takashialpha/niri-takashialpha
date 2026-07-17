@@ -127,13 +127,12 @@ impl ExitConfirmDialog {
 
     pub fn advance_animations(&mut self) {
         match &mut self.state {
-            State::Hidden => (),
+            State::Hidden | State::Visible => (),
             State::Showing(anim) => {
                 if anim.is_done() {
                     self.state = State::Visible;
                 }
             }
-            State::Visible => (),
             State::Hiding(anim) => {
                 if anim.is_clamped_done() {
                     self.state = State::Hidden;
@@ -186,10 +185,13 @@ impl ExitConfirmDialog {
         location.x = f64::max(0., location.x);
         location.y = f64::max(0., location.y);
 
+        // `clamped_value` was clamped to [0, 1] above, well within f32 precision.
+        #[allow(clippy::cast_possible_truncation)]
+        let clamped_value_f32 = clamped_value as f32;
         let elem = TextureRenderElement::from_texture_buffer(
             buffer,
             location,
-            clamped_value as f32,
+            clamped_value_f32,
             None,
             None,
             Kind::Unspecified,
@@ -214,9 +216,10 @@ impl ExitConfirmDialog {
         let elem = SolidColorRenderElement::from_buffer(
             &data.backdrop,
             Point::new(0., 0.),
-            clamped_value as f32,
+            clamped_value_f32,
             Kind::Unspecified,
         );
+        drop(data);
         push(ExitConfirmDialogRenderElement::SolidColor(elem));
     }
 }

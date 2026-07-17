@@ -71,6 +71,10 @@ unsafe fn compile_program(
     texture_uniforms: &[&str],
     // destruction_callback_sender: Sender<CleanupResource>,
 ) -> Result<ShaderProgram, GlesError> {
+    // SAFETY: callers of this fn (both below) only invoke it from inside a
+    // `with_context`/`with_profiled_context` closure, so the GL context is current on
+    // this thread; all C strings passed to `gl.Get*Location` are `'static` `CStr`s or
+    // freshly built `CString`s that outlive the call.
     unsafe {
         let shader = format!("#version 100\n{src}");
         let program = link_program(gl, include_str!("shaders/texture.vert"), &shader)?;
@@ -169,6 +173,8 @@ impl ShaderProgram {
         additional_uniforms: &[UniformName<'_>],
         texture_uniforms: &[&str],
     ) -> Result<Self, GlesError> {
+        // SAFETY: inside `with_context`, so the GL context is current on this thread,
+        // satisfying `compile_program`'s precondition.
         renderer.with_context(move |gl| unsafe {
             compile_program(gl, src, additional_uniforms, texture_uniforms)
         })?
@@ -179,6 +185,8 @@ impl ShaderProgram {
     /// Returns an error if the EGL context could not be made current to delete the GL
     /// program objects.
     pub fn destroy(self, renderer: &mut GlesRenderer) -> Result<(), GlesError> {
+        // SAFETY: GL context is current (inside `with_context`); `self` owns these
+        // program ids and is consumed here, so they aren't deleted twice.
         renderer.with_context(move |gl| unsafe {
             gl.DeleteProgram(self.0.normal.program);
             gl.DeleteProgram(self.0.debug.program);
@@ -306,7 +314,10 @@ impl RenderElement<GlesRenderer> for ShaderRenderElement {
     // any single logical step and would make the required call ordering harder to see,
     // while adding function-boundary risk to unsafe FFI code with no compile-time
     // ordering checks.
-    #[allow(clippy::too_many_lines)]
+    // `frame` (below) is a re-borrowed `&mut GlesFrame`, not an owned guard, so there is
+    // no lock/guard to drop early; rustc's `dropping_references` lint confirms an
+    // explicit `drop(frame)` would be a no-op.
+    #[allow(clippy::too_many_lines, clippy::significant_drop_tightening)]
     fn draw(
         &self,
         frame: &mut GlesFrame<'_, '_>,
@@ -403,6 +414,8 @@ impl RenderElement<GlesRenderer> for ShaderRenderElement {
                 &shader.0.normal
             };
 
+            // SAFETY: GL context is current (inside `with_profiled_context`); texture
+            // ids come from `self.textures`, which owns them for at least this call.
             unsafe {
                 for (i, texture) in self.textures.values().enumerate() {
                     gl.ActiveTexture(ffi::TEXTURE0 + i as u32);

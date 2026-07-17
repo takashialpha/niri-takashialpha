@@ -293,6 +293,9 @@ pub fn make_screenshot_path(config: &Config) -> anyhow::Result<Option<PathBuf>> 
 
     let mut buf = [0u8; 2048];
     let mut path;
+    // SAFETY: `null_mut()` is a valid argument to `time` (it means "don't also store
+    // the result there"); `tm` is checked non-null before being dereferenced by
+    // `strftime`; `buf` and `format` are valid for the duration of the `strftime` call.
     unsafe {
         let time = libc::time(null_mut());
         ensure!(time != -1, "error in time()");
@@ -364,6 +367,9 @@ pub fn with_toplevel_role<T>(
 ///
 /// Panics if `toplevel`'s surface has no [`XdgToplevelSurfaceData`], which should not
 /// happen for any surface with the xdg-toplevel role.
+// `current` (below) borrows out of `guard`, and `f` needs it live, so `guard` cannot be
+// dropped before the call to `f`.
+#[allow(clippy::significant_drop_tightening)]
 pub fn with_toplevel_role_and_current<T>(
     toplevel: &ToplevelSurface,
     f: impl FnOnce(&mut XdgToplevelSurfaceRoleAttributes, Option<&ToplevelState>) -> T,
@@ -376,9 +382,6 @@ pub fn with_toplevel_role_and_current<T>(
             .lock()
             .unwrap();
 
-        // `current` borrows out of `guard`, and `f` needs it live, so `guard` cannot be
-        // dropped before the call to `f` below.
-        #[allow(clippy::significant_drop_tightening)]
         let mut guard = states.cached_state.get::<ToplevelCachedState>();
         let current = guard.current().last_acked.as_ref().map(|c| &c.state);
 
@@ -417,7 +420,11 @@ pub fn with_toplevel_last_uncommitted_configure<T>(
             drop(guard);
 
             // Already committed to this configure.
-            let configure = if already_committed { None } else { Some(last_acked) };
+            let configure = if already_committed {
+                None
+            } else {
+                Some(last_acked)
+            };
 
             f(configure)
         } else {

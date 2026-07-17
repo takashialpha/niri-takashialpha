@@ -181,6 +181,12 @@ impl<'a> WindowRef<'a> {
 
 impl ResolvedWindowRules {
     #[must_use]
+    // This is a flat sequential "copy each configured field from the matching
+    // rule(s) into `resolved`" loop; it's long only because there are many
+    // independent fields, not because it's complex. Extracting it would need to
+    // thread the `open_on_output`/`open_on_workspace` locals (borrowed from `rules`'
+    // lifetime) out of the loop as well, for no real readability gain.
+    #[allow(clippy::too_many_lines)]
     pub fn compute(rules: &[WindowRule], window: WindowRef, is_at_startup: bool) -> Self {
         let mut resolved = Self::default();
 
@@ -370,7 +376,9 @@ impl ResolvedWindowRules {
         let (min_size, max_size) = with_states(toplevel.wl_surface(), |state| {
             let mut guard = state.cached_state.get::<SurfaceCachedState>();
             let current = guard.current();
-            (current.min_size, current.max_size)
+            let sizes = (current.min_size, current.max_size);
+            drop(guard);
+            sizes
         });
         let (min_size, max_size) = self.apply_min_max_size(min_size, max_size);
 

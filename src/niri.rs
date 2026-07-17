@@ -469,9 +469,7 @@ impl RedrawState {
             }
 
             // A redraw is already queued.
-            value @ (Self::Queued | Self::WaitingForEstimatedVBlankAndQueued(_)) => {
-                value
-            }
+            value @ (Self::Queued | Self::WaitingForEstimatedVBlankAndQueued(_)) => value,
 
             // We're waiting for VBlank, request a redraw afterwards.
             Self::WaitingForVBlank { .. } => Self::WaitingForVBlank {
@@ -542,7 +540,7 @@ impl State {
             let headless = Headless::new();
             Backend::Headless(headless)
         } else {
-            let tty = Tty::new(config.clone(), event_loop.clone())
+            let tty = Tty::new(config.clone(), &event_loop)
                 .context("error initializing the TTY backend")?;
             Backend::Tty(tty)
         };
@@ -1438,26 +1436,25 @@ impl State {
             let full_config = self.niri.config.borrow_mut();
             let config = full_config.outputs.find(name);
 
-            let scale = config
-                .and_then(|c| c.scale).map_or_else(|| {
+            let scale = config.and_then(|c| c.scale).map_or_else(
+                || {
                     let size_mm = output.physical_properties().size;
                     let resolution = output.current_mode().unwrap().size;
                     guess_monitor_scale(size_mm, resolution)
-                }, |s| s.0);
+                },
+                |s| s.0,
+            );
             let scale = closest_representable_scale(scale.clamp(0.1, 10.));
 
             let transform = panel_orientation(output)
-                + config
-                    .map_or(Transform::Normal, |c| ipc_transform_to_smithay(c.transform));
+                + config.map_or(Transform::Normal, |c| ipc_transform_to_smithay(c.transform));
 
             // Both sides are passed through closest_representable_scale(), which snaps to a
             // deterministic, canonical value, so an exact comparison correctly detects "no
             // change" and avoids an unnecessary change_current_state() call below.
             #[allow(clippy::float_cmp)]
             let scale_changed = output.current_scale().fractional_scale() != scale;
-            if scale_changed
-                || output.current_transform() != transform
-            {
+            if scale_changed || output.current_transform() != transform {
                 output.change_current_state(
                     None,
                     Some(transform),
@@ -1766,6 +1763,10 @@ impl Niri {
         backend: &Backend,
         create_wayland_socket: bool,
     ) -> Self {
+        fn client_is_unrestricted(client: &Client) -> bool {
+            !client.get_data::<ClientState>().unwrap().restricted
+        }
+
         let (executor, scheduler) = calloop::futures::executor().unwrap();
         event_loop.insert_source(executor, |(), (), _| ()).unwrap();
 
@@ -1782,10 +1783,6 @@ impl Niri {
         let layout = Layout::new(animation_clock.clone(), &config_);
 
         let (blocker_cleared_tx, blocker_cleared_rx) = mpsc::channel();
-
-        fn client_is_unrestricted(client: &Client) -> bool {
-            !client.get_data::<ClientState>().unwrap().restricted
-        }
 
         let compositor_state = CompositorState::new_v6::<State>(&display_handle);
         let xdg_shell_state = XdgShellState::new_with_capabilities::<State>(
@@ -2047,7 +2044,7 @@ impl Niri {
 
         let config = self.config.borrow();
         let data = Arc::new(ClientState {
-            compositor_state: Default::default(),
+            compositor_state: CompositorClientState::default(),
             can_view_decoration_globals: config.prefer_no_csd,
             primary_selection_disabled: config.clipboard.disable_primary,
             restricted,
@@ -2205,11 +2202,14 @@ impl Niri {
 
         let config = self.config.borrow();
         let c = config.outputs.find(name);
-        let scale = c.and_then(|c| c.scale).map_or_else(|| {
-            let size_mm = output.physical_properties().size;
-            let resolution = output.current_mode().unwrap().size;
-            guess_monitor_scale(size_mm, resolution)
-        }, |s| s.0);
+        let scale = c.and_then(|c| c.scale).map_or_else(
+            || {
+                let size_mm = output.physical_properties().size;
+                let resolution = output.current_mode().unwrap().size;
+                guess_monitor_scale(size_mm, resolution)
+            },
+            |s| s.0,
+        );
         let scale = closest_representable_scale(scale.clamp(0.1, 10.));
 
         let transform = panel_orientation(&output)
@@ -2297,11 +2297,11 @@ impl Niri {
         let state = self.output_state.remove(output).unwrap();
 
         match state.redraw_state {
-            RedrawState::Idle => (),
-            RedrawState::Queued => (),
-            RedrawState::WaitingForVBlank { .. } => (),
-            RedrawState::WaitingForEstimatedVBlank(token) => self.event_loop.remove(token),
-            RedrawState::WaitingForEstimatedVBlankAndQueued(token) => self.event_loop.remove(token),
+            RedrawState::Idle | RedrawState::Queued | RedrawState::WaitingForVBlank { .. } => (),
+            RedrawState::WaitingForEstimatedVBlank(token)
+            | RedrawState::WaitingForEstimatedVBlankAndQueued(token) => {
+                self.event_loop.remove(token);
+            }
         }
 
         // Disable the output global and remove some time later to give the clients some time to
@@ -2392,7 +2392,13 @@ impl Niri {
             // FIXME: scale changes and transform flips shouldn't matter but they currently do since
             // I haven't quite figured out how to draw the screenshot textures in
             // physical coordinates.
-            if old_size != size || old_scale != scale || old_transform != transform {
+            #[allow(
+                clippy::float_cmp,
+                reason = "detecting any scale change at all, not comparing computed values"
+            )]
+            let scale_or_geometry_changed =
+                old_size != size || old_scale != scale || old_transform != transform;
+            if scale_or_geometry_changed {
                 self.screenshot_ui.close();
                 self.cursor_manager
                     .set_cursor_image(CursorImageStatus::default_named());
@@ -2956,7 +2962,7 @@ impl Niri {
             .rev()
             .skip_while(|&output| output != current)
             .nth(1)
-            .or(self.sorted_outputs.last())
+            .or_else(|| self.sorted_outputs.last())
             .filter(|&output| output != current)
             .cloned()
     }
@@ -2966,7 +2972,7 @@ impl Niri {
             .iter()
             .skip_while(|&output| output != current)
             .nth(1)
-            .or(self.sorted_outputs.first())
+            .or_else(|| self.sorted_outputs.first())
             .filter(|&output| output != current)
             .cloned()
     }
@@ -3051,7 +3057,11 @@ impl Niri {
             .or_else(|| self.global_space.outputs().next())?;
 
         let state = self.output_state.get(output)?;
-        state.lock_surface.as_ref().map(smithay::wayland::session_lock::LockSurface::wl_surface).cloned()
+        state
+            .lock_surface
+            .as_ref()
+            .map(smithay::wayland::session_lock::LockSurface::wl_surface)
+            .cloned()
     }
 
     /// Schedules an immediate redraw on all outputs if one is not already scheduled.
@@ -3327,7 +3337,7 @@ impl Niri {
                 let icon = if let CursorImageStatus::Named(icon) = cursor_image {
                     *icon
                 } else {
-                    Default::default()
+                    CursorIcon::default()
                 };
 
                 let mut dnd_scale = 1.;
@@ -3375,6 +3385,10 @@ impl Niri {
     }
 
     pub fn refresh_layout(&mut self) {
+        // `Layout` is kept as its own arm rather than merged with the other `=> true` cases
+        // below: it's the one case where the layout is genuinely focused, not just drawn as
+        // active to avoid spurious animations, and that distinction is worth keeping visible.
+        #[allow(clippy::match_same_arms)]
         let layout_is_active = match &self.keyboard_focus {
             KeyboardFocus::Layout { .. } => true,
             KeyboardFocus::LayerShell { .. } => false,
@@ -3384,10 +3398,10 @@ impl Niri {
             //
             // FIXME: when going into the screenshot UI from a layer-shell focus, and then back to
             // layer-shell, the layout will briefly draw as active, despite never having focus.
-            KeyboardFocus::LockScreen { .. } => true,
-            KeyboardFocus::ScreenshotUi => true,
-            KeyboardFocus::ExitConfirmDialog => true,
-            KeyboardFocus::Overview => true,
+            KeyboardFocus::LockScreen { .. }
+            | KeyboardFocus::ScreenshotUi
+            | KeyboardFocus::ExitConfirmDialog
+            | KeyboardFocus::Overview => true,
         };
 
         self.layout.refresh(layout_is_active);
@@ -3475,6 +3489,7 @@ impl Niri {
 
                     mapped.update_render_elements(geo.size.to_f64());
                 }
+                drop(layer_map);
             }
         }
     }
@@ -3773,8 +3788,7 @@ impl Niri {
 
         self.update_render_elements(Some(output));
 
-        let mut res = RenderResult::Skipped;
-        if self.monitors_active {
+        let res = if self.monitors_active {
             let state = self.output_state.get_mut(output).unwrap();
             state.unfinished_animations_remain = self.layout.are_animations_ongoing(Some(output));
             state.unfinished_animations_remain |=
@@ -3797,8 +3811,10 @@ impl Niri {
             }
 
             // Render.
-            res = backend.render(self, output, target_presentation_time);
-        }
+            backend.render(self, output, target_presentation_time)
+        } else {
+            RenderResult::Skipped
+        };
 
         let is_locked = self.is_locked();
         let state = self.output_state.get_mut(output).unwrap();
@@ -4129,16 +4145,13 @@ impl Niri {
                 .get_or_insert(SurfaceFrameThrottlingState::default);
             let mut last_sent_at = frame_throttling_state.last_sent_at.borrow_mut();
 
-            let mut send = true;
-
             // If we already sent a frame callback to this surface this output refresh
             // cycle, don't send one again to prevent empty-damage commit busy loops.
-            if let Some((last_output, last_sequence)) = &*last_sent_at
-                && last_output == output
-                && *last_sequence == sequence
-            {
-                send = false;
-            }
+            let send = !matches!(
+                &*last_sent_at,
+                Some((last_output, last_sequence))
+                    if last_output == output && *last_sequence == sequence
+            );
 
             if send {
                 *last_sent_at = Some((output.clone(), sequence));
@@ -4776,8 +4789,8 @@ impl Niri {
                 error!("tried to add a lock surface on an unlocked session");
                 return;
             }
-            LockState::WaitingForSurfaces { confirmation, .. } => confirmation.ext_session_lock(),
-            LockState::Locking(confirmation) => confirmation.ext_session_lock(),
+            LockState::WaitingForSurfaces { confirmation, .. }
+            | LockState::Locking(confirmation) => confirmation.ext_session_lock(),
             LockState::Locked(lock) => lock,
         };
 

@@ -48,6 +48,9 @@ impl Headless {
             return Ok(());
         }
 
+        // SAFETY: `renderer` was just checked to be `None` above, so we're not
+        // clobbering a live EGL context; the display/context/renderer are created
+        // fresh here and stay owned by `self` for their whole lifetime.
         let mut renderer = unsafe {
             let display =
                 EGLDisplay::new(EGLSurfacelessDisplay).context("error creating EGL display")?;

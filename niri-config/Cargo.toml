@@ -11,6 +11,9 @@ readme = "../README.md"
 keywords = ["wayland", "niri", "config"]
 categories = ["config"]
 
+[lints]
+workspace = true
+
 [dependencies]
 bitflags.workspace = true
 csscolorparser = "0.8"

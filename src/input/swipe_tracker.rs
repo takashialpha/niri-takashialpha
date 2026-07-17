@@ -64,7 +64,11 @@ impl SwipeTracker {
             return 0.;
         };
 
-        let total_time = last.timestamp.checked_sub(first.timestamp).unwrap().as_secs_f64();
+        let total_time = last
+            .timestamp
+            .checked_sub(first.timestamp)
+            .unwrap()
+            .as_secs_f64();
         if total_time == 0. {
             return 0.;
         }

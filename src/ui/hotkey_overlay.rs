@@ -91,19 +91,19 @@ impl HotkeyOverlay {
 
         // FIXME: should probably use the working area rather than view size.
         let weak = output.downgrade();
-        if let Some(rendered) = buffers.get(&weak)
-            && let Some(buffer) = &rendered.buffer
+        if let Some(cached) = buffers.get(&weak)
+            && let Some(buffer) = &cached.buffer
             && buffer.texture_scale() != Scale::from(scale)
         {
             buffers.remove(&weak);
         }
 
-        let rendered = buffers.entry(weak).or_insert_with(|| {
+        let cached = buffers.entry(weak).or_insert_with(|| {
             let renderer = renderer.as_gles_renderer();
             render(renderer, &self.config.borrow(), self.mod_key, scale)
                 .unwrap_or_else(|_| RenderedOverlay { buffer: None })
         });
-        let buffer = rendered.buffer.as_ref()?;
+        let buffer = cached.buffer.as_ref()?;
 
         let size = buffer.logical_size();
         let location = (output_size.to_f64().to_point() - size.to_point()).downscale(2.);
@@ -152,15 +152,13 @@ fn format_bind(binds: &[Bind], action: &Action) -> Option<(Option<Key>, String)>
     }
 
     let mut title = None;
-    let key = if let Some(bind) = bind_with_custom_title.or(bind_with_non_null) {
+    let key = bind_with_custom_title.or(bind_with_non_null).map(|bind| {
         if let Some(Some(custom)) = &bind.hotkey_overlay_title {
             title = Some(custom.clone());
         }
 
-        Some(bind.key)
-    } else {
-        None
-    };
+        bind.key
+    });
     let title = title.unwrap_or_else(|| action_name(action));
 
     Some((key, title))
@@ -275,6 +273,12 @@ fn collect_actions(config: &Config) -> Vec<&Action> {
     actions
 }
 
+// This is a two-phase Cairo/Pango render (measure text sizes on a throwaway
+// surface, then draw on the correctly-sized real one) sharing several locals
+// (`font`, `attrs`, `bold`, running size accumulators) across both phases;
+// splitting it would mean threading many values between helpers for no real
+// readability gain.
+#[allow(clippy::too_many_lines)]
 fn render(
     renderer: &mut GlesRenderer,
     config: &Config,
@@ -343,10 +347,14 @@ fn render(
     let action_width = action_sizes.iter().map(|(w, _)| w).max().unwrap();
     let mut width = key_width + padding + action_width;
 
+    // The number of configured keybinds shown in the overlay is always tiny
+    // (nowhere near i32::MAX), so this length cast can't wrap or truncate.
+    #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)]
+    let bind_count_minus_one = (key_sizes.len() - 1) as i32;
     let mut height = zip(&key_sizes, &action_sizes)
         .map(|((_, key_h), (_, act_h))| max(key_h, act_h))
         .sum::<i32>()
-        + (key_sizes.len() - 1) as i32 * line_interval
+        + bind_count_minus_one * line_interval
         + title_size.1
         + padding;
 

@@ -94,11 +94,11 @@ impl State {
 
         let consumed_by_a11y = false;
         match event {
-            Keyboard { event } => self.on_keyboard::<I>(&event, &consumed_by_a11y),
-            PointerMotion { event } => self.on_pointer_motion::<I>(event),
-            PointerMotionAbsolute { event } => self.on_pointer_motion_absolute::<I>(event),
-            PointerButton { event } => self.on_pointer_button::<I>(event),
-            PointerAxis { event } => self.on_pointer_axis::<I>(event),
+            Keyboard { event } => self.on_keyboard::<I>(&event, consumed_by_a11y),
+            PointerMotion { event } => self.on_pointer_motion::<I>(&event),
+            PointerMotionAbsolute { event } => self.on_pointer_motion_absolute::<I>(&event),
+            PointerButton { event } => self.on_pointer_button::<I>(&event),
+            PointerAxis { event } => self.on_pointer_axis::<I>(&event),
             // Touchpads, touchscreens, drawing tablets, and hardware switches are not supported;
             // ignore their events. Mouse-wheel scrolling is handled via PointerAxis above.
             DeviceAdded { .. }
@@ -180,7 +180,7 @@ impl State {
     fn on_keyboard<I: InputBackend>(
         &mut self,
         event: &I::KeyboardKeyEvent,
-        consumed_by_a11y: &bool,
+        consumed_by_a11y: bool,
     ) {
         let mod_key = self.backend.mod_key(&self.niri.config.borrow());
 
@@ -570,7 +570,11 @@ impl State {
                 self.niri.queue_redraw_all();
             }
             Action::FocusWindowPrevious => {
-                let current = self.niri.layout.focus().map(super::window::mapped::Mapped::id);
+                let current = self
+                    .niri
+                    .layout
+                    .focus()
+                    .map(super::window::mapped::Mapped::id);
                 if let Some(window) = self
                     .niri
                     .layout
@@ -1981,7 +1985,12 @@ impl State {
         }
     }
 
-    fn on_pointer_motion<I: InputBackend>(&mut self, event: I::PointerMotionEvent) {
+    // This is one linear procedure (hot corner, then constraints, then focus, then
+    // motion, then screenshot UI) with heavy mutable-borrow interleaving between
+    // `self.niri` and `pointer`; splitting it up risks subtly reordering side effects
+    // in input-handling code.
+    #[allow(clippy::too_many_lines)]
+    fn on_pointer_motion<I: InputBackend>(&mut self, event: &I::PointerMotionEvent) {
         let was_inside_hot_corner = self.niri.pointer_inside_hot_corner;
         // Any of the early returns here mean that the pointer is not inside the hot corner.
         self.niri.pointer_inside_hot_corner = false;
@@ -2096,12 +2105,14 @@ impl State {
                 // The pointer was previously on some output. Clip the movement against its
                 // boundaries.
                 let geom = self.niri.global_space.output_geometry(output).unwrap();
-                new_pos.x = new_pos
-                    .x
-                    .clamp(f64::from(geom.loc.x), f64::from(geom.loc.x + geom.size.w - 1));
-                new_pos.y = new_pos
-                    .y
-                    .clamp(f64::from(geom.loc.y), f64::from(geom.loc.y + geom.size.h - 1));
+                new_pos.x = new_pos.x.clamp(
+                    f64::from(geom.loc.x),
+                    f64::from(geom.loc.x + geom.size.w - 1),
+                );
+                new_pos.y = new_pos.y.clamp(
+                    f64::from(geom.loc.y),
+                    f64::from(geom.loc.y + geom.size.h - 1),
+                );
             } else {
                 // The pointer was not on any output in the first place. Find one for it.
                 // Let's do the simple thing and just put it on the first output.
@@ -2124,22 +2135,16 @@ impl State {
 
         // Handle confined pointer.
         if let Some((focus_surface, region)) = pointer_confined {
-            let mut prevent = false;
-
-            // Prevent the pointer from leaving the focused surface.
-            if Some(&focus_surface.0) != under.surface.as_ref().map(|(s, _)| s) {
-                prevent = true;
-            }
-
-            // Prevent the pointer from leaving the confine region, if any.
-            if let Some(region) = region {
+            // Prevent the pointer from leaving the focused surface, or the confine
+            // region, if any.
+            let left_focused_surface =
+                Some(&focus_surface.0) != under.surface.as_ref().map(|(s, _)| s);
+            let left_confine_region = region.is_some_and(|region| {
                 let new_pos_within_surface = new_pos - focus_surface.1;
-                if !region.contains(new_pos_within_surface.to_i32_round()) {
-                    prevent = true;
-                }
-            }
+                !region.contains(new_pos_within_surface.to_i32_round())
+            });
 
-            if prevent {
+            if left_focused_surface || left_confine_region {
                 pointer.relative_motion(
                     self,
                     Some(focus_surface),
@@ -2214,13 +2219,13 @@ impl State {
 
     fn on_pointer_motion_absolute<I: InputBackend>(
         &mut self,
-        event: I::PointerMotionAbsoluteEvent,
+        event: &I::PointerMotionAbsoluteEvent,
     ) {
         let was_inside_hot_corner = self.niri.pointer_inside_hot_corner;
         // Any of the early returns here mean that the pointer is not inside the hot corner.
         self.niri.pointer_inside_hot_corner = false;
 
-        let Some(pos) = self.compute_absolute_location(&event, None).or_else(|| {
+        let Some(pos) = self.compute_absolute_location(event, None).or_else(|| {
             self.global_bounding_rectangle().map(|output_geo| {
                 event.position_transformed(output_geo.size) + output_geo.loc.to_f64()
             })
@@ -2291,7 +2296,10 @@ impl State {
         self.niri.queue_redraw_all();
     }
 
-    fn on_pointer_button<I: InputBackend>(&mut self, event: I::PointerButtonEvent) {
+    // Same reasoning as `on_pointer_motion` above: one linear procedure with heavy
+    // mutable-borrow interleaving that resists a clean split.
+    #[allow(clippy::too_many_lines)]
+    fn on_pointer_button<I: InputBackend>(&mut self, event: &I::PointerButtonEvent) {
         let pointer = self.niri.seat.get_pointer().unwrap();
 
         let serial = SERIAL_COUNTER.next_serial();
@@ -2592,7 +2600,9 @@ impl State {
         pointer.frame(self);
     }
 
-    fn on_pointer_axis<I: InputBackend>(&mut self, event: I::PointerAxisEvent) {
+    // Same reasoning as `on_pointer_motion` above.
+    #[allow(clippy::too_many_lines)]
+    fn on_pointer_axis<I: InputBackend>(&mut self, event: &I::PointerAxisEvent) {
         let pointer = &self.niri.seat.get_pointer().unwrap();
 
         let source = event.source();
@@ -2818,8 +2828,8 @@ impl State {
             .unwrap_or(1.);
 
         // Determine final scroll factors based on configuration
-        let (horizontal_factor, vertical_factor) = device_scroll_factor
-            .map_or((1.0, 1.0), |x| x.h_v_factors());
+        let (horizontal_factor, vertical_factor) =
+            device_scroll_factor.map_or((1.0, 1.0), |x| x.h_v_factors());
         let (horizontal_factor, vertical_factor) = (
             horizontal_factor * window_scroll_factor,
             vertical_factor * window_scroll_factor,
@@ -2844,7 +2854,13 @@ impl State {
                 .relative_direction(Axis::Horizontal, event.relative_direction(Axis::Horizontal));
             frame = frame.value(Axis::Horizontal, horizontal_amount);
             if let Some(v120) = horizontal_amount_v120 {
-                frame = frame.v120(Axis::Horizontal, v120 as i32);
+                // v120 scroll amounts are libinput's discrete wheel-click units scaled
+                // by 120, so they're already effectively integral; truncation here
+                // doesn't lose meaningful precision.
+                #[allow(clippy::cast_possible_truncation)]
+                {
+                    frame = frame.v120(Axis::Horizontal, v120 as i32);
+                }
             }
         }
         if vertical_amount != 0.0 {
@@ -2852,7 +2868,11 @@ impl State {
                 frame.relative_direction(Axis::Vertical, event.relative_direction(Axis::Vertical));
             frame = frame.value(Axis::Vertical, vertical_amount);
             if let Some(v120) = vertical_amount_v120 {
-                frame = frame.v120(Axis::Vertical, v120 as i32);
+                // Same reasoning as the horizontal v120 cast above.
+                #[allow(clippy::cast_possible_truncation)]
+                {
+                    frame = frame.v120(Axis::Vertical, v120 as i32);
+                }
             }
         }
 
@@ -2926,13 +2946,9 @@ fn should_intercept_key<'a>(
     // Allow only a subset of compositor actions while the screenshot UI is open, since the user
     // cannot see the screen.
     if screenshot_ui.is_open() {
-        let mut use_screenshot_ui_action = true;
-
-        if let Some(bind) = &final_bind
-            && allowed_during_screenshot(&bind.action)
-        {
-            use_screenshot_ui_action = false;
-        }
+        let use_screenshot_ui_action = !final_bind
+            .as_ref()
+            .is_some_and(|bind| allowed_during_screenshot(&bind.action));
 
         if use_screenshot_ui_action && let Some(raw) = raw {
             final_bind = screenshot_ui.action(raw, mods).map(|action| Bind {
@@ -2975,12 +2991,15 @@ fn find_bind<'a>(
     mods: ModifiersState,
     disable_power_key_handling: bool,
 ) -> Option<Bind> {
-    use keysyms::{KEY_XF86Switch_VT_1, KEY_XF86Switch_VT_12, KEY_XF86PowerOff};
+    use keysyms::{KEY_XF86PowerOff, KEY_XF86Switch_VT_1, KEY_XF86Switch_VT_12};
 
     // Handle hardcoded binds.
     #[allow(non_upper_case_globals)] // wat
     let hardcoded_action = match modified.raw() {
         modified @ KEY_XF86Switch_VT_1..=KEY_XF86Switch_VT_12 => {
+            // The match arm bounds `modified` to the VT_1..=VT_12 range, so `vt`
+            // is always in 1..=12, well within i32 range.
+            #[allow(clippy::cast_possible_wrap)]
             let vt = (modified - KEY_XF86Switch_VT_1 + 1) as i32;
             Some(Action::ChangeVt(vt))
         }

@@ -85,6 +85,10 @@ impl Spring {
         let mut y1 = self.oscillate(x1);
 
         let mut i = 0;
+        // Newton's method convergence check: the `i > 1000` guard below bounds the
+        // loop regardless of float precision, so this can't hang even if the
+        // sequence never converges exactly.
+        #[allow(clippy::while_float)]
         while (self.to - y1).abs() > self.params.epsilon {
             if i > 1000 {
                 return Duration::ZERO;
@@ -169,14 +173,16 @@ impl Spring {
 
             self.to
                 + envelope
-                    * ((beta * x0 + v0) / omega1).mul_add((omega1 * t).sin(), x0 * (omega1 * t).cos())
+                    * ((beta * x0 + v0) / omega1)
+                        .mul_add((omega1 * t).sin(), x0 * (omega1 * t).cos())
         } else {
             // Overdamped.
             let omega2 = omega0.mul_add(-omega0, beta * beta).sqrt();
 
             self.to
                 + envelope
-                    * ((beta * x0 + v0) / omega2).mul_add((omega2 * t).sinh(), x0 * (omega2 * t).cosh())
+                    * ((beta * x0 + v0) / omega2)
+                        .mul_add((omega2 * t).sinh(), x0 * (omega2 * t).cosh())
         }
     }
 }

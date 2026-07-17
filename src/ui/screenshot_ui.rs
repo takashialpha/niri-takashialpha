@@ -198,7 +198,7 @@ impl ScreenshotUi {
                     SolidColorBuffer::new((0., 0.), [0., 0., 0., 0.5]),
                     SolidColorBuffer::new((0., 0.), [0., 0., 0., 0.5]),
                 ];
-                let locations = [Default::default(); 8];
+                let locations = [Point::<i32, Physical>::default(); 8];
 
                 let mut render_panel_ = |text| {
                     render_panel(renderer, scale, text)
@@ -1184,7 +1184,10 @@ fn render_panel(
     cr.set_source_rgb(1., 1., 1.);
     cr.fill()?;
 
-    cr.move_to(r.mul_add(2., padding) + padding - half_border_width, padding);
+    cr.move_to(
+        r.mul_add(2., padding) + padding - half_border_width,
+        padding,
+    );
 
     let layout = pangocairo::functions::create_layout(&cr);
     layout.context().set_round_glyph_positions(false);

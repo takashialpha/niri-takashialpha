@@ -53,6 +53,10 @@ impl CompositorHandler for State {
         self.add_default_dmabuf_pre_commit_hook(surface);
     }
 
+    // The central wl_surface commit handler: one linear, order-critical procedure
+    // (damage, subsurfaces, popups, window state) with heavy mutable-borrow
+    // interleaving on `self.niri`; splitting risks subtly reordering commit handling.
+    #[allow(clippy::too_many_lines)]
     fn commit(&mut self, surface: &WlSurface) {
         let _span = trace_span!("commit", surface = %surface.id()).entered();
         trace!("commit");
@@ -176,6 +180,11 @@ impl CompositorHandler for State {
                     let mapped = Mapped::new(window, rules, hook);
                     let window = mapped.window.clone();
 
+                    // This is a genuine 3-way priority chain (parent, then explicit
+                    // workspace, then explicit output, then auto), not a binary
+                    // Option-or-default; forcing it through map_or_else would nest
+                    // three closures for no readability gain.
+                    #[allow(clippy::option_if_let_else)]
                     let target = if let Some(p) = &parent {
                         // Open dialogs next to their parent window.
                         AddWindowTarget::NextTo(p)
@@ -503,7 +512,7 @@ impl State {
                     .as_ref()
                     .and_then(|assignment| match assignment {
                         BufferAssignment::NewBuffer(buffer) => get_dmabuf(buffer).cloned().ok(),
-                        _ => None,
+                        BufferAssignment::Removed => None,
                     })
             });
             if let Some(dmabuf) = maybe_dmabuf

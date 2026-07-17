@@ -65,6 +65,7 @@ pub fn render_snapshot_from_surface_tree(
                     data.buffer_transform(),
                     Vec::new(),
                 );
+                drop(data);
 
                 let baked = BakedBuffer {
                     buffer,
@@ -120,7 +121,7 @@ pub fn push_elements_from_surface_tree<R>(
 
             if let Some(data) = data {
                 let guard = data.lock().unwrap();
-                let has_view = guard.view().map_or(false, |view| {
+                let has_view = guard.view().is_some_and(|view| {
                     location += view.offset.to_f64().to_physical(scale);
                     true
                 });

@@ -174,13 +174,16 @@ impl<T: Texture> Element for TextureRenderElement<T> {
     }
 
     fn src(&self) -> Rectangle<f64, Buffer> {
-        self.src.map_or_else(|| Rectangle::from_size(self.buffer.texture.size()).to_f64(), |src| {
+        self.src.map_or_else(
+            || Rectangle::from_size(self.buffer.texture.size()).to_f64(),
+            |src| {
                 src.to_buffer(
                     self.buffer.scale,
                     self.buffer.transform,
                     &self.buffer.logical_size(),
                 )
-            })
+            },
+        )
     }
 
     fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {

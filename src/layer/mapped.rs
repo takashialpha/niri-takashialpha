@@ -181,6 +181,10 @@ impl MappedLayer {
         Point::from((0., y))
     }
 
+    // `RenderCtx` is deliberately taken by value throughout the render call tree;
+    // callers that need to reuse it afterwards reborrow via `ctx.r()` (see
+    // RenderCtx::r), so this isn't an accidental unnecessary move.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn render_normal<R: NiriRenderer>(
         &self,
         ctx: RenderCtx<R>,
@@ -228,6 +232,8 @@ impl MappedLayer {
             .render(ctx.renderer, location, &mut |elem| push(elem.into()));
     }
 
+    // Same reasoning as `render_normal` above.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn render_popups<R: NiriRenderer>(
         &self,
         ctx: RenderCtx<R>,

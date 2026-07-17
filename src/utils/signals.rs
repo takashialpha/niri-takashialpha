@@ -78,7 +78,11 @@ mod platform {
 
     fn empty_sigset() -> io::Result<libc::sigset_t> {
         let mut sigset = mem::MaybeUninit::uninit();
+        // SAFETY: `sigset.as_mut_ptr()` points at valid, properly aligned memory for
+        // a `sigset_t` for `sigemptyset` to write into.
         if unsafe { libc::sigemptyset(sigset.as_mut_ptr()) } == 0 {
+            // SAFETY: `sigemptyset` just returned success, so it fully initialized
+            // `sigset`.
             Ok(unsafe { sigset.assume_init() })
         } else {
             Err(io::Error::last_os_error())
@@ -87,6 +91,8 @@ mod platform {
 
     fn preferred_sigset() -> io::Result<libc::sigset_t> {
         let mut set = empty_sigset()?;
+        // SAFETY: SIGINT, SIGTERM, and SIGHUP are all valid signal numbers, satisfying
+        // `add_signal`'s precondition.
         unsafe {
             add_signal(&mut set, libc::SIGINT)?;
             add_signal(&mut set, libc::SIGTERM)?;
@@ -97,6 +103,8 @@ mod platform {
 
     // SAFETY: `signum` must be a valid signal number.
     unsafe fn add_signal(set: &mut libc::sigset_t, signum: libc::c_int) -> io::Result<()> {
+        // SAFETY: `set` is a valid `&mut sigset_t`, and the caller guarantees `signum`
+        // is a valid signal number per this fn's own safety contract above.
         if unsafe { libc::sigaddset(set, signum) } == 0 {
             Ok(())
         } else {
@@ -106,6 +114,8 @@ mod platform {
 
     fn set_sigmask(set: &libc::sigset_t) -> io::Result<()> {
         let oldset = std::ptr::null_mut(); // ignore old mask
+        // SAFETY: `set` is a valid `&sigset_t`; `oldset` is null, which
+        // `pthread_sigmask` documents as "don't store the previous mask".
         if unsafe { libc::pthread_sigmask(libc::SIG_SETMASK, set, oldset) } == 0 {
             Ok(())
         } else {

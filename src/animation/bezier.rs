@@ -18,12 +18,18 @@ impl CubicBezier {
 
     fn x_for_t(&self, t: f64) -> f64 {
         let omt = 1. - t;
-        (t * t).mul_add(t, (3. * omt * t * t).mul_add(self.x2, 3. * omt * omt * t * self.x1))
+        (t * t).mul_add(
+            t,
+            (3. * omt * t * t).mul_add(self.x2, 3. * omt * omt * t * self.x1),
+        )
     }
 
     fn y_for_t(&self, t: f64) -> f64 {
         let omt = 1. - t;
-        (t * t).mul_add(t, (3. * omt * t * t).mul_add(self.y2, 3. * omt * omt * t * self.y1))
+        (t * t).mul_add(
+            t,
+            (3. * omt * t * t).mul_add(self.y2, 3. * omt * omt * t * self.y1),
+        )
     }
 
     fn t_for_x(&self, x: f64) -> f64 {

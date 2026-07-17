@@ -66,8 +66,9 @@ impl<S: knus::traits::ErrorSpan> knus::DecodeScalar<S> for WorkspaceName {
         #[derive(Debug)]
         struct WorkspaceNameSet(Vec<String>);
         if let knus::ast::Literal::String(s) = &**val {
-            let mut name_set: Vec<String> =
-                ctx.get::<WorkspaceNameSet>().map_or_else(Vec::new, |h| h.0.clone());
+            let mut name_set: Vec<String> = ctx
+                .get::<WorkspaceNameSet>()
+                .map_or_else(Vec::new, |h| h.0.clone());
 
             if name_set.iter().any(|name| name.eq_ignore_ascii_case(s)) {
                 ctx.emit_error(DecodeError::unexpected(

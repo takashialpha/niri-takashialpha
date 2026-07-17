@@ -317,7 +317,10 @@ where
                         let Some(home) = std::env::home_dir() else {
                             ctx.emit_error(DecodeError::missing(
                                 node,
-                                format!("error retrieving home directory to expand {}", path.display()),
+                                format!(
+                                    "error retrieving home directory to expand {}",
+                                    path.display()
+                                ),
                             ));
                             continue;
                         };
@@ -406,7 +409,10 @@ where
                                 // Report all other errors normally
                                 ctx.emit_error(DecodeError::missing(
                                     node,
-                                    format!("failed to read included config from {}: {err}", path.display()),
+                                    format!(
+                                        "failed to read included config from {}: {err}",
+                                        path.display()
+                                    ),
                                 ));
                             }
                         }
@@ -571,7 +577,12 @@ impl ConfigPath {
         if let Some(default_parent) = path.parent() {
             fs::create_dir_all(default_parent)
                 .into_diagnostic()
-                .with_context(|| format!("error creating config directory {}", default_parent.display()))?;
+                .with_context(|| {
+                    format!(
+                        "error creating config directory {}",
+                        default_parent.display()
+                    )
+                })?;
         }
 
         // Create the config and fill it with the default config if it doesn't exist.

@@ -57,6 +57,9 @@ const fn triangle_verts() -> [ffi::types::GLfloat; 12 * MAX_RECTS_PER_DRAW] {
 impl Resources {
     fn create(renderer: &mut GlesRenderer) -> Result<Self, GlesError> {
         let supports_instancing = renderer.capabilities().contains(&Capability::Instancing);
+        // SAFETY: `with_context` guarantees the GL context is current on this thread
+        // for the duration of the closure; the buffer/texture handles created below
+        // are freshly allocated here and not touched anywhere else concurrently.
         renderer.with_context(|gl| unsafe {
             let vertices: &[ffi::types::GLfloat] = if supports_instancing {
                 &INSTANCED_VERTS

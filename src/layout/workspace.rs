@@ -622,7 +622,7 @@ impl<W: LayoutElement> Workspace<W> {
     /// Panics if `target` is [`WorkspaceAddWindowTarget::NextTo`] and there is no currently
     /// active window on this workspace.
     // `WorkspaceAddWindowTarget<W>` derives Copy, but the derive bounds it on `W: Copy` even
-    // though W only ever appears behind a reference (`&'a W::Id`) — so for a non-Copy window
+    // though W only ever appears behind a reference (`&'a W::Id`), so for a non-Copy window
     // type W (the common case) this is not statically Copy and clippy can't see it's cheap.
     // The variants only hold a `usize` or a `&W::Id`, so passing by value is already free; taking
     // a reference instead would require touching every `add_tile` call site across
@@ -1133,18 +1133,20 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn consume_or_expel_window_left(&mut self, window: Option<&W::Id>) {
-        if window.map_or_else(|| self.floating_is_active.get(), |id| {
-            self.floating.has_window(id)
-        }) {
+        if window.map_or_else(
+            || self.floating_is_active.get(),
+            |id| self.floating.has_window(id),
+        ) {
             return;
         }
         self.scrolling.consume_or_expel_window_left(window);
     }
 
     pub fn consume_or_expel_window_right(&mut self, window: Option<&W::Id>) {
-        if window.map_or_else(|| self.floating_is_active.get(), |id| {
-            self.floating.has_window(id)
-        }) {
+        if window.map_or_else(
+            || self.floating_is_active.get(),
+            |id| self.floating.has_window(id),
+        ) {
             return;
         }
         self.scrolling.consume_or_expel_window_right(window);
@@ -1194,9 +1196,10 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn center_window(&mut self, id: Option<&W::Id>) {
-        if id.map_or_else(|| self.floating_is_active.get(), |id| {
-            self.floating.has_window(id)
-        }) {
+        if id.map_or_else(
+            || self.floating_is_active.get(),
+            |id| self.floating.has_window(id),
+        ) {
             self.floating.center_window(id);
         } else {
             self.scrolling.center_window(id);
@@ -1236,9 +1239,10 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn set_window_width(&mut self, window: Option<&W::Id>, change: SizeChange) {
-        if window.map_or_else(|| self.floating_is_active.get(), |id| {
-            self.floating.has_window(id)
-        }) {
+        if window.map_or_else(
+            || self.floating_is_active.get(),
+            |id| self.floating.has_window(id),
+        ) {
             self.floating.set_window_width(window, change, true);
         } else {
             self.scrolling.set_window_width(window, change);
@@ -1246,9 +1250,10 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn set_window_height(&mut self, window: Option<&W::Id>, change: SizeChange) {
-        if window.map_or_else(|| self.floating_is_active.get(), |id| {
-            self.floating.has_window(id)
-        }) {
+        if window.map_or_else(
+            || self.floating_is_active.get(),
+            |id| self.floating.has_window(id),
+        ) {
             self.floating.set_window_height(window, change, true);
         } else {
             self.scrolling.set_window_height(window, change);
@@ -1256,18 +1261,20 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn reset_window_height(&mut self, window: Option<&W::Id>) {
-        if window.map_or_else(|| self.floating_is_active.get(), |id| {
-            self.floating.has_window(id)
-        }) {
+        if window.map_or_else(
+            || self.floating_is_active.get(),
+            |id| self.floating.has_window(id),
+        ) {
             return;
         }
         self.scrolling.reset_window_height(window);
     }
 
     pub fn toggle_window_width(&mut self, window: Option<&W::Id>, forwards: bool) {
-        if window.map_or_else(|| self.floating_is_active.get(), |id| {
-            self.floating.has_window(id)
-        }) {
+        if window.map_or_else(
+            || self.floating_is_active.get(),
+            |id| self.floating.has_window(id),
+        ) {
             self.floating.toggle_window_width(window, forwards);
         } else {
             self.scrolling.toggle_window_width(window, forwards);
@@ -1275,9 +1282,10 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn toggle_window_height(&mut self, window: Option<&W::Id>, forwards: bool) {
-        if window.map_or_else(|| self.floating_is_active.get(), |id| {
-            self.floating.has_window(id)
-        }) {
+        if window.map_or_else(
+            || self.floating_is_active.get(),
+            |id| self.floating.has_window(id),
+        ) {
             self.floating.toggle_window_height(window, forwards);
         } else {
             self.scrolling.toggle_window_height(window, forwards);
@@ -1427,7 +1435,7 @@ impl<W: LayoutElement> Workspace<W> {
             .scrolling
             .columns()
             .find(|col| col.contains(window))
-            .is_some_and(|col| col.is_pending_maximized());
+            .is_some_and(super::scrolling::Column::is_pending_maximized);
 
         self.set_maximized(window, !current);
     }
@@ -1497,9 +1505,10 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn set_window_floating(&mut self, id: Option<&W::Id>, floating: bool) {
-        if id.map_or_else(|| self.floating_is_active.get(), |id| {
-            self.floating.has_window(id)
-        }) == floating
+        if id.map_or_else(
+            || self.floating_is_active.get(),
+            |id| self.floating.has_window(id),
+        ) == floating
         {
             return;
         }
@@ -1548,9 +1557,10 @@ impl<W: LayoutElement> Workspace<W> {
     ) {
         const MAX_F: f64 = 10000.;
 
-        if id.map_or_else(|| self.floating_is_active.get(), |id| {
-            self.floating.has_window(id)
-        }) {
+        if id.map_or_else(
+            || self.floating_is_active.get(),
+            |id| self.floating.has_window(id),
+        ) {
             self.floating.move_window(id, x, y, animate);
         } else {
             // If the target tile isn't floating, set its stored floating position.

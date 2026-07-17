@@ -45,6 +45,9 @@ impl WlrLayerShellHandler for State {
             .unwrap();
     }
 
+    // `map` (below) is deliberately moved out of the `find_map` closure (it's needed
+    // afterward to call `unmap_layer`), so it can't be dropped any earlier than that.
+    #[allow(clippy::significant_drop_tightening)]
     fn layer_destroyed(&mut self, surface: WlrLayerSurface) {
         let wl_surface = surface.wl_surface();
         self.niri.unmapped_layer_surfaces.remove(wl_surface);
@@ -227,6 +230,7 @@ fn add_mapped_layer_pre_commit_hook(layer: &LayerSurface) -> HookId {
             let mut guard = states.cached_state.get::<LayerSurfaceCachedState>();
             let pending_layer = guard.pending().layer;
             let current_layer = guard.current().layer;
+            drop(guard);
             pending_layer != current_layer
         });
 

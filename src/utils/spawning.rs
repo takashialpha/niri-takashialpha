@@ -24,6 +24,8 @@ pub fn store_and_increase_nofile_rlimit() {
         rlim_cur: 0,
         rlim_max: 0,
     };
+    // SAFETY: `&raw mut rlim` points at a valid, live `rlimit` for `getrlimit` to
+    // write into.
     if unsafe { getrlimit(RLIMIT_NOFILE, &raw mut rlim) } != 0 {
         let err = io::Error::last_os_error();
         warn!("error getting nofile rlimit: {err:?}");
@@ -39,6 +41,8 @@ pub fn store_and_increase_nofile_rlimit() {
     );
     rlim.rlim_cur = rlim.rlim_max;
 
+    // SAFETY: `&raw const rlim` points at a valid, initialized `rlimit` for
+    // `setrlimit` to read.
     if unsafe { setrlimit(RLIMIT_NOFILE, &raw const rlim) } != 0 {
         let err = io::Error::last_os_error();
         warn!("error setting nofile rlimit: {err:?}");
@@ -55,6 +59,7 @@ pub fn restore_nofile_rlimit() {
     }
 
     let rlim = rlimit { rlim_cur, rlim_max };
+    // SAFETY: same as the `setrlimit` call in `store_and_increase_nofile_rlimit`.
     unsafe { setrlimit(RLIMIT_NOFILE, &raw const rlim) };
 }
 
@@ -137,6 +142,9 @@ fn spawn_sync(command: impl AsRef<OsStr>, args: impl IntoIterator<Item = impl As
     }
     drop(env);
 
+    // SAFETY: `pre_exec` runs the closure between fork and exec in the child, where
+    // only async-signal-safe operations are allowed. `unblock_all` only calls
+    // `pthread_sigmask`, which is async-signal-safe.
     unsafe { process.pre_exec(crate::utils::signals::unblock_all) };
 
     let Some(mut child) = do_spawn(command, process) else {
@@ -156,6 +164,10 @@ fn spawn_sync(command: impl AsRef<OsStr>, args: impl IntoIterator<Item = impl As
 }
 
 fn do_spawn(command: &OsStr, mut process: Command) -> Option<Child> {
+    // SAFETY: `pre_exec` runs the closure between fork and exec in the child, where
+    // only async-signal-safe operations are allowed. The closure below only calls
+    // `fork()`, `_exit()`, and `restore_nofile_rlimit` (which only calls `setrlimit`),
+    // all of which are async-signal-safe.
     unsafe {
         // Double-fork to avoid having to waitpid the child.
         process.pre_exec(move || {
