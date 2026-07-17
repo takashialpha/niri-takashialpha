@@ -626,4 +626,17 @@ mod tests {
         assert_eq!(config.input.keyboard.repeat_delay, 600);
         assert_eq!(config.input.keyboard.repeat_rate, 25);
     }
+
+    #[test]
+    fn default_config_matches_default_impls() {
+        // The `Default` impls scattered across this crate are meant to match
+        // default-config.kdl, as documented in the module-level doc comment, with the
+        // documented exception of `binds {}` and some window rules. Reset those two
+        // fields before comparing so this test only catches accidental drift.
+        let mut parsed = Config::load_default();
+        parsed.binds = Default::default();
+        parsed.window_rules = Default::default();
+
+        assert_eq!(parsed, Config::default());
+    }
 }
