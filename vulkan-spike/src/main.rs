@@ -12,16 +12,18 @@ mod renderer;
 mod vulkan_device;
 mod wgpu_bridge;
 
+use std::time::Duration;
+
 use anyhow::Context;
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::allocator::format::FormatSet;
-use smithay::backend::allocator::gbm::{GbmAllocator, GbmBufferFlags};
+use smithay::backend::allocator::gbm::{GbmAllocator, GbmBufferFlags, GbmDevice};
 use smithay::backend::drm::compositor::{DrmCompositor, FrameFlags};
 use smithay::backend::drm::exporter::gbm::GbmFramebufferExporter;
-use smithay::backend::drm::{DrmDeviceFd, DrmEvent};
+use smithay::backend::drm::{DrmDevice, DrmDeviceFd, DrmDeviceNotifier, DrmEvent};
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::output::{Mode as OutputMode, Output, OutputModeSource, PhysicalProperties, Subpixel};
-use smithay::reexports::calloop::EventLoop;
+use smithay::reexports::calloop::{EventLoop, LoopSignal};
 use smithay::reexports::drm::control::ModeTypeFlags;
 use smithay::reexports::gbm::Modifier;
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner, SimpleCrtcMapper};
@@ -35,17 +37,55 @@ const TEST_CLEAR_COLOR: [f32; 4] = [1.0, 0.0, 1.0, 1.0];
 /// Exit after this many vblank-driven frames rather than running forever.
 const FRAME_COUNT: u32 = 300;
 
+/// Absolute hard deadline for the whole program, from process start.
+/// Deliberately independent of the calloop event loop and everything it
+/// drives: if a DRM ioctl, a GPU wait, or anything else blocks indefinitely
+/// on the main thread for any reason, this is a separate OS thread and
+/// cannot be blocked by that. It unconditionally kills the process instead
+/// of leaving the session (and VT switching) stuck with no way out. The
+/// whole 300-frame test normally completes in well under this.
+const WATCHDOG_TIMEOUT: Duration = Duration::from_mins(1);
+
+/// `std::process::exit` skips Rust destructors, but that's fine here: it
+/// doesn't need to be a clean shutdown, it needs to be an unconditional one.
+/// Closing this process's file descriptors (including DRM master) and
+/// reclaiming its GPU-side resources on exit is the kernel's job, not
+/// something that depends on this process's own cleanup code running (which
+/// could itself be part of what's stuck). Must be called after
+/// `tracing_subscriber::fmt::init()` so the watchdog's own message actually
+/// gets printed.
+fn spawn_watchdog() {
+    let spawned = std::thread::Builder::new()
+        .name("watchdog".to_owned())
+        .spawn(|| {
+            std::thread::sleep(WATCHDOG_TIMEOUT);
+            tracing::error!(
+                "watchdog fired, did not finish within {WATCHDOG_TIMEOUT:?}; forcing exit"
+            );
+            std::process::exit(1);
+        });
+    if let Err(err) = spawned {
+        // Failing to spawn the safety net is itself worth failing loudly
+        // over, rather than silently continuing without one.
+        tracing::warn!("error spawning the watchdog thread: {err}");
+    }
+}
+
 type Compositor =
     DrmCompositor<GbmAllocator<DrmDeviceFd>, GbmFramebufferExporter<DrmDeviceFd>, (), DrmDeviceFd>;
 
-// Flat sequential "open the device, then match Vulkan, then bridge wgpu,
-// then set up KMS" bootstrap with no branching; it's long only because each
-// step is spelled out, not because it's complex.
-#[allow(clippy::too_many_lines)]
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
+    spawn_watchdog();
 
-    let drm_gbm = device::open_primary_gpu()?;
+    // Created up front (rather than later, right before the vblank loop)
+    // because `device::open_primary_gpu` itself needs to pump this loop to
+    // observe the seat daemon's asynchronous session-activation event before
+    // it's safe to touch the DRM device at all.
+    let mut event_loop: EventLoop<'static, ()> = EventLoop::try_new()?;
+    let loop_signal = event_loop.get_signal();
+
+    let drm_gbm = device::open_primary_gpu(&mut event_loop, loop_signal.clone())?;
     tracing::info!("opened primary GPU, render node: {}", drm_gbm.render_node);
 
     let matched = vulkan_device::match_physical_device(drm_gbm.render_node)?;
@@ -64,9 +104,22 @@ fn main() -> anyhow::Result<()> {
         ..
     } = drm_gbm;
 
+    let compositor = open_compositor(&mut drm_device, gbm)?;
+    let renderer = WgpuRenderer::new(bridged.device, bridged.queue);
+
+    run(event_loop, loop_signal, drm_notifier, compositor, renderer)
+}
+
+/// Finds a connected display with a free CRTC and builds a `DrmCompositor`
+/// for it, using its preferred mode (or its first mode, if none is marked
+/// preferred).
+fn open_compositor(
+    drm_device: &mut DrmDevice,
+    gbm: GbmDevice<DrmDeviceFd>,
+) -> anyhow::Result<Compositor> {
     let mut scanner = DrmScanner::<SimpleCrtcMapper>::default();
     let (connector, crtc) = scanner
-        .scan_connectors(&drm_device)
+        .scan_connectors(drm_device)
         .context("error scanning DRM connectors")?
         .into_iter()
         .find_map(|event| match event {
@@ -129,7 +182,7 @@ fn main() -> anyhow::Result<()> {
         })
         .collect();
 
-    let mut compositor: Compositor = DrmCompositor::new(
+    DrmCompositor::new(
         OutputModeSource::Auto(output.downgrade()),
         surface,
         None,
@@ -140,16 +193,21 @@ fn main() -> anyhow::Result<()> {
         drm_device.cursor_size(),
         Some(gbm),
     )
-    .context("error creating the DRM compositor")?;
+    .context("error creating the DRM compositor")
+}
 
-    let mut renderer = WgpuRenderer::new(bridged.device, bridged.queue);
-
-    // First frame, kicked off synchronously so we don't need a calloop
-    // "start" event to get going.
+/// Renders and presents the first frame synchronously (so no calloop "start"
+/// event is needed to get going), then drives the rest from vblank events
+/// until `FRAME_COUNT` is reached or an error stops the loop.
+fn run(
+    mut event_loop: EventLoop<'static, ()>,
+    loop_signal: LoopSignal,
+    drm_notifier: DrmDeviceNotifier,
+    mut compositor: Compositor,
+    mut renderer: WgpuRenderer,
+) -> anyhow::Result<()> {
     render_and_queue(&mut compositor, &mut renderer)?;
 
-    let mut event_loop: EventLoop<'_, ()> = EventLoop::try_new()?;
-    let loop_signal = event_loop.get_signal();
     let mut frames_left = FRAME_COUNT;
     event_loop
         .handle()

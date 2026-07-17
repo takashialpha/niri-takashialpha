@@ -12,10 +12,12 @@ use wgpu::hal::vulkan as hal_vulkan;
 use crate::vulkan_device::{MatchedDevice, REQUIRED_DEVICE_EXTENSIONS};
 
 pub struct Bridged {
-    /// Held only to keep the wrapped Vulkan instance/adapter alive for as
-    /// long as `device`/`queue` are in use. Never read directly.
+    /// Held only to keep the wrapped Vulkan instance alive for as long as
+    /// `device`/`queue` are in use. Never read directly.
     #[allow(dead_code)]
     pub instance: wgpu::Instance,
+    /// Held only to keep the wrapped Vulkan adapter alive for as long as
+    /// `device`/`queue` are in use. Never read directly.
     #[allow(dead_code)]
     pub adapter: wgpu::Adapter,
     pub device: wgpu::Device,
@@ -28,7 +30,14 @@ pub fn bridge_to_wgpu(matched: &MatchedDevice) -> anyhow::Result<Bridged> {
     // `entry`, `instance_api_version`, and `extensions` list (see
     // `vulkan_device::match_physical_device`), matching `from_raw`'s
     // documented precondition instead of standing up a second, separate
-    // `VkInstance`.
+    // `VkInstance`. The trailing `Some(no-op callback)` matters: passing
+    // `None` there makes wgpu-hal's own `InstanceShared::drop` call
+    // `vkDestroyInstance` on this handle too, double-destroying the same
+    // `VkInstance` that `matched.smithay_instance` (kept alive for the
+    // whole process, dropped after everything built from `hal_instance`,
+    // see `main`'s local ordering) also owns and destroys. A no-op
+    // callback here makes wgpu-hal skip its own destroy, leaving
+    // `smithay_instance` as the sole real owner.
     let hal_instance = unsafe {
         hal_vulkan::Instance::from_raw(
             matched.entry.clone(),
@@ -40,7 +49,7 @@ pub fn bridge_to_wgpu(matched: &MatchedDevice) -> anyhow::Result<Bridged> {
             matched.instance_flags,
             wgpu::MemoryBudgetThresholds::default(),
             false, // has_nv_optimus
-            None,
+            Some(Box::new(|| {})),
         )
     }
     .context("error bridging Smithay's Vulkan instance into wgpu-hal")?;

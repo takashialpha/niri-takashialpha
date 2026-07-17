@@ -8,8 +8,10 @@
 //! already allocates the dmabuf, so this only ever needs to *import* it as a
 //! wgpu render target, never export one.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::os::fd::OwnedFd;
+use std::time::Duration;
 
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::allocator::{Buffer, Fourcc};
@@ -36,7 +38,7 @@ impl fmt::Display for WgpuRendererError {
 
 impl std::error::Error for WgpuRendererError {}
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WgpuTexture {
     pub view: wgpu::TextureView,
     pub width: u32,
@@ -62,6 +64,18 @@ pub struct WgpuRenderer {
     queue: wgpu::Queue,
     context_id: ContextId<WgpuTexture>,
     debug_flags: DebugFlags,
+    // `DrmCompositor`'s `GbmAllocator` swapchain reuses a small, fixed set of
+    // physical buffers across frames, handing back the *same* `Dmabuf`
+    // (`Dmabuf`'s `Eq`/`Hash` are `Arc` pointer identity) for a given slot
+    // repeatedly. Re-importing on every `bind()` call would both be wasteful
+    // and, more importantly, wrong: a freshly `texture_from_dmabuf_fd`'d
+    // image is claimed to be in `TextureUses::UNINITIALIZED`, which is only
+    // true the *first* time a given buffer is seen. Re-wrapping an
+    // already-rendered-into buffer with that same claim mismatches wgpu's
+    // internal usage-tracking against the image's real Vulkan layout, which
+    // is exactly the kind of bug that manifests as a hang or corruption a
+    // frame or two in rather than a clean error.
+    texture_cache: HashMap<Dmabuf, WgpuTexture>,
 }
 
 impl fmt::Debug for WgpuRenderer {
@@ -77,6 +91,7 @@ impl WgpuRenderer {
             queue,
             context_id: ContextId::new(),
             debug_flags: DebugFlags::empty(),
+            texture_cache: HashMap::new(),
         }
     }
 }
@@ -111,6 +126,18 @@ impl Renderer for WgpuRenderer {
 
     fn debug_flags(&self) -> DebugFlags {
         self.debug_flags
+    }
+
+    fn cleanup_texture_cache(&mut self) -> Result<(), Self::Error> {
+        // Intentionally a no-op: `texture_cache` only ever grows to the
+        // size of `DrmCompositor`'s swapchain (a handful of fixed buffers,
+        // v1's single non-resizing output), so there's nothing meaningful
+        // to prune. `Dmabuf`'s `Arc` internals aren't exposed to check
+        // whether `DrmCompositor` still needs a given entry, and evicting
+        // one that's still live would force a re-import that reintroduces
+        // the wrong-`UNINITIALIZED` bug this cache exists to prevent.
+        // Explicitly not pruning is safer than pruning wrong.
+        Ok(())
     }
 
     fn render<'frame, 'buffer>(
@@ -149,7 +176,13 @@ impl Renderer for WgpuRenderer {
 
 impl Bind<Dmabuf> for WgpuRenderer {
     fn bind<'a>(&mut self, target: &'a mut Dmabuf) -> Result<Self::Framebuffer<'a>, Self::Error> {
-        import_dmabuf_as_color_target(&self.device, target)
+        if let Some(texture) = self.texture_cache.get(target) {
+            return Ok(texture.clone());
+        }
+
+        let texture = import_dmabuf_as_color_target(&self.device, target)?;
+        self.texture_cache.insert(target.clone(), texture.clone());
+        Ok(texture)
     }
 }
 
@@ -256,15 +289,35 @@ impl SmithayFrame for WgpuFrame<'_, '_> {
     fn finish(mut self) -> Result<SyncPoint, Self::Error> {
         let encoder = self.encoder.take().expect("encoder taken twice");
         self.queue.submit(Some(encoder.finish()));
-        // Block until the GPU has actually finished, so the caller (the
+        // Wait for the GPU to actually finish, so the caller (the
         // `DrmCompositor` presentation loop) can safely treat the target as
-        // ready to scan out the moment this returns.
+        // ready to scan out the moment this returns. Bounded, not
+        // indefinite: this runs synchronously inside the vblank event's
+        // calloop callback, so an unbounded wait here would freeze the
+        // whole event loop, including the session notifier that needs to
+        // keep processing so Ctrl+Alt+Fn / VT-switch acknowledgements don't
+        // get stuck. Timing out is reported as an error (caught by
+        // `render_and_queue`'s caller, which stops the loop) rather than
+        // silently hanging forever.
         self.device
-            .poll(wgpu::PollType::wait_indefinitely())
+            .poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: Some(Duration::from_secs(2)),
+            })
             .map_err(|err| WgpuRendererError::Dmabuf(format!("error polling device: {err}")))?;
         Ok(SyncPoint::signaled())
     }
 }
+
+/// Shared between `hal_desc` and `public_desc` in
+/// `import_dmabuf_as_color_target`: both describe the same texture to two
+/// different wgpu APIs (hal-level vs. public), and nothing enforces they stay
+/// in sync beyond convention. Naming the fields that must match here, rather
+/// than repeating literals in both descriptor literals, keeps a future edit
+/// to one from silently desyncing from the other.
+const TEXTURE_MIP_LEVEL_COUNT: u32 = 1;
+const TEXTURE_SAMPLE_COUNT: u32 = 1;
+const TEXTURE_DIMENSION: wgpu::TextureDimension = wgpu::TextureDimension::D2;
 
 const fn fourcc_to_wgpu_format(fourcc: Fourcc) -> Option<wgpu::TextureFormat> {
     match fourcc {
@@ -325,9 +378,9 @@ fn import_dmabuf_as_color_target(
     let hal_desc = wgpu::hal::TextureDescriptor {
         label: Some("vulkan-spike dmabuf target"),
         size,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
+        mip_level_count: TEXTURE_MIP_LEVEL_COUNT,
+        sample_count: TEXTURE_SAMPLE_COUNT,
+        dimension: TEXTURE_DIMENSION,
         format: wgpu_format,
         usage: wgpu::TextureUses::COLOR_TARGET,
         memory_flags: wgpu::hal::MemoryFlags::empty(),
@@ -365,9 +418,9 @@ fn import_dmabuf_as_color_target(
     let public_desc = wgpu::TextureDescriptor {
         label: Some("vulkan-spike dmabuf target"),
         size,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
+        mip_level_count: TEXTURE_MIP_LEVEL_COUNT,
+        sample_count: TEXTURE_SAMPLE_COUNT,
+        dimension: TEXTURE_DIMENSION,
         format: wgpu_format,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
         view_formats: &[],

@@ -7,7 +7,16 @@ use anyhow::{Context, bail};
 use smithay::backend::drm::DrmNode;
 use smithay::backend::vulkan::version::Version;
 use smithay::backend::vulkan::{Instance as SmithayInstance, PhysicalDevice};
+use smithay::reexports::gbm::Modifier;
 use wgpu::hal::vulkan as hal_vulkan;
+
+/// The exact format+modifier this spike renders into (see
+/// `renderer::fourcc_to_wgpu_format` and the forced-`Linear` render formats
+/// in `main.rs`). Checked once, up front, against what the matched physical
+/// device actually reports supporting for external-memory `COLOR_ATTACHMENT`
+/// import, rather than discovering an incompatibility only via a GPU hang
+/// during the first real render.
+const TARGET_VK_FORMAT: ash::vk::Format = ash::vk::Format::B8G8R8A8_UNORM;
 
 /// The three extensions required for dmabuf import; checked up front against
 /// the matched physical device rather than discovered via a failed
@@ -73,6 +82,8 @@ pub fn match_physical_device(render_node: DrmNode) -> anyhow::Result<MatchedDevi
         }
     }
 
+    check_color_attachment_support(&physical_device, TARGET_VK_FORMAT, Modifier::Linear.into())?;
+
     // This is exactly the extension list `smithay_instance` was created with
     // above, so it's also exactly what `hal_vulkan::Instance::from_raw` needs
     // to be told was enabled.
@@ -84,4 +95,39 @@ pub fn match_physical_device(render_node: DrmNode) -> anyhow::Result<MatchedDevi
         instance_api_version: Version::VERSION_1_3.to_raw(),
         instance_flags,
     })
+}
+
+/// Confirms the physical device reports `COLOR_ATTACHMENT` tiling support for
+/// `format` under `modifier`, via `VK_EXT_image_drm_format_modifier`'s
+/// per-modifier properties. A dmabuf import + `vkCreateImage` can succeed at
+/// the API level even when the hardware doesn't actually support using the
+/// result as a render target for this specific format/modifier pair. That
+/// mismatch doesn't surface as a clean Vulkan validation error, it surfaces
+/// as GPU-side corruption or a hang partway through real use. Checking this
+/// up front turns an unverified assumption into a checked precondition.
+fn check_color_attachment_support(
+    physical_device: &PhysicalDevice,
+    format: ash::vk::Format,
+    modifier: u64,
+) -> anyhow::Result<()> {
+    let properties = physical_device
+        .get_format_modifier_properties(format)
+        .with_context(|| format!("error querying DRM format modifier properties for {format:?}"))?;
+
+    let supported = properties.iter().any(|props| {
+        props.drm_format_modifier == modifier
+            && props
+                .drm_format_modifier_tiling_features
+                .contains(ash::vk::FormatFeatureFlags::COLOR_ATTACHMENT)
+    });
+
+    if !supported {
+        bail!(
+            "physical device {:?} does not report COLOR_ATTACHMENT tiling support for \
+             format {format:?} with DRM modifier {modifier:#x}; reported modifiers: {properties:?}",
+            physical_device.name(),
+        );
+    }
+
+    Ok(())
 }
