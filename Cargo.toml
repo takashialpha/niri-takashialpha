@@ -18,7 +18,7 @@ missing_errors_doc = "allow"
 # Extra hygiene lints beyond the standard groups above.
 # Forgotten debug prints never make it to a commit.
 dbg_macro = "warn"
-# This codebase talks to libinput/GBM/EGL/DRM directly; every unsafe block
+# libinput/GBM/EGL/DRM; every unsafe block
 # should carry a `// SAFETY:` comment explaining the invariant that makes it
 # sound, the same way `render_helpers` already documents its casts.
 undocumented_unsafe_blocks = "warn"
