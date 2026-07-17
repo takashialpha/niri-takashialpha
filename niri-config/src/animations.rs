@@ -149,7 +149,6 @@ impl Default for WorkspaceSwitchAnim {
 #[derive(Debug, Clone, PartialEq)]
 pub struct WindowOpenAnim {
     pub anim: Animation,
-    pub custom_shader: Option<String>,
 }
 
 impl Default for WindowOpenAnim {
@@ -162,7 +161,6 @@ impl Default for WindowOpenAnim {
                     curve: Curve::EaseOutExpo,
                 }),
             },
-            custom_shader: None,
         }
     }
 }
@@ -170,7 +168,6 @@ impl Default for WindowOpenAnim {
 #[derive(Debug, Clone, PartialEq)]
 pub struct WindowCloseAnim {
     pub anim: Animation,
-    pub custom_shader: Option<String>,
 }
 
 impl Default for WindowCloseAnim {
@@ -183,7 +180,6 @@ impl Default for WindowCloseAnim {
                     curve: Curve::EaseOutQuad,
                 }),
             },
-            custom_shader: None,
         }
     }
 }
@@ -223,7 +219,6 @@ impl Default for WindowMovementAnim {
 #[derive(Debug, Clone, PartialEq)]
 pub struct WindowResizeAnim {
     pub anim: Animation,
-    pub custom_shader: Option<String>,
 }
 
 impl Default for WindowResizeAnim {
@@ -237,7 +232,6 @@ impl Default for WindowResizeAnim {
                     epsilon: 0.0001,
                 }),
             },
-            custom_shader: None,
         }
     }
 }
@@ -359,20 +353,9 @@ where
         ctx: &mut knus::decode::Context<S>,
     ) -> Result<Self, DecodeError<S>> {
         let default = Self::default().anim;
-        let mut custom_shader = None;
-        let anim = Animation::decode_node(node, ctx, default, |child, ctx| {
-            if &**child.node_name == "custom-shader" {
-                custom_shader = parse_arg_node("custom-shader", child, ctx)?;
-                Ok(true)
-            } else {
-                Ok(false)
-            }
-        })?;
+        let anim = Animation::decode_node(node, ctx, default, |_, _| Ok(false))?;
 
-        Ok(Self {
-            anim,
-            custom_shader,
-        })
+        Ok(Self { anim })
     }
 }
 
@@ -385,20 +368,9 @@ where
         ctx: &mut knus::decode::Context<S>,
     ) -> Result<Self, DecodeError<S>> {
         let default = Self::default().anim;
-        let mut custom_shader = None;
-        let anim = Animation::decode_node(node, ctx, default, |child, ctx| {
-            if &**child.node_name == "custom-shader" {
-                custom_shader = parse_arg_node("custom-shader", child, ctx)?;
-                Ok(true)
-            } else {
-                Ok(false)
-            }
-        })?;
+        let anim = Animation::decode_node(node, ctx, default, |_, _| Ok(false))?;
 
-        Ok(Self {
-            anim,
-            custom_shader,
-        })
+        Ok(Self { anim })
     }
 }
 
@@ -411,20 +383,9 @@ where
         ctx: &mut knus::decode::Context<S>,
     ) -> Result<Self, DecodeError<S>> {
         let default = Self::default().anim;
-        let mut custom_shader = None;
-        let anim = Animation::decode_node(node, ctx, default, |child, ctx| {
-            if &**child.node_name == "custom-shader" {
-                custom_shader = parse_arg_node("custom-shader", child, ctx)?;
-                Ok(true)
-            } else {
-                Ok(false)
-            }
-        })?;
+        let anim = Animation::decode_node(node, ctx, default, |_, _| Ok(false))?;
 
-        Ok(Self {
-            anim,
-            custom_shader,
-        })
+        Ok(Self { anim })
     }
 }
 

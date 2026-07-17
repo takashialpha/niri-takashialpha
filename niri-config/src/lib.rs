@@ -634,8 +634,8 @@ mod tests {
         // documented exception of `binds {}` and some window rules. Reset those two
         // fields before comparing so this test only catches accidental drift.
         let mut parsed = Config::load_default();
-        parsed.binds = Default::default();
-        parsed.window_rules = Default::default();
+        parsed.binds = Binds::default();
+        parsed.window_rules = Vec::default();
 
         assert_eq!(parsed, Config::default());
     }

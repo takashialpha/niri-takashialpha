@@ -116,7 +116,7 @@ use crate::render_helpers::surface::push_elements_from_surface_tree;
 use crate::render_helpers::texture::TextureBuffer;
 use crate::render_helpers::{
     RenderCtx, RenderTarget, encompassing_geo, render_to_encompassing_texture, render_to_texture,
-    render_to_vec, shaders,
+    render_to_vec,
 };
 use crate::ui::config_error_notification::ConfigErrorNotification;
 use crate::ui::exit_confirm_dialog::{ExitConfirmDialog, ExitConfirmDialogRenderElement};
@@ -1245,7 +1245,6 @@ impl State {
         let mut preserved_output_config = None;
         let mut window_rules_changed = false;
         let mut layer_rules_changed = false;
-        let mut shaders_changed = false;
         let mut cursor_inactivity_timeout_changed = false;
         let mut old_config = self.niri.config.borrow_mut();
 
@@ -1304,36 +1303,6 @@ impl State {
 
         if config.layer_rules != old_config.layer_rules {
             layer_rules_changed = true;
-        }
-
-        if config.animations.window_resize.custom_shader
-            != old_config.animations.window_resize.custom_shader
-        {
-            let src = config.animations.window_resize.custom_shader.as_deref();
-            self.backend.with_primary_renderer(|renderer| {
-                shaders::set_custom_resize_program(renderer, src);
-            });
-            shaders_changed = true;
-        }
-
-        if config.animations.window_close.custom_shader
-            != old_config.animations.window_close.custom_shader
-        {
-            let src = config.animations.window_close.custom_shader.as_deref();
-            self.backend.with_primary_renderer(|renderer| {
-                shaders::set_custom_close_program(renderer, src);
-            });
-            shaders_changed = true;
-        }
-
-        if config.animations.window_open.custom_shader
-            != old_config.animations.window_open.custom_shader
-        {
-            let src = config.animations.window_open.custom_shader.as_deref();
-            self.backend.with_primary_renderer(|renderer| {
-                shaders::set_custom_open_program(renderer, src);
-            });
-            shaders_changed = true;
         }
 
         if config.cursor.hide_after_inactive_ms != old_config.cursor.hide_after_inactive_ms {
@@ -1402,10 +1371,6 @@ impl State {
 
         if layer_rules_changed {
             self.niri.recompute_layer_rules();
-        }
-
-        if shaders_changed {
-            self.niri.update_shaders();
         }
 
         if cursor_inactivity_timeout_changed {
