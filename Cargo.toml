@@ -83,7 +83,7 @@ bitflags.workspace = true
 calloop = { version = "0.14", features = ["executor", "futures-io", "signals"] }
 clap = { workspace = true, features = ["string"] }
 drm-ffi = "0.9"
-fastrand = "2.4"
+fastrand = "2.5"
 futures-util = { version = "0.3", default-features = false, features = [
   "std",
   "io",

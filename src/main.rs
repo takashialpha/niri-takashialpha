@@ -1,9 +1,7 @@
 #[macro_use]
 extern crate tracing;
 
-use std::fs::File;
-use std::io::{self, Write};
-use std::os::fd::FromRawFd;
+use std::io;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::Ordering;
@@ -157,13 +155,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         import_environment();
     }
 
-    if env::var_os("NIRI_DISABLE_SYSTEM_MANAGER_NOTIFY").is_none_or(|x| x != "1") {
-        // Send ready notification to the NOTIFY_FD file descriptor.
-        if let Err(err) = notify_fd() {
-            warn!("error notifying fd: {err:?}");
-        }
-    }
-
     watcher::setup(&mut state, &config_path, config_includes);
 
     // Spawn commands from cli and auto-start.
@@ -270,21 +261,6 @@ fn config_path(cli_path: Option<PathBuf>) -> ConfigPath {
         // Couldn't find the home directory, or whatever.
         ConfigPath::Explicit(system_path)
     }
-}
-
-fn notify_fd() -> anyhow::Result<()> {
-    let fd = match env::var("NOTIFY_FD") {
-        Ok(notify_fd) => notify_fd.parse()?,
-        Err(env::VarError::NotPresent) => return Ok(()),
-        Err(err) => return Err(err.into()),
-    };
-    // SAFETY: still single-threaded, right at the start of `main`'s post-parse setup.
-    unsafe { env::remove_var("NOTIFY_FD") };
-    // SAFETY: `fd` was just parsed from `NOTIFY_FD`, which the service manager sets to
-    // an open fd it hands off exclusively to this process; nothing else in niri owns it.
-    let mut notif = unsafe { File::from_raw_fd(fd) };
-    notif.write_all(b"READY=1\n")?;
-    Ok(())
 }
 
 // The wayland-server crate has set_default_max_buffer_size() under a libwayland_1_23 feature, but

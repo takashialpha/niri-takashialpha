@@ -21,7 +21,6 @@ use crate::render_helpers::renderer::AsGlesRenderer;
 pub mod border;
 pub mod clipped_surface;
 pub mod damage;
-pub mod gradient_fade_texture;
 pub mod memory;
 pub mod offscreen;
 pub mod primary_gpu_texture;
@@ -96,8 +95,6 @@ pub trait ToRenderElement {
 }
 
 impl RenderTarget {
-    pub const COUNT: usize = 2;
-
     #[must_use]
     pub fn should_block_out(self, block_out_from: Option<BlockOutFrom>) -> bool {
         match block_out_from {

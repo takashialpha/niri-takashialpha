@@ -13,7 +13,6 @@ pub struct Shaders {
     pub clipped_surface: Option<GlesTexProgram>,
     pub postprocess_and_clip: Option<GlesTexProgram>,
     pub resize: Option<ShaderProgram>,
-    pub gradient_fade: Option<GlesTexProgram>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -125,21 +124,12 @@ impl Shaders {
             "resize",
         );
 
-        let gradient_fade = compiled_or_warn(
-            renderer.compile_custom_texture_shader(
-                include_str!("shaders/gradient_fade.frag"),
-                &[UniformName::new("cutoff", UniformType::_2f)],
-            ),
-            "gradient fade",
-        );
-
         Self {
             border,
             shadow,
             clipped_surface,
             postprocess_and_clip,
             resize,
-            gradient_fade,
         }
     }
 
