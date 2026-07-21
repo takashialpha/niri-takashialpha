@@ -1,6 +1,9 @@
 [workspace]
 members = ["niri-config", "niri-ipc"]
 
+[workspace.lints.rust]
+unused_qualifications = "deny"
+
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
