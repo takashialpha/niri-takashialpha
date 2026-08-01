@@ -52,12 +52,12 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [workspace.dependencies.smithay]
 git = "https://github.com/Smithay/smithay.git"
-rev = "ff5fa7df392cecfba049ffed55cdaa4e98a8e7ef"
+rev = "master"
 default-features = false
 
 [workspace.dependencies.smithay-drm-extras]
 git = "https://github.com/Smithay/smithay.git"
-rev = "ff5fa7df392cecfba049ffed55cdaa4e98a8e7ef"
+rev = "master"
 
 [package]
 name = "niri"
