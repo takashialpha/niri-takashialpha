@@ -3709,10 +3709,7 @@ impl ViewOffset {
             Self::Animation(anim) => anim.value(),
             Self::Gesture(gesture) => {
                 gesture.current_view_offset
-                    + gesture
-                        .animation
-                        .as_ref()
-                        .map_or(0., Animation::value)
+                    + gesture.animation.as_ref().map_or(0., Animation::value)
             }
         }
     }

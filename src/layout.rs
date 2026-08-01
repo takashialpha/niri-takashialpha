@@ -1575,10 +1575,7 @@ impl<W: LayoutElement> Layout<W> {
             .into_iter();
 
         let mon = monitors.iter().find(|mon| &mon.output == output).unwrap();
-        let mon_windows = mon
-            .workspaces
-            .iter()
-            .flat_map(Workspace::windows);
+        let mon_windows = mon.workspaces.iter().flat_map(Workspace::windows);
 
         moving_window.chain(mon_windows)
     }
@@ -1600,10 +1597,7 @@ impl<W: LayoutElement> Layout<W> {
             .iter_mut()
             .find(|mon| &mon.output == output)
             .unwrap();
-        let mon_windows = mon
-            .workspaces
-            .iter_mut()
-            .flat_map(Workspace::windows_mut);
+        let mon_windows = mon.workspaces.iter_mut().flat_map(Workspace::windows_mut);
 
         moving_window.chain(mon_windows)
     }

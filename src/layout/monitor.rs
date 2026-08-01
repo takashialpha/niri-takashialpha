@@ -196,11 +196,7 @@ impl WorkspaceSwitch {
         match self {
             Self::Animation(anim) => anim.value(),
             Self::Gesture(gesture) => {
-                gesture.current_idx
-                    + gesture
-                        .animation
-                        .as_ref()
-                        .map_or(0., Animation::value)
+                gesture.current_idx + gesture.animation.as_ref().map_or(0., Animation::value)
             }
         }
     }
@@ -364,8 +360,7 @@ impl<W: LayoutElement> Monitor<W> {
 
     #[must_use]
     pub fn into_workspaces(mut self) -> Vec<Workspace<W>> {
-        self.workspaces
-            .retain(Workspace::has_windows_or_name);
+        self.workspaces.retain(Workspace::has_windows_or_name);
 
         for ws in &mut self.workspaces {
             ws.set_output(None);
@@ -408,9 +403,7 @@ impl<W: LayoutElement> Monitor<W> {
     }
 
     pub fn windows(&self) -> impl Iterator<Item = &W> {
-        self.workspaces
-            .iter()
-            .flat_map(Workspace::windows)
+        self.workspaces.iter().flat_map(Workspace::windows)
     }
 
     pub fn has_window(&self, window: &W::Id) -> bool {

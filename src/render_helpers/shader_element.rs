@@ -475,8 +475,7 @@ impl RenderElement<GlesRenderer> for ShaderRenderElement {
                 gl.BindBuffer(ffi::ARRAY_BUFFER, resources.vbos[1]);
                 gl.BufferData(
                     ffi::ARRAY_BUFFER,
-                    (size_of::<ffi::types::GLfloat>() * resources.vertices.len())
-                        as isize,
+                    (size_of::<ffi::types::GLfloat>() * resources.vertices.len()) as isize,
                     resources.vertices.as_ptr().cast(),
                     ffi::STREAM_DRAW,
                 );
@@ -501,8 +500,7 @@ impl RenderElement<GlesRenderer> for ShaderRenderElement {
                         gl.DrawArrays(ffi::TRIANGLES, 0, 6);
 
                         // Set damage pointer to the next 10 rectangles.
-                        let offset =
-                            (i + 1) as usize * 6 * 4 * size_of::<ffi::types::GLfloat>();
+                        let offset = (i + 1) as usize * 6 * 4 * size_of::<ffi::types::GLfloat>();
                         gl.VertexAttribPointer(
                             program.attrib_vert_position as u32,
                             4,
