@@ -179,19 +179,6 @@ impl ShaderProgram {
             compile_program(gl, src, additional_uniforms, texture_uniforms)
         })?
     }
-
-    /// # Errors
-    ///
-    /// Returns an error if the EGL context could not be made current to delete the GL
-    /// program objects.
-    pub fn destroy(self, renderer: &mut GlesRenderer) -> Result<(), GlesError> {
-        // SAFETY: GL context is current (inside `with_context`); `self` owns these
-        // program ids and is consumed here, so they aren't deleted twice.
-        renderer.with_context(move |gl| unsafe {
-            gl.DeleteProgram(self.0.normal.program);
-            gl.DeleteProgram(self.0.debug.program);
-        })
-    }
 }
 
 impl ShaderRenderElement {
