@@ -396,13 +396,13 @@ struct InteractiveMoveData<W: LayoutElement> {
     /// Config overrides for the output where the window is currently located.
     ///
     /// Cached here to be accessible while an output is removed.
-    pub(self) output_config: Option<niri_config::LayoutPart>,
+    pub(self) output_config: Option<LayoutPart>,
     /// Config overrides for the workspace where the window is currently located.
     ///
     /// To avoid sudden window changes when starting an interactive move, it will remember the
     /// config overrides for the workspace where the move originated from. As soon as the window
     /// moves over some different workspace though, this override will reset.
-    pub(self) workspace_config: Option<(WorkspaceId, niri_config::LayoutPart)>,
+    pub(self) workspace_config: Option<(WorkspaceId, LayoutPart)>,
 }
 
 #[derive(Debug)]
@@ -606,7 +606,7 @@ impl Options {
         }
     }
 
-    fn with_merged_layout(mut self, part: Option<&niri_config::LayoutPart>) -> Self {
+    fn with_merged_layout(mut self, part: Option<&LayoutPart>) -> Self {
         if let Some(part) = part {
             self.layout.merge_with(part);
         }
@@ -1578,7 +1578,7 @@ impl<W: LayoutElement> Layout<W> {
         let mon_windows = mon
             .workspaces
             .iter()
-            .flat_map(workspace::Workspace::windows);
+            .flat_map(Workspace::windows);
 
         moving_window.chain(mon_windows)
     }
@@ -1603,7 +1603,7 @@ impl<W: LayoutElement> Layout<W> {
         let mon_windows = mon
             .workspaces
             .iter_mut()
-            .flat_map(workspace::Workspace::windows_mut);
+            .flat_map(Workspace::windows_mut);
 
         moving_window.chain(mon_windows)
     }

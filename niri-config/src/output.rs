@@ -42,9 +42,9 @@ pub struct Modeline {
     /// Total vertical number of pixels before resetting the vertical drawing position to zero.
     pub vtotal: u16,
     /// Horizontal sync polarity: "+hsync" or "-hsync".
-    pub hsync_polarity: niri_ipc::HSyncPolarity,
+    pub hsync_polarity: HSyncPolarity,
     /// Vertical sync polarity: "+vsync" or "-vsync".
-    pub vsync_polarity: niri_ipc::VSyncPolarity,
+    pub vsync_polarity: VSyncPolarity,
 }
 
 #[derive(knus::Decode, Debug, Clone, PartialEq)]
@@ -271,7 +271,7 @@ impl<S: ErrorSpan> knus::DecodeScalar<S> for MaxBpc {
     }
 }
 
-impl<S: ErrorSpan> knus::Decode<S> for Mode {
+impl<S: ErrorSpan> Decode<S> for Mode {
     fn decode_node(node: &SpannedNode<S>, ctx: &mut Context<S>) -> Result<Self, DecodeError<S>> {
         if let Some(type_name) = &node.type_name {
             ctx.emit_error(DecodeError::unexpected(
@@ -547,9 +547,9 @@ mod tests {
     ) -> OutputName {
         OutputName {
             connector: connector.to_string(),
-            make: make.map(std::string::ToString::to_string),
-            model: model.map(std::string::ToString::to_string),
-            serial: serial.map(std::string::ToString::to_string),
+            make: make.map(ToString::to_string),
+            model: model.map(ToString::to_string),
+            serial: serial.map(ToString::to_string),
         }
     }
 

@@ -308,8 +308,8 @@ impl ResolvedWindowRules {
                 resolved.popups.merge_with(&rule.popups);
             }
 
-            resolved.open_on_output = open_on_output.map(std::borrow::ToOwned::to_owned);
-            resolved.open_on_workspace = open_on_workspace.map(std::borrow::ToOwned::to_owned);
+            resolved.open_on_output = open_on_output.map(ToOwned::to_owned);
+            resolved.open_on_workspace = open_on_workspace.map(ToOwned::to_owned);
         });
 
         resolved

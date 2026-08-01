@@ -72,7 +72,7 @@ impl Resources {
             gl.BindBuffer(ffi::ARRAY_BUFFER, vbos[0]);
             gl.BufferData(
                 ffi::ARRAY_BUFFER,
-                std::mem::size_of_val(vertices) as isize,
+                size_of_val(vertices) as isize,
                 vertices.as_ptr().cast(),
                 ffi::STATIC_DRAW,
             );

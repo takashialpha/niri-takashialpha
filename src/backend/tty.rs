@@ -2139,7 +2139,7 @@ pub fn calculate_mode_cvt(width: u16, height: u16, refresh: f64) -> DrmMode {
     let mode_name = format!("{width}x{height}@{:.2}", cvt_timing.act_frame_rate);
     let name = modeinfo_name_slice_from_string(&mode_name);
 
-    let drm_ffi_mode = drm_ffi::drm_sys::drm_mode_modeinfo {
+    let drm_ffi_mode = drm_mode_modeinfo {
         clock,
 
         hdisplay: width,
@@ -2611,7 +2611,7 @@ impl<'a> ConnectorProperties<'a> {
         if self.has_change {
             self.device.atomic_commit(
                 AtomicCommitFlags::ALLOW_MODESET,
-                std::mem::take(&mut self.requests),
+                mem::take(&mut self.requests),
             )?;
         }
 

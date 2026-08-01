@@ -83,7 +83,7 @@ pub struct Monitor<W: LayoutElement> {
     /// Configurable properties of the layout.
     pub(super) options: Rc<Options>,
     /// Layout config overrides for this monitor.
-    layout_config: Option<niri_config::LayoutPart>,
+    layout_config: Option<LayoutPart>,
 }
 
 #[derive(Debug)]
@@ -200,7 +200,7 @@ impl WorkspaceSwitch {
                     + gesture
                         .animation
                         .as_ref()
-                        .map_or(0., super::super::animation::Animation::value)
+                        .map_or(0., Animation::value)
             }
         }
     }
@@ -365,7 +365,7 @@ impl<W: LayoutElement> Monitor<W> {
     #[must_use]
     pub fn into_workspaces(mut self) -> Vec<Workspace<W>> {
         self.workspaces
-            .retain(super::workspace::Workspace::has_windows_or_name);
+            .retain(Workspace::has_windows_or_name);
 
         for ws in &mut self.workspaces {
             ws.set_output(None);
@@ -410,7 +410,7 @@ impl<W: LayoutElement> Monitor<W> {
     pub fn windows(&self) -> impl Iterator<Item = &W> {
         self.workspaces
             .iter()
-            .flat_map(super::workspace::Workspace::windows)
+            .flat_map(Workspace::windows)
     }
 
     pub fn has_window(&self, window: &W::Id) -> bool {
@@ -890,7 +890,7 @@ impl<W: LayoutElement> Monitor<W> {
         let new_id = self.workspaces[new_idx].id();
 
         let activate = activate.map_smart(|| {
-            window.is_none_or(|win| self.active_window().map(super::LayoutElement::id) == Some(win))
+            window.is_none_or(|win| self.active_window().map(LayoutElement::id) == Some(win))
         });
 
         let workspace = &mut self.workspaces[source_workspace_idx];
@@ -1113,7 +1113,7 @@ impl<W: LayoutElement> Monitor<W> {
             || self
                 .workspaces
                 .iter()
-                .any(super::workspace::Workspace::are_animations_ongoing)
+                .any(Workspace::are_animations_ongoing)
     }
 
     #[must_use]
@@ -1122,7 +1122,7 @@ impl<W: LayoutElement> Monitor<W> {
             || self
                 .workspaces
                 .iter()
-                .any(super::workspace::Workspace::are_transitions_ongoing)
+                .any(Workspace::are_transitions_ongoing)
     }
 
     /// # Panics
@@ -1250,7 +1250,7 @@ impl<W: LayoutElement> Monitor<W> {
         self.options = options;
     }
 
-    pub fn update_layout_config(&mut self, layout_config: Option<niri_config::LayoutPart>) -> bool {
+    pub fn update_layout_config(&mut self, layout_config: Option<LayoutPart>) -> bool {
         if self.layout_config == layout_config {
             return false;
         }
@@ -2091,7 +2091,7 @@ impl<W: LayoutElement> Monitor<W> {
     }
 
     #[must_use]
-    pub const fn layout_config(&self) -> Option<&niri_config::LayoutPart> {
+    pub const fn layout_config(&self) -> Option<&LayoutPart> {
         self.layout_config.as_ref()
     }
 }

@@ -16,7 +16,7 @@ use smithay::reexports::wayland_protocols_misc::server_decoration::server::org_k
 use smithay::reexports::wayland_server::protocol::wl_output;
 use smithay::reexports::wayland_server::protocol::wl_seat::WlSeat;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::reexports::wayland_server::{self, Resource, WEnum};
+use smithay::reexports::wayland_server::{Resource, WEnum};
 use smithay::utils::{Logical, Rectangle, Serial};
 use smithay::wayland::compositor::{
     BufferAssignment, CompositorHandler as _, HookId, SurfaceAttributes, add_blocker,
@@ -325,7 +325,7 @@ impl XdgShellHandler for State {
             .and_then(|output| {
                 layer_map_for_output(output)
                     .layer_for_surface(&root, WindowSurfaceType::TOPLEVEL)
-                    .map(smithay::desktop::LayerSurface::can_receive_keyboard_focus)
+                    .map(LayerSurface::can_receive_keyboard_focus)
             })
             .unwrap_or(true);
 
@@ -937,7 +937,7 @@ impl KdeDecorationHandler for State {
         &mut self,
         surface: &WlSurface,
         decoration: &org_kde_kwin_server_decoration::OrgKdeKwinServerDecoration,
-        mode: wayland_server::WEnum<org_kde_kwin_server_decoration::Mode>,
+        mode: WEnum<org_kde_kwin_server_decoration::Mode>,
     ) {
         let WEnum::Value(mode) = mode else {
             return;

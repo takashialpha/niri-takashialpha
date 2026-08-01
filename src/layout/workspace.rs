@@ -1435,7 +1435,7 @@ impl<W: LayoutElement> Workspace<W> {
             .scrolling
             .columns()
             .find(|col| col.contains(window))
-            .is_some_and(super::scrolling::Column::is_pending_maximized);
+            .is_some_and(Column::is_pending_maximized);
 
         self.set_maximized(window, !current);
     }
@@ -1873,7 +1873,7 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn is_urgent(&self) -> bool {
-        self.windows().any(super::LayoutElement::is_urgent)
+        self.windows().any(LayoutElement::is_urgent)
     }
 
     pub fn activate_window(&mut self, window: &W::Id) -> bool {

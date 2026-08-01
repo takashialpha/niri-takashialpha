@@ -145,7 +145,7 @@ impl Drop for IpcServer {
 fn socket_dir() -> PathBuf {
     BaseDirectories::new()
         .get_runtime_directory()
-        .map_or_else(|_| env::temp_dir(), std::borrow::ToOwned::to_owned)
+        .map_or_else(|_| env::temp_dir(), ToOwned::to_owned)
 }
 
 fn on_new_ipc_client(state: &State, stream: UnixStream) {
@@ -571,7 +571,7 @@ fn make_ipc_window(
         title: role.title.clone(),
         app_id: role.app_id.clone(),
         pid: mapped.credentials().map(|c| c.pid),
-        workspace_id: workspace_id.map(super::super::layout::workspace::WorkspaceId::get),
+        workspace_id: workspace_id.map(WorkspaceId::get),
         is_focused: mapped.is_focused(),
         is_floating: mapped.is_floating(),
         is_urgent: mapped.is_urgent(),
@@ -762,7 +762,7 @@ impl State {
                 return;
             };
 
-            let workspace_id = ws_id.map(super::super::layout::workspace::WorkspaceId::get);
+            let workspace_id = ws_id.map(WorkspaceId::get);
             let mut changed =
                 ipc_win.workspace_id != workspace_id || ipc_win.is_floating != mapped.is_floating();
 

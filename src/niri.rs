@@ -3025,7 +3025,7 @@ impl Niri {
         state
             .lock_surface
             .as_ref()
-            .map(smithay::wayland::session_lock::LockSurface::wl_surface)
+            .map(LockSurface::wl_surface)
             .cloned()
     }
 
@@ -3772,7 +3772,7 @@ impl Niri {
                 state.unfinished_animations_remain |= layer_map_for_output(output)
                     .layers()
                     .filter_map(|surface| self.mapped_layer_surfaces.get(surface))
-                    .any(super::layer::mapped::MappedLayer::are_animations_ongoing);
+                    .any(MappedLayer::are_animations_ongoing);
             }
 
             // Render.
@@ -4394,7 +4394,7 @@ impl Niri {
                 })
             });
 
-            if screenshot.iter().any(std::option::Option::is_none) {
+            if screenshot.iter().any(Option::is_none) {
                 return None;
             }
 
@@ -4602,7 +4602,7 @@ impl Niri {
             let path_string = image_path
                 .as_ref()
                 .and_then(|p| p.to_str())
-                .map(std::borrow::ToOwned::to_owned);
+                .map(ToOwned::to_owned);
             let _ = event_tx.send(path_string);
         });
 
@@ -4947,7 +4947,7 @@ impl Niri {
                     res
                 });
 
-                if textures.iter().any(std::result::Result::is_err) {
+                if textures.iter().any(Result::is_err) {
                     return None;
                 }
 

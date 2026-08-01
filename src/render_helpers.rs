@@ -119,7 +119,7 @@ impl ToRenderElement for BakedBuffer<TextureBuffer<GlesTexture>> {
             location + self.location,
             alpha,
             self.src,
-            self.dst.map(smithay::utils::Size::to_f64),
+            self.dst.map(Size::to_f64),
             kind,
         );
         PrimaryGpuTextureRenderElement(elem)
@@ -146,7 +146,7 @@ pub fn encompassing_geo(
 ) -> Rectangle<i32, Physical> {
     elements
         .map(|ele| ele.geometry(scale))
-        .reduce(smithay::utils::Rectangle::merge)
+        .reduce(Rectangle::merge)
         .unwrap_or_default()
 }
 

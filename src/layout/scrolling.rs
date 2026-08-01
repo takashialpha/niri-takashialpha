@@ -3712,7 +3712,7 @@ impl ViewOffset {
                     + gesture
                         .animation
                         .as_ref()
-                        .map_or(0., super::super::animation::Animation::value)
+                        .map_or(0., Animation::value)
             }
         }
     }

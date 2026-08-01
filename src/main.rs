@@ -180,7 +180,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .run(
             None,
             &mut state,
-            niri::niri::State::refresh_and_flush_clients,
+            State::refresh_and_flush_clients,
         )
         .unwrap();
 
@@ -293,7 +293,7 @@ fn set_default_max_buffer_size(display: &Display<State>, size: usize) {
             // Expected on libwayland-server < 1.23.
             trace!("wl_display_set_default_max_buffer_size is missing; skipping");
         } else {
-            let func: unsafe extern "C" fn(*mut c_void, libc::size_t) = std::mem::transmute(sym);
+            let func: unsafe extern "C" fn(*mut c_void, libc::size_t) = mem::transmute(sym);
             let display_ptr = display.handle().backend_handle().display_ptr();
             func(display_ptr.cast(), size);
         }
