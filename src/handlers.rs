@@ -10,8 +10,10 @@ use std::thread;
 
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::input::TabletToolDescriptor;
+use smithay::delegate_dispatch2;
 use smithay::input::dnd::{self, DnDGrab, DndGrabHandler, DndTarget};
 use smithay::input::pointer::{CursorIcon, CursorImageStatus, Focus, PointerHandle};
+use smithay::input::tablet::TabletSeatHandler;
 use smithay::input::{Seat, SeatHandler, SeatState, keyboard};
 use smithay::output::Output;
 use smithay::reexports::rustix::fs::{OFlags, fcntl_setfl};
@@ -33,13 +35,6 @@ use smithay::wayland::selection::primary_selection::{
 use smithay::wayland::selection::{SelectionHandler, SelectionTarget};
 use smithay::wayland::session_lock::{
     LockSurface, SessionLockHandler, SessionLockManagerState, SessionLocker,
-};
-use smithay::wayland::tablet_manager::TabletSeatHandler;
-use smithay::{
-    delegate_cursor_shape, delegate_data_device, delegate_dmabuf, delegate_fractional_scale,
-    delegate_output, delegate_pointer_constraints, delegate_presentation,
-    delegate_primary_selection, delegate_relative_pointer, delegate_seat, delegate_session_lock,
-    delegate_single_pixel_buffer, delegate_viewporter,
 };
 
 pub use crate::handlers::xdg_shell::KdeDecorationsModeState;
@@ -86,13 +81,12 @@ impl SeatHandler for State {
         }
     }
 }
-delegate_seat!(State);
-delegate_cursor_shape!(State);
-delegate_relative_pointer!(State);
 
 // Required by the cursor-shape protocol (a cursor-shape device can be created from a tablet tool),
 // even though niri no longer exposes the tablet manager global itself.
 impl TabletSeatHandler for State {
+    type ToolFocus = WlSurface;
+
     fn tablet_tool_image(&mut self, _tool: &TabletToolDescriptor, image: CursorImageStatus) {
         // FIXME: tablet tools should have their own cursors.
         self.niri.cursor_manager.set_cursor_image(image);
@@ -108,6 +102,10 @@ impl PointerConstraintsHandler for State {
         self.refresh_pointer_contents();
 
         self.niri.maybe_activate_pointer_constraint();
+    }
+
+    fn remove_constraint(&mut self, _surface: &WlSurface, _pointer: &PointerHandle<Self>) {
+        // Constraints are re-evaluated on pointer motion and focus changes, so nothing to do here.
     }
 
     fn cursor_position_hint(
@@ -164,7 +162,6 @@ impl PointerConstraintsHandler for State {
         }
     }
 }
-delegate_pointer_constraints!(State);
 
 impl SelectionHandler for State {
     type SelectionUserData = Arc<[u8]>;
@@ -279,19 +276,13 @@ impl crate::niri::Niri {
     }
 }
 
-delegate_data_device!(State);
-
 impl PrimarySelectionHandler for State {
     fn primary_selection_state(&mut self) -> &mut PrimarySelectionState {
         &mut self.niri.primary_selection_state
     }
 }
-delegate_primary_selection!(State);
 
 impl OutputHandler for State {}
-delegate_output!(State);
-
-delegate_presentation!(State);
 
 impl DmabufHandler for State {
     fn dmabuf_state(&mut self) -> &mut DmabufState {
@@ -311,7 +302,6 @@ impl DmabufHandler for State {
         }
     }
 }
-delegate_dmabuf!(State);
 
 impl SessionLockHandler for State {
     fn lock_state(&mut self) -> &mut SessionLockManagerState {
@@ -338,7 +328,6 @@ impl SessionLockHandler for State {
         self.niri.new_lock_surface(surface, &output);
     }
 }
-delegate_session_lock!(State);
 
 pub fn configure_lock_surface(surface: &LockSurface, output: &Output) {
     surface.with_pending_state(|states| {
@@ -354,9 +343,8 @@ pub fn configure_lock_surface(surface: &LockSurface, output: &Output) {
     surface.send_configure();
 }
 
-delegate_viewporter!(State);
-
 impl FractionalScaleHandler for State {}
-delegate_fractional_scale!(State);
 
-delegate_single_pixel_buffer!(State);
+// Single blanket delegation for all Wayland protocols; replaces the per-protocol delegate_*!
+// macros (removed upstream in favor of Dispatch2/GlobalDispatch2).
+delegate_dispatch2!(State);

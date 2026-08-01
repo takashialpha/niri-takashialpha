@@ -1,4 +1,3 @@
-use smithay::delegate_layer_shell;
 use smithay::desktop::{LayerSurface, PopupKind, WindowSurfaceType, layer_map_for_output};
 use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
@@ -76,7 +75,6 @@ impl WlrLayerShellHandler for State {
         self.unconstrain_popup(&PopupKind::Xdg(popup));
     }
 }
-delegate_layer_shell!(State);
 
 impl State {
     pub fn layer_shell_handle_commit(&mut self, surface: &WlSurface) -> bool {

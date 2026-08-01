@@ -1892,13 +1892,15 @@ fn surface_dmabuf_feedback(
         .clone()
         .add_preference_tranche(
             surface_scanout_node.dev_id(),
-            Some(TrancheFlags::Scanout),
+            TrancheFlags::Scanout,
             primary_scanout_formats,
+            4u32..=6,
         )
         .add_preference_tranche(
             surface_scanout_node.dev_id(),
-            Some(TrancheFlags::Scanout),
+            TrancheFlags::Scanout,
             primary_or_overlay_scanout_formats,
+            4u32..=6,
         )
         .build()?;
 
