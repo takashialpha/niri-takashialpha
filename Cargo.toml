@@ -1,5 +1,5 @@
 [workspace]
-members = ["niri-config", "niri-ipc", "vulkan-spike"]
+members = ["niri-config", "niri-ipc"]
 
 [workspace.lints.rust]
 unused_qualifications = "deny"
